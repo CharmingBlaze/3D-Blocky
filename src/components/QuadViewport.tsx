@@ -57,7 +57,7 @@ import {
 } from '../images/imageDropPlacement'
 import type { PolyDrawPointSnap } from '../store/appStore'
 import type { ViewportSlotIndex } from '../scene/viewTypes'
-import type { OrthoViewType } from '../scene/viewTypes'
+import type { SelectableViewType } from '../scene/viewTypes'
 import { getCameraSetup } from '../scene/viewTypes'
 import { ViewportViewPicker } from './ViewportViewPicker'
 
@@ -439,7 +439,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
   )
 
   const handleSelectView = useCallback(
-    (nextView: OrthoViewType) => {
+    (nextView: SelectableViewType) => {
       setViewportSlotView(slotIndex, nextView)
       if (isActive) setActiveView(nextView)
     },

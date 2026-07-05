@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import type { ViewType } from '../store/appStore'
-import type { OrthoViewType } from '../scene/viewTypes'
 import {
   getViewLabel,
-  isOrthoView,
   normalizeViewType,
-  ORTHO_VIEW_OPTIONS,
+  VIEWPORT_VIEW_OPTIONS,
+  type SelectableViewType,
 } from '../scene/viewTypes'
 
 interface ViewportViewPickerProps {
   view: ViewType
-  onSelect: (view: OrthoViewType) => void
+  onSelect: (view: SelectableViewType) => void
 }
 
 function stopViewportEvent(e: SyntheticEvent) {
@@ -21,7 +20,7 @@ export function ViewportViewPicker({ view, onSelect }: ViewportViewPickerProps) 
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const currentLabel = getViewLabel(view)
-  const currentOrtho = isOrthoView(view) ? normalizeViewType(view) : null
+  const currentView = normalizeViewType(view)
 
   useEffect(() => {
     if (!open) return
@@ -58,12 +57,12 @@ export function ViewportViewPicker({ view, onSelect }: ViewportViewPickerProps) 
       </button>
       {open && (
         <div className="viewport-view-picker-menu" role="menu">
-          {ORTHO_VIEW_OPTIONS.map((option) => (
+          {VIEWPORT_VIEW_OPTIONS.map((option) => (
             <button
               key={option.id}
               type="button"
               role="menuitem"
-              className={`viewport-view-picker-item ${currentOrtho === option.id ? 'active' : ''}`}
+              className={`viewport-view-picker-item ${currentView === option.id ? 'active' : ''}`}
               onClick={(e) => {
                 stopViewportEvent(e)
                 onSelect(option.id)

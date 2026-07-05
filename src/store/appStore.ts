@@ -287,7 +287,7 @@ export {
   normalizeViewType,
   isOrthoView,
 } from '../scene/viewTypes'
-import type { ViewType, OrthoViewType, ViewportSlotIndex } from '../scene/viewTypes'
+import type { ViewType, OrthoViewType, SelectableViewType, ViewportSlotIndex } from '../scene/viewTypes'
 import { DEFAULT_VIEWPORT_SLOT_VIEWS } from '../scene/viewTypes'
 export type ToolCategory =
   | 'draw'
@@ -658,7 +658,7 @@ export interface AppState {
   knifeCancel: () => void
 
   setActiveView: (view: ViewType) => void
-  setViewportSlotView: (index: ViewportSlotIndex, view: OrthoViewType) => void
+  setViewportSlotView: (index: ViewportSlotIndex, view: SelectableViewType) => void
   toggleMaximizedView: () => void
   setViewportColSplit: (ratio: number) => void
   setViewportRowSplit: (ratio: number) => void

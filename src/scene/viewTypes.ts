@@ -14,6 +14,13 @@ export const ORTHO_VIEW_OPTIONS: { id: OrthoViewType; label: string }[] = [
   { id: 'right', label: 'Right Side' },
 ]
 
+export type SelectableViewType = OrthoViewType | 'perspective'
+
+export const VIEWPORT_VIEW_OPTIONS: { id: SelectableViewType; label: string }[] = [
+  ...ORTHO_VIEW_OPTIONS,
+  { id: 'perspective', label: 'Perspective' },
+]
+
 export const VIEW_LABELS: Record<OrthoViewType | 'perspective', string> = {
   front: 'Front',
   back: 'Back',
