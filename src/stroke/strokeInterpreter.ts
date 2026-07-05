@@ -1,0 +1,297 @@
+import { perpendicularDistance, type Vec2 } from '../utils/math'
+import { curvatureSampleProfile } from './rdp'
+import { fitEllipse, totalCurvature } from './strokeCapture'
+import { classifyStroke, type StrokeType } from './strokeClassifier'
+import { isConcavePolygon, concavityScore, countReflexVertices } from '../mesh/concaveTriangulate'
+import type { StrokeMode } from '../store/appStore'
+
+import { detectRadialSymmetry } from './strokeClassifier'
+
+export type StrokeIntent =
+  | 'bead'
+  | 'soft-silhouette'
+  | 'sharp-silhouette'
+  | 'organic-volume'
+  | 'silhouette-lathe'
+  | 'silhouette-extrude'
+  | 'path-tube'
+  | 'hole-line'
+
+export interface StrokeInterpretation {
+  intent: StrokeIntent
+  strokeType: StrokeType
+  isClosed: boolean
+  isConcave: boolean
+  lobeCount: number
+  ellipse: ReturnType<typeof fitEllipse> | null
+  centroid: Vec2
+  pathLength: number
+  totalTurn: number
+  name: string
+}
+
+function pathLength(points: Vec2[]): number {
+  let len = 0
+  for (let i = 1; i < points.length; i++) {
+    len += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+  }
+  return len
+}
+
+export function isStraightLine(points: Vec2[], ratioThreshold = 0.06): boolean {
+  if (points.length < 2) return false
+  const start = points[0]
+  const end = points[points.length - 1]
+  const chord = Math.hypot(end.x - start.x, end.y - start.y)
+  if (chord < 3) return false
+
+  let maxDev = 0
+  for (const p of points) {
+    maxDev = Math.max(maxDev, perpendicularDistance(p, start, end))
+  }
+  return maxDev / chord <= ratioThreshold
+}
+
+/** Strict circle only — ovals, heads, and blobs never pass */
+export function isCircleOrOval(points: Vec2[]): boolean {
+  if (points.length < 8 || isConcavePolygon(points)) return false
+  const ellipse = fitEllipse(points)
+  return (
+    ellipse.circularity > 0.9 &&
+    ellipse.aspectRatio > 0.75 &&
+    concavityScore(points) < 0.04
+  )
+}
+
+export function estimateLobeCount(points: Vec2[]): number {
+  return Math.max(1, Math.floor(countReflexVertices(points) / 2))
+}
+
+export function interpretStroke(
+  points: Vec2[],
+  closeThreshold: number,
+  strokeMode: StrokeMode,
+  extrudeMode = false
+): StrokeInterpretation {
+  const strokeType = classifyStroke(points, closeThreshold)
+  const isClosed = strokeType === 'closed'
+  const concave = isClosed && isConcavePolygon(points)
+  const lobes = isClosed ? estimateLobeCount(points) : 1
+  const ellipse = isClosed ? fitEllipse(points) : null
+  const centroid = {
+    x: points.reduce((s, p) => s + p.x, 0) / points.length,
+    y: points.reduce((s, p) => s + p.y, 0) / points.length,
+  }
+  const len = pathLength(points)
+  const turn = totalCurvature(points)
+
+  const base = {
+    strokeType,
+    isClosed,
+    isConcave: concave,
+    lobeCount: lobes,
+    ellipse,
+    centroid,
+    pathLength: len,
+    totalTurn: turn,
+  }
+
+  // Extrude mode takes priority — flat 2D silhouette → 3D prism along view depth
+  if (extrudeMode && points.length >= 2) {
+    return {
+      ...base,
+      intent: 'silhouette-extrude',
+      name: isClosed
+        ? lobes > 1
+          ? `Extrude (${lobes} lobes)`
+          : 'Extrude'
+        : 'Extrude',
+    }
+  }
+
+  if (strokeMode === 'centerline') {
+    return {
+      ...base,
+      intent: isStraightLine(points) ? 'hole-line' : 'path-tube',
+      name: isStraightLine(points) ? 'Hole' : 'Path',
+    }
+  }
+
+  if (strokeMode === 'blob') {
+    if (!isClosed) {
+      return {
+        ...base,
+        intent: isStraightLine(points) ? 'hole-line' : 'path-tube',
+        name: isStraightLine(points) ? 'Hole' : 'Blob Path',
+      }
+    }
+    return {
+      ...base,
+      intent: 'soft-silhouette',
+      name: lobes > 1 ? `Blob (${lobes} lobes)` : 'Blob',
+    }
+  }
+
+  // Outline mode — Paint 3D-style: soft inflated silhouettes, not dual contouring
+  if (!isClosed) {
+    if (isStraightLine(points)) {
+      return { ...base, intent: 'hole-line', name: 'Hole' }
+    }
+    return { ...base, intent: 'path-tube', name: 'Path' }
+  }
+
+  if (isCircleOrOval(points)) {
+    return { ...base, intent: 'bead', name: 'Bead' }
+  }
+
+  if (detectRadialSymmetry(points, 0.72)) {
+    return { ...base, intent: 'silhouette-lathe', name: 'Bead' }
+  }
+
+  if (concave && lobes > 1) {
+    return {
+      ...base,
+      intent: 'soft-silhouette',
+      name: `Shape (${lobes} lobes)`,
+    }
+  }
+
+  return {
+    ...base,
+    intent: 'soft-silhouette',
+    name: 'Shape',
+  }
+}
+
+export interface TessellationBudget {
+  radialSegments: number
+  profileRings: number
+  pathSamples: number
+  boundaryVerts: number
+  extrudeDepth: number
+  minAngleDeg: number
+}
+
+export function allocateTessellation(
+  polyBudget: number,
+  brushDensity: number,
+  intent: StrokeIntent,
+  profilePoints: Vec2[],
+  minAngleDeg = 15
+): TessellationBudget {
+  const sampled = curvatureSampleProfile(profilePoints, minAngleDeg)
+  const curvatureRings = Math.max(3, Math.min(sampled.length, 16))
+  const cappedDensity = Math.max(4, Math.min(brushDensity, 24))
+  const budget = Math.max(12, polyBudget)
+
+  switch (intent) {
+    case 'bead': {
+      const profileRings = Math.max(4, Math.min(curvatureRings, 8))
+      const radialSegments = Math.max(
+        4,
+        Math.min(cappedDensity, Math.floor((budget - 2) / profileRings))
+      )
+      return {
+        radialSegments,
+        profileRings,
+        pathSamples: 0,
+        boundaryVerts: 0,
+        extrudeDepth: cappedDensity * 0.8,
+        minAngleDeg: 18,
+      }
+    }
+    case 'silhouette-lathe': {
+      const profileRings = Math.max(3, Math.min(curvatureRings, 12))
+      const radialSegments = Math.max(
+        4,
+        Math.min(cappedDensity, Math.floor(budget / profileRings))
+      )
+      return {
+        radialSegments,
+        profileRings,
+        pathSamples: 0,
+        boundaryVerts: 0,
+        extrudeDepth: cappedDensity * 0.8,
+        minAngleDeg,
+      }
+    }
+    case 'soft-silhouette': {
+      const radialSegments = Math.max(
+        6,
+        Math.min(cappedDensity, Math.floor(Math.sqrt(budget * 1.1)))
+      )
+      const maxRings = Math.max(
+        5,
+        Math.min(14, Math.floor((budget * 0.9) / Math.max(12, radialSegments * 2)))
+      )
+      return {
+        radialSegments,
+        profileRings: maxRings,
+        pathSamples: 0,
+        boundaryVerts: Math.max(14, Math.min(Math.floor(budget * 0.75), 56)),
+        extrudeDepth: Math.max(6, cappedDensity * 1.1),
+        minAngleDeg: Math.max(10, minAngleDeg - 2),
+      }
+    }
+    case 'sharp-silhouette': {
+      const maxBoundary = Math.max(8, Math.min(Math.floor(budget * 0.5), 28))
+      return {
+        radialSegments: 0,
+        profileRings: 0,
+        pathSamples: 0,
+        boundaryVerts: maxBoundary,
+        extrudeDepth: Math.max(6, cappedDensity),
+        minAngleDeg,
+      }
+    }
+    case 'organic-volume': {
+      const maxBoundary = Math.max(12, Math.min(Math.floor(budget * 0.65), 40))
+      const gridRes = Math.max(8, Math.min(16, Math.floor(Math.sqrt(budget) * 1.1)))
+      return {
+        radialSegments: gridRes,
+        profileRings: 0,
+        pathSamples: 0,
+        boundaryVerts: maxBoundary,
+        extrudeDepth: Math.max(6, cappedDensity * 1.2),
+        minAngleDeg: Math.max(8, minAngleDeg - 4),
+      }
+    }
+    case 'silhouette-extrude': {
+      const maxBoundary = Math.max(8, Math.min(Math.floor(budget * 0.5), 32))
+      return {
+        radialSegments: 0,
+        profileRings: 0,
+        pathSamples: 0,
+        boundaryVerts: maxBoundary,
+        extrudeDepth: Math.max(8, cappedDensity),
+        minAngleDeg,
+      }
+    }
+    case 'path-tube': {
+      const pathSamples = Math.max(
+        3,
+        Math.min(curvatureRings, Math.floor(budget / Math.max(5, cappedDensity)))
+      )
+      return {
+        radialSegments: Math.max(
+          6,
+          Math.min(cappedDensity, Math.floor(budget / Math.max(3, pathSamples)))
+        ),
+        profileRings: 0,
+        pathSamples,
+        boundaryVerts: 0,
+        extrudeDepth: cappedDensity * 0.8,
+        minAngleDeg,
+      }
+    }
+    case 'hole-line':
+      return {
+        radialSegments: 0,
+        profileRings: 0,
+        pathSamples: 2,
+        boundaryVerts: 0,
+        extrudeDepth: 0,
+        minAngleDeg,
+      }
+  }
+}

@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap');
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-dark: #1c1c1c;
+  --bg-panel: #282828;
+  --bg-hover: #343434;
+  --bg-elevated: #484848;
+  --border: #545454;
+  --text: #f0f0f0;
+  --text-muted: #989898;
+  --accent: #e40020;
+  --accent-green: #00b800;
+  --accent-orange: #f83800;
+  --accent-pink: #d800cc;
+  --danger: #a81000;
+  --accent-dim: #881400;
+  --accent-soft: rgba(228, 0, 32, 0.16);
+  --accent-green-soft: rgba(0, 184, 0, 0.18);
+  --accent-orange-soft: rgba(248, 56, 0, 0.18);
+  --scrollbar-thumb: #585858;
+  --scrollbar-thumb-hover: #707070;
+  --overlay-dim: rgba(0, 0, 0, 0.5);
+  --viewport-bg: #242424;
+  --viewport-bg-deep: #181818;
+  --grid-cell: #343434;
+  --grid-section: #505050;
+  --mesh-outline: #0078f8;
+  --mesh-outline-secondary: #6888fc;
+  --mesh-selected: #e40020;
+  --mesh-hover: #f8b800;
+  --symmetry-plane: #0078f8;
+  --uv-canvas-bg: #2c2c2c;
+  --uv-grid-a: #505050;
+  --uv-grid-b: #3c3c3c;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-dark);
+  color: var(--text);
+  font-family: 'Outfit', system-ui, sans-serif;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

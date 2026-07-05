@@ -1,0 +1,406 @@
+import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
+import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
+import { generateSoftInflateDome } from '../mesh/softInflate'
+import { extrudeSilhouette } from '../mesh/silhouetteExtrude'
+import { generateTube } from '../mesh/extrusion'
+import { generateId, type Vec2 } from '../utils/math'
+import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
+import { orientTubeFacesOutward } from '../mesh/extrusion'
+import { ensureClosedMeshOutward } from '../mesh/meshWinding'
+import { resampleUniform, resampleUniformClosed } from './strokeCapture'
+import { classifyStroke } from './strokeClassifier'
+import type { PolylineInput } from './polylineToMesh'
+import type { SketchDoodleKind, SketchSource } from './sketchSource'
+
+export interface PreparedSketch {
+  points: Vec2[]
+  relative: Vec2[]
+  center: Vec2
+  isClosed: boolean
+}
+
+/** Bounding box of stroke points in plane space. */
+function strokeBounds(points: Vec2[]): {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  width: number
+  height: number
+  diagonal: number
+  shortSide: number
+  longSide: number
+} {
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const p of points) {
+    minX = Math.min(minX, p.x)
+    maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
+  }
+  const width = maxX - minX
+  const height = maxY - minY
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    width,
+    height,
+    diagonal: Math.hypot(width, height),
+    shortSide: Math.min(width, height),
+    longSide: Math.max(width, height),
+  }
+}
+
+function strokePathLength(points: Vec2[]): number {
+  let len = 0
+  for (let i = 1; i < points.length; i++) {
+    len += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+  }
+  return len
+}
+
+/** Paint 3D-style snap radius — scales with stroke size so loops close reliably. */
+export function effectiveCloseThreshold(points: Vec2[], baseThreshold: number): number {
+  if (points.length < 2) return baseThreshold
+
+  const { diagonal, shortSide } = strokeBounds(points)
+  // Tie to the shorter bbox side so wide U/C strokes don't snap across the opening too early.
+  return Math.max(baseThreshold, shortSide * 0.12, diagonal * 0.07, 8)
+}
+
+/** Snap the stroke endpoint to the start when the loop is nearly closed. */
+export function snapSketchStrokeClosed(points: Vec2[], baseThreshold: number): Vec2[] {
+  if (points.length < 3) return points
+
+  const first = points[0]
+  const last = points[points.length - 1]
+  const gap = Math.hypot(first.x - last.x, first.y - last.y)
+  const threshold = effectiveCloseThreshold(points, baseThreshold) * 1.25
+  const { shortSide, longSide } = strokeBounds(points)
+  const pathLen = strokePathLength(points)
+  const loopLike =
+    pathLen >= Math.max(shortSide * 2, longSide * 0.75) &&
+    gap <= Math.max(threshold, effectiveCloseThreshold(points, baseThreshold) * 1.8)
+
+  if (gap <= threshold || loopLike) {
+    return [...points.slice(0, -1), { ...first }]
+  }
+  return points
+}
+
+export function isSketchNearClose(
+  points: Vec2[],
+  preview: Vec2 | null,
+  baseThreshold: number
+): boolean {
+  if (points.length < 3 || !preview) return false
+
+  const start = points[0]
+  const path = [...points, preview]
+  const threshold = effectiveCloseThreshold(path, baseThreshold)
+  const closeDist = Math.hypot(start.x - preview.x, start.y - preview.y)
+  if (closeDist > threshold) return false
+
+  const { shortSide, longSide } = strokeBounds(path)
+  const pathLen = strokePathLength(path)
+  const minPathLen = Math.max(threshold * 4, shortSide * 1.5, longSide * 0.4)
+  if (pathLen < minPathLen) return false
+
+  const distToStart = (p: Vec2) => Math.hypot(p.x - start.x, p.y - start.y)
+
+  // Require the stroke to leave the start area and return — not just pass nearby in 2D.
+  let maxDist = 0
+  for (let i = 1; i < points.length - 1; i++) {
+    maxDist = Math.max(maxDist, distToStart(points[i]!))
+  }
+  if (maxDist < threshold * 1.25) return false
+  if (maxDist < closeDist * 2.2) return false
+
+  const last = points[points.length - 1]!
+  const lastDist = distToStart(last)
+  if (closeDist >= lastDist * 0.98) return false
+
+  return true
+}
+
+function strokeCentroid(points: Vec2[]): Vec2 {
+  return {
+    x: points.reduce((s, p) => s + p.x, 0) / points.length,
+    y: points.reduce((s, p) => s + p.y, 0) / points.length,
+  }
+}
+
+function relativePoints(points: Vec2[], center: Vec2): Vec2[] {
+  return points.map((p) => ({ x: p.x - center.x, y: p.y - center.y }))
+}
+
+function resampleSpacing(points: Vec2[], brushDensity: number): number {
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const p of points) {
+    minX = Math.min(minX, p.x)
+    maxX = Math.max(maxX, p.x)
+    minY = Math.min(minY, p.y)
+    maxY = Math.max(maxY, p.y)
+  }
+  const diagonal = Math.hypot(maxX - minX, maxY - minY)
+  return Math.max(1.1, Math.min(3.5, diagonal / 56, brushDensity * 0.28))
+}
+
+/**
+ * Light stroke prep — preserves the drawn path, only snaps closed loops and
+ * resamples to even spacing (no RDP simplification that distorts shape).
+ */
+export function prepareSketchStroke(
+  points: Vec2[],
+  closeThreshold: number,
+  brushDensity: number
+): PreparedSketch | null {
+  if (points.length < 2) return null
+
+  const snapped = snapSketchStrokeClosed(points, closeThreshold)
+  const threshold = effectiveCloseThreshold(snapped, closeThreshold) * 2.5
+  let isClosed = classifyStroke(snapped, threshold) === 'closed'
+
+  let work = [...snapped]
+  if (isClosed && work.length >= 3) {
+    const first = work[0]
+    const last = work[work.length - 1]
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= threshold) {
+      work = work.slice(0, -1)
+    }
+  }
+
+  const spacing = resampleSpacing(work, brushDensity)
+  let resampled =
+    isClosed && work.length >= 3
+      ? resampleUniformClosed(work, spacing)
+      : resampleUniform(work, spacing)
+  if (resampled.length < 2) return null
+
+  if (!isClosed) {
+    isClosed = classifyStroke(resampled, threshold) === 'closed'
+    if (isClosed && work.length >= 3) {
+      resampled = resampleUniformClosed(work, spacing)
+    }
+  }
+
+  const loopPoints = isClosed && resampled.length >= 3 ? resampled : resampled
+  const center = strokeCentroid(loopPoints)
+
+  return {
+    points: resampled,
+    relative: relativePoints(loopPoints, center),
+    center,
+    isClosed: isClosed && loopPoints.length >= 3,
+  }
+}
+
+function capBoundaryPoints(relative: Vec2[], maxPoints: number): Vec2[] {
+  if (relative.length <= maxPoints) return relative
+  const out: Vec2[] = []
+  const step = relative.length / maxPoints
+  for (let i = 0; i < maxPoints; i++) {
+    out.push(relative[Math.min(relative.length - 1, Math.round(i * step))]!)
+  }
+  return out
+}
+
+function resolveExtrudeDepth(input: PolylineInput, brushDensity: number): number {
+  if (input.extrudeAmount != null) return input.extrudeAmount
+  return Math.max(8, brushDensity * 1.2)
+}
+
+function buildClosedSoftBlob(
+  relative: Vec2[],
+  polyBudget: number,
+  extrudeDepth: number
+): HalfEdgeMesh {
+  const maxBoundary = Math.max(8, Math.min(20, Math.floor(polyBudget / 4)))
+  const boundary = capBoundaryPoints(relative, maxBoundary)
+  const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (maxBoundary + 4))))
+  return generateSoftInflateDome(boundary, {
+    depth: Math.max(4, extrudeDepth),
+    rings,
+    color: 0,
+  })
+}
+
+function buildClosedSharpExtrusion(
+  relative: Vec2[],
+  extrudeDepth: number,
+  color: number
+): HalfEdgeMesh {
+  return extrudeSilhouette(relative, { depth: Math.max(4, extrudeDepth), color })
+}
+
+function buildOpenSoftTube(relative: Vec2[], brushDensity: number): HalfEdgeMesh {
+  return generateTube(relative, {
+    radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
+    radialSegments: 8,
+    minAngleDeg: 14,
+    capped: true,
+  })
+}
+
+function finalizeSketchMesh(
+  mesh: HalfEdgeMesh,
+  center: Vec2,
+  view: PolylineInput['view'],
+  depth: number,
+  color: number,
+  polyBudget: number,
+  name: string,
+  sketchSource: SketchSource,
+  smoothShading = false,
+  tubePathPlane?: Vec2[]
+): SceneObject {
+  for (let i = 0; i < mesh.faceColors.length; i++) mesh.faceColors[i] = color
+  offsetMeshInPlane(mesh, center.x, center.y)
+  projectMeshToView(mesh, view, depth)
+
+  if (tubePathPlane && tubePathPlane.length >= 2) {
+    orientTubeFacesOutward(mesh, planePathToWorld(tubePathPlane, view, depth))
+  } else {
+    ensureClosedMeshOutward(mesh)
+  }
+
+  return mesh.toObject(generateId(), name, {
+    polyBudget: Math.max(mesh.vertexCount(), polyBudget),
+    color,
+    polyBudgetMode: 'strict',
+    smoothShading,
+    sketchSource,
+    transform: {
+      position: { ...IDENTITY_TRANSFORM.position },
+      rotation: { ...IDENTITY_TRANSFORM.rotation },
+      scale: { ...IDENTITY_TRANSFORM.scale },
+    },
+  })
+}
+
+function makeSketchSource(
+  prepared: PreparedSketch,
+  input: PolylineInput,
+  kind: SketchDoodleKind,
+  extrudeDepth: number
+): SketchSource {
+  return {
+    relative: prepared.relative.map((p) => ({ ...p })),
+    center: { ...prepared.center },
+    view: input.view,
+    brushDensity: input.brushDensity,
+    polyBudget: input.polyBudget,
+    closeThreshold: input.closeThreshold,
+    defaultDepth: input.defaultDepth,
+    isClosed: prepared.isClosed,
+    kind,
+    extrudeDepth,
+  }
+}
+
+/** Paint 3D soft-edge doodle — closed loops inflate, open strokes become capped tubes. */
+export function softSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    name,
+  } = input
+
+  if (points.length < 2 || view === 'perspective') return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity)
+  if (!prepared) return null
+
+  const { relative, center, isClosed } = prepared
+  const extrudeDepth = resolveExtrudeDepth(input, brushDensity)
+  const kind: SketchDoodleKind = isClosed ? 'soft' : 'path'
+
+  const mesh = isClosed
+    ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth)
+    : buildOpenSoftTube(relative, brushDensity)
+
+  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const doodleName = name ?? (isClosed ? 'Doodle' : 'Doodle Path')
+  const source = makeSketchSource(prepared, input, kind, extrudeDepth)
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    doodleName,
+    source,
+    false,
+    isClosed ? undefined : prepared.points
+  )
+}
+
+/** Paint 3D sharp-edge doodle — closed silhouette extruded with flat sides. */
+export function sharpSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    extrudeAmount,
+    name,
+  } = input
+
+  if (points.length < 2 || view === 'perspective') return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity)
+  if (!prepared) return null
+
+  const { relative, center, isClosed } = prepared
+  const extrudeDepth = Math.max(4, extrudeAmount ?? resolveExtrudeDepth(input, brushDensity))
+  const kind: SketchDoodleKind = isClosed ? 'sharp' : 'path'
+
+  const mesh = isClosed
+    ? buildClosedSharpExtrusion(relative, extrudeDepth, color)
+    : buildOpenSoftTube(relative, brushDensity)
+
+  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const doodleName = name ?? (isClosed ? 'Extrude' : 'Doodle Path')
+  const source = makeSketchSource(prepared, input, kind, extrudeDepth)
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    doodleName,
+    source,
+    false,
+    isClosed ? undefined : prepared.points
+  )
+}
+
+/** Regular sketch tool entry — soft by default, sharp when extrude mode is on. */
+export function sketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  if (input.extrudeMode) {
+    return sharpSketchDoodleToObject(input)
+  }
+  return softSketchDoodleToObject(input)
+}
+
+export { regenerateSketchObject, isSketchDoodleObject } from './sketchSource'
