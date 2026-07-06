@@ -1199,7 +1199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedBillboardImageId: null,
 
   uvEditorOpen: false,
-  uvEditorPanel: { x: 80, y: 80, width: 520, height: 560, minimized: false },
+  uvEditorPanel: { x: 80, y: 80, width: 680, height: 680, minimized: false },
   uvEditorGridDivisions: 16,
   uvEditorSnap: false,
   uvEditorSnapMode: 'vertex',

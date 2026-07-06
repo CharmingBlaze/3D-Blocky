@@ -2276,7 +2276,7 @@ export function UVEditorPanel() {
               Grid & View ▾
             </button>
             {activeMenu === 'view' && (
-              <div className="uv-dropdown-menu uv-dropdown-menu-wide">
+              <div className="uv-dropdown-menu uv-dropdown-menu-wide align-right">
                 <label className="uv-dropdown-checkbox-row">
                   <input
                     type="checkbox"
@@ -2378,26 +2378,9 @@ export function UVEditorPanel() {
           </button>
         </div>
 
-        <div className="uv-editor-shortcuts">
-          <span>
-            {uvEditorMode === 'faces'
-              ? uvEditorViewAll
-                ? 'All islands: full packed atlas · toggle All off to focus selection'
-                : 'Selected face(s) only · All = full atlas · Unwrap repacks islands'
-              : 'Points: drag handles · Snap to verts/grid'}
-            {' · Scroll zoom · Space/middle pan · Alt+click reposition · F frame'}
-          </span>
-        </div>
-
         {(texture || pixelDoc) && (
           <div className="uv-editor-meta">
             {pixelDoc ? 'Pixel texture' : texture!.name} — {texW}×{texH}px
-            <span className="uv-editor-hint"> · Shift+click toggle region · Ctrl+drag box-select</span>
-          </div>
-        )}
-        {!texture && (
-          <div className="uv-editor-meta uv-editor-hint">
-            Shift+click toggle planar region · Ctrl+drag box-select · Alt+click move selection to cursor
           </div>
         )}
 

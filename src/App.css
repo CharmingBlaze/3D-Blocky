@@ -1993,14 +1993,19 @@
   margin-top: 6px;
   z-index: 1000;
   min-width: 140px;
-  background: var(--bg);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.uv-dropdown-menu.align-right {
+  left: auto;
+  right: 0;
 }
 
 .uv-dropdown-menu-wide {
