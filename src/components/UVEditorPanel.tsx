@@ -13,9 +13,9 @@ import { compositeLayers } from '../pixel/compositeLayers'
 import { pickOpenFile } from '../io/fileDialogs'
 import { IMAGE_IMPORT_FILTERS } from '../io/download'
 import { ensureObjectUVs, resolveUvMappingMode, detachFacesUvTopology, type SceneObjectWithUVs } from '../uv/uvObject'
+import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { activeObjectTextureId, listSceneTextures } from '../uv/sceneTextures'
 import {
-  boundaryEdgesForFacesSpatial,
   expandFaceToPlanarRegion,
   expandFacesToPlanarRegions,
   getFaceGroupMap,
@@ -108,34 +108,7 @@ function pointInPolygon(px: number, py: number, poly: { x: number; y: number }[]
   return inside
 }
 
-function uvEdgePixels(
-  obj: SceneObjectWithUVs,
-  uvs: Uv2[],
-  regionFaces: number[],
-  va: number,
-  vb: number,
-  texW: number,
-  texH: number
-): [{ x: number; y: number }, { x: number; y: number }] | null {
-  const target = spatialMeshEdgeKey(obj, va, vb)
-  for (const fi of regionFaces) {
-    const face = obj.faces[fi]
-    const uvIdx = obj.faceUvIndices[fi]
-    if (!face || !uvIdx?.length) continue
-    for (let i = 0; i < face.length; i++) {
-      const a = face[i]
-      const b = face[(i + 1) % face.length]
-      if (spatialMeshEdgeKey(obj, a, b) !== target) continue
-      const uia = uvIdx[i]
-      const uib = uvIdx[(i + 1) % face.length]
-      return [
-        uvToPixel(uvs[uia] ?? { u: 0, v: 0 }, texW, texH),
-        uvToPixel(uvs[uib] ?? { u: 0, v: 0 }, texW, texH),
-      ]
-    }
-  }
-  return null
-}
+
 
 function drawRegionFill(
   ctx: CanvasRenderingContext2D,
@@ -165,24 +138,64 @@ function drawRegionFill(
   ctx.fill()
 }
 
+interface BoundaryEdgeInfo {
+  faceIndex: number
+  edgeIndex: number
+}
+
+function getBoundaryEdgesSpatial(
+  obj: SceneObject,
+  faceIndices: number[]
+): BoundaryEdgeInfo[] {
+  const counts = new Map<string, number>()
+  const firstOccurrence = new Map<string, { faceIndex: number; edgeIndex: number }>()
+
+  for (const fi of faceIndices) {
+    const face = obj.faces[fi]
+    if (!face) continue
+    for (let i = 0; i < face.length; i++) {
+      const a = face[i]
+      const b = face[(i + 1) % face.length]
+      const key = spatialMeshEdgeKey(obj, a, b)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+      if (!firstOccurrence.has(key)) {
+        firstOccurrence.set(key, { faceIndex: fi, edgeIndex: i })
+      }
+    }
+  }
+
+  const boundary: BoundaryEdgeInfo[] = []
+  for (const [key, count] of counts) {
+    if (count === 1) {
+      const occurrence = firstOccurrence.get(key)
+      if (occurrence) boundary.push(occurrence)
+    }
+  }
+  return boundary
+}
+
 function drawRegionBoundary(
   ctx: CanvasRenderingContext2D,
   obj: SceneObjectWithUVs,
   uvs: Uv2[],
-  faceIndices: number[],
   strokeStyle: string,
   lineWidth: number,
   texW: number,
-  texH: number
+  texH: number,
+  edges: BoundaryEdgeInfo[]
 ) {
-  const edges = boundaryEdgesForFacesSpatial(obj, faceIndices)
   if (edges.length === 0) return
   ctx.beginPath()
-  for (const [va, vb] of edges) {
-    const seg = uvEdgePixels(obj, uvs, faceIndices, va, vb, texW, texH)
-    if (!seg) continue
-    ctx.moveTo(seg[0].x, seg[0].y)
-    ctx.lineTo(seg[1].x, seg[1].y)
+  for (const info of edges) {
+    const face = obj.faces[info.faceIndex]
+    const uvIdx = obj.faceUvIndices[info.faceIndex]
+    if (!face || !uvIdx || uvIdx.length === 0) continue
+    const uia = uvIdx[info.edgeIndex]
+    const uib = uvIdx[(info.edgeIndex + 1) % face.length]
+    const pa = uvToPixel(uvs[uia] ?? { u: 0, v: 0 }, texW, texH)
+    const pb = uvToPixel(uvs[uib] ?? { u: 0, v: 0 }, texW, texH)
+    ctx.moveTo(pa.x, pa.y)
+    ctx.lineTo(pb.x, pb.y)
   }
   ctx.strokeStyle = strokeStyle
   ctx.lineWidth = lineWidth
@@ -393,9 +406,13 @@ export function UVEditorPanel() {
   const obj = useAppStore((s) =>
     objectId ? s.objects.find((o) => o.id === objectId) ?? null : null
   )
-  const sceneTextures = useAppStore(
-    useShallow((s) => listSceneTextures(s.pixelDocuments, s.objectTextures, s.objects))
-  )
+  const pixelDocuments = useAppStore((s) => s.pixelDocuments)
+  const objectTextures = useAppStore((s) => s.objectTextures)
+  const objects = useAppStore((s) => s.objects)
+
+  const sceneTextures = useMemo(() => {
+    return listSceneTextures(pixelDocuments, objectTextures, objects)
+  }, [pixelDocuments, objectTextures, objects])
   const activeTextureId = useMemo(() => activeObjectTextureId(obj), [obj])
   const texId = activeTextureId
   const texture = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
@@ -475,6 +492,20 @@ export function UVEditorPanel() {
     }
     return regionFacesForEdit
   }, [ensured, uvEditorViewAll, regionFacesForEdit])
+
+  const regionBoundaryEdges = useMemo(() => {
+    if (!obj || !faceGroupMap) return new Map<number, BoundaryEdgeInfo[]>()
+    const map = new Map<number, BoundaryEdgeInfo[]>()
+    for (const group of faceGroupMap.groups) {
+      map.set(group.id, getBoundaryEdgesSpatial(obj, group.faceIndices))
+    }
+    return map
+  }, [obj, faceGroupMap])
+
+  const isolatedBoundaryEdges = useMemo(() => {
+    if (!obj || !isolatedFaceView || !visibleFaceIndices) return []
+    return getBoundaryEdgesSpatial(obj, visibleFaceIndices)
+  }, [obj, isolatedFaceView, visibleFaceIndices])
 
   const clearAllUvSelection = useCallback(() => {
     setUvEditorSelectedPoints([])
@@ -932,11 +963,11 @@ export function UVEditorPanel() {
             ctx,
             ensured,
             uvs,
-            visibleFaceIndices,
             theme.accent,
             2.25 / viewZoom,
             texW,
-            texH
+            texH,
+            isolatedBoundaryEdges
           )
         } else {
           for (const group of faceGroupMap.groups) {
@@ -973,7 +1004,16 @@ export function UVEditorPanel() {
             ctx.lineWidth = 1 / viewZoom
             ctx.stroke()
 
-            drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
+            drawRegionBoundary(
+              ctx,
+              ensured,
+              uvs,
+              stroke,
+              strokeW,
+              texW,
+              texH,
+              regionBoundaryEdges.get(group.id) ?? []
+            )
           }
         }
       } else if (uvEditorDisplayMode === 'tris') {
@@ -1223,6 +1263,8 @@ export function UVEditorPanel() {
     theme,
     clearPanPreview,
     uvEditorDisplayMode,
+    regionBoundaryEdges,
+    isolatedBoundaryEdges,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -2193,29 +2235,7 @@ export function UVEditorPanel() {
             </>
           )}
 
-          <div className="uv-toolbar-divider" />
 
-          {/* Transform Dropdown */}
-          <div className="uv-dropdown-container">
-            <button
-              type="button"
-              className={`uv-dropdown-trigger ${activeMenu === 'transform' ? 'active' : ''}`}
-              onClick={() => setActiveMenu(activeMenu === 'transform' ? null : 'transform')}
-            >
-              Transform ▾
-            </button>
-            {activeMenu === 'transform' && (
-              <div className="uv-dropdown-menu">
-                <button type="button" onClick={() => { transformSelectedUvIslands('flipH'); setActiveMenu(null); }}>Flip Horizontal</button>
-                <button type="button" onClick={() => { transformSelectedUvIslands('flipV'); setActiveMenu(null); }}>Flip Vertical</button>
-                <button type="button" onClick={() => { transformSelectedUvIslands('rotateCW'); setActiveMenu(null); }}>Rotate 90° CW</button>
-                <button type="button" onClick={() => { transformSelectedUvIslands('rotateCCW'); setActiveMenu(null); }}>Rotate 90° CCW</button>
-                <button type="button" onClick={() => { transformSelectedUvIslands('fit'); setActiveMenu(null); }}>Fit UV Area</button>
-                <button type="button" onClick={() => { transformSelectedUvIslands('flipH'); setActiveMenu(null); }}>Mirror UV</button>
-                <button type="button" onClick={() => { frameSelection(); setActiveMenu(null); }}>Frame Selection (F)</button>
-              </div>
-            )}
-          </div>
 
           {/* Unwrap Dropdown */}
           <div className="uv-dropdown-container">
@@ -2384,27 +2404,53 @@ export function UVEditorPanel() {
           </div>
         )}
 
-        <div
-          ref={containerRef}
-          className="uv-editor-canvas-wrap"
-          style={{ cursor: hoverCursor }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={(e) => {
-            if (dragRef.current?.kind === 'pan') {
-              onPointerUp(e)
-              return
-            }
-            hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
-            setHoverCursor('crosshair')
-            scheduleRedraw()
-          }}
-          onAuxClick={(e) => e.preventDefault()}
-          onWheel={onWheel}
-        >
-          <canvas ref={canvasRef} className="uv-editor-canvas" />
-          {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
+        <div className="uv-editor-workspace">
+          <div className="uv-editor-sidebar-left">
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Flip horizontally">
+              Flip H
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipV')} title="Flip vertically">
+              Flip V
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('rotateCW')} title="Rotate 90° CW">
+              Rot 90°
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('rotateCCW')} title="Rotate 90° CCW">
+              Rot −90°
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('fit')} title="Fit selected face UVs to fill 0-1 texture area">
+              Fit UV
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Mirror UV horizontally">
+              Mirror
+            </button>
+            <button type="button" className="uv-sidebar-btn" onClick={frameSelection} title="Frame view (F · double-click)">
+              Frame (F)
+            </button>
+          </div>
+
+          <div
+            ref={containerRef}
+            className="uv-editor-canvas-wrap"
+            style={{ cursor: hoverCursor }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerLeave={(e) => {
+              if (dragRef.current?.kind === 'pan') {
+                onPointerUp(e)
+                return
+              }
+              hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
+              setHoverCursor('crosshair')
+              scheduleRedraw()
+            }}
+            onAuxClick={(e) => e.preventDefault()}
+            onWheel={onWheel}
+          >
+            <canvas ref={canvasRef} className="uv-editor-canvas" />
+            {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
+          </div>
         </div>
 
         <div className="uv-editor-precision">

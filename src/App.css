@@ -2214,6 +2214,46 @@
   border-bottom: 1px solid var(--border);
 }
 
+.uv-editor-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  width: 100%;
+}
+
+.uv-editor-sidebar-left {
+  width: 76px;
+  flex-shrink: 0;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+
+.uv-sidebar-btn {
+  width: 100%;
+  padding: 6px 2px;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.uv-sidebar-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .uv-editor-canvas-wrap {
   flex: 1;
   min-height: 180px;
