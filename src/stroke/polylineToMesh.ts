@@ -1,5 +1,6 @@
 import { generateBeadFromEllipse, generateBeadFromSilhouette } from '../mesh/bead'
-import { generateTube } from '../mesh/extrusion'
+import { generateCapsuleSweep } from '../mesh/extrusion'
+import { generateCapsulePillow } from '../mesh/capsulePillow'
 import { generateLathe } from '../mesh/lathe'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { reconstructOrganicMesh } from '../mesh/organicVolumeReconstruct'
@@ -49,6 +50,19 @@ export interface PolylineInput {
   name?: string
   /** Explicit closed flag from vector pen (overrides endpoint distance check). */
   pathClosed?: boolean
+  /** Vector pen commit: skip sketch RDP, force doodle intent, low-poly capsule sampling. */
+  preserveDetail?: boolean
+}
+
+function dedupeConsecutivePoints(points: Vec2[], epsilon = 0.01): Vec2[] {
+  if (points.length === 0) return []
+  const out: Vec2[] = [points[0]!]
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i]!
+    const prev = out[out.length - 1]!
+    if (Math.hypot(p.x - prev.x, p.y - prev.y) > epsilon) out.push(p)
+  }
+  return out
 }
 
 function centroidRelative(points: Vec2[], cx: number, cy: number): Vec2[] {
@@ -70,14 +84,23 @@ function finalizeMesh(
   polyBudget: number,
   intent: StrokeIntent,
   customName?: string,
-  tubePathPlane?: Vec2[]
+  tubePathPlane?: Vec2[],
+  preserveDetail = false
 ): SceneObject {
   offsetMeshInPlane(mesh, interpretation.centroid.x, interpretation.centroid.y)
   projectMeshToView(mesh, view, depth)
   applyColor(mesh, color)
 
-  if (intent === 'path-tube' && tubePathPlane && tubePathPlane.length >= 2) {
-    orientTubeFacesOutward(mesh, planePathToWorld(tubePathPlane, view, depth))
+  if (
+    (intent === 'path-tube' || intent === 'path-capsule') &&
+    tubePathPlane &&
+    tubePathPlane.length >= 2
+  ) {
+    orientTubeFacesOutward(
+      mesh,
+      planePathToWorld(tubePathPlane, view, depth),
+      interpretation.isClosed
+    )
   } else {
     ensureClosedMeshOutward(mesh)
   }
@@ -87,23 +110,25 @@ function finalizeMesh(
     result = remeshOrganic(result, polyBudget)
     applyColor(result, color)
   } else if (
-    intent === 'soft-silhouette' ||
-    intent === 'sharp-silhouette' ||
-    intent === 'silhouette-extrude'
+    !preserveDetail &&
+    (intent === 'soft-silhouette' ||
+      intent === 'sharp-silhouette' ||
+      intent === 'silhouette-extrude' ||
+      intent === 'capsule-pillow')
   ) {
     if (result.vertexCount() > polyBudget) {
       result = simplifyMesh(result, polyBudget)
       applyColor(result, color)
     }
-  } else if (result.vertexCount() > polyBudget) {
+  } else if (!preserveDetail && result.vertexCount() > polyBudget) {
     result = simplifyMesh(result, polyBudget)
     applyColor(result, color)
   }
 
   return result.toObject(generateId(), customName ?? interpretation.name, {
-    polyBudget,
+    polyBudget: preserveDetail ? result.vertexCount() : polyBudget,
     color,
-    polyBudgetMode: 'strict',
+    polyBudgetMode: preserveDetail ? 'adaptive' : 'strict',
     transform: {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },
@@ -242,12 +267,48 @@ function generateForIntent(
     }
 
     case 'path-tube':
-      return generateTube(relative, {
+      return generateCapsuleSweep(relative, {
         radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
         radialSegments: tess.radialSegments,
         minAngleDeg: tess.minAngleDeg,
-        capped: true,
+        closed: false,
+        color,
       })
+
+    case 'path-capsule':
+      return generateCapsuleSweep(relative, {
+        radius: Math.max(2, tess.extrudeDepth),
+        radialSegments: tess.radialSegments,
+        minAngleDeg: tess.minAngleDeg,
+        closed: false,
+        color,
+      })
+
+    case 'capsule-pillow': {
+      const boundary = curvatureSampleClosedLoop(
+        relative,
+        tess.minAngleDeg,
+        tess.boundaryVerts
+      )
+      const { lobes, isMultiLobe } = detectLobes(boundary)
+      if (isMultiLobe && lobes.length > 1) {
+        const parts = lobes.map((lobe) =>
+          generateCapsulePillow(lobe, {
+            depth: tess.extrudeDepth,
+            minAngleDeg: tess.minAngleDeg,
+            maxBoundaryVerts: tess.boundaryVerts,
+            color,
+          })
+        )
+        return parts.length === 1 ? parts[0]! : mergeMeshes(parts, color)
+      }
+      return generateCapsulePillow(boundary, {
+        depth: tess.extrudeDepth,
+        minAngleDeg: tess.minAngleDeg,
+        maxBoundaryVerts: tess.boundaryVerts,
+        color,
+      })
+    }
 
     case 'hole-line':
       return null
@@ -269,6 +330,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     extrudeMode = false,
     extrudeAmount,
     name,
+    pathClosed,
+    preserveDetail = false,
   } = input
 
   if (points.length < 2 || view === 'perspective') return null
@@ -277,32 +340,49 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     return blobStrokeToObject(input)
   }
 
-  const outlineSketch = strokeMode === 'outline' && !extrudeMode
-  const spacing = Math.max(rdpTolerance * (outlineSketch ? 0.22 : 0.35), outlineSketch ? 0.5 : 0.8)
-  const resampled = resampleUniform(points, spacing)
-  const simplified = rdpSimplify(
-    resampled,
-    outlineSketch ? rdpTolerance * 0.72 : rdpTolerance
-  )
+  let closedPoints: Vec2[]
+  if (preserveDetail) {
+    closedPoints = dedupeConsecutivePoints(points)
+    if (pathClosed && closedPoints.length >= 3) {
+      const first = closedPoints[0]!
+      const last = closedPoints[closedPoints.length - 1]!
+      if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.01) {
+        closedPoints = closedPoints.slice(0, -1)
+      }
+    }
+  } else {
+    const outlineSketch = strokeMode === 'outline' && !extrudeMode
+    const spacing = Math.max(rdpTolerance * (outlineSketch ? 0.22 : 0.35), outlineSketch ? 0.5 : 0.8)
+    const resampled = resampleUniform(points, spacing)
+    const simplified = rdpSimplify(
+      resampled,
+      outlineSketch ? rdpTolerance * 0.72 : rdpTolerance
+    )
 
-  if (simplified.length < 2) return null
+    if (simplified.length < 2) return null
 
-  const effectiveCloseThreshold = extrudeMode ? closeThreshold * 2.5 : closeThreshold
+    const effectiveCloseThreshold = extrudeMode ? closeThreshold * 2.5 : closeThreshold
 
-  let closedPoints = simplified
-  if (classifyStroke(simplified, effectiveCloseThreshold) === 'closed') {
-    const first = simplified[0]
-    const last = simplified[simplified.length - 1]
-    if (Math.hypot(first.x - last.x, first.y - last.y) > 0.01) {
-      closedPoints = [...simplified, first]
+    closedPoints = simplified
+    if (classifyStroke(simplified, effectiveCloseThreshold) === 'closed') {
+      const first = simplified[0]!
+      const last = simplified[simplified.length - 1]!
+      if (Math.hypot(first.x - last.x, first.y - last.y) > 0.01) {
+        closedPoints = [...simplified, first]
+      }
     }
   }
+
+  if (closedPoints.length < 2) return null
+
+  const effectiveCloseThreshold = extrudeMode ? closeThreshold * 2.5 : closeThreshold
 
   const interpretation = interpretStroke(
     closedPoints,
     effectiveCloseThreshold,
     strokeMode,
-    extrudeMode
+    extrudeMode,
+    { preserveDetail, pathClosed }
   )
 
   if (interpretation.intent === 'hole-line') return null
@@ -326,12 +406,14 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     polyBudget,
     brushDensity,
     interpretation.intent,
-    profileSource
+    profileSource,
+    15,
+    preserveDetail
   )
 
   const effectiveTess =
-    extrudeMode && extrudeAmount != null
-      ? { ...tess, extrudeDepth: extrudeAmount }
+    extrudeAmount != null && (extrudeMode || preserveDetail)
+      ? { ...tess, extrudeDepth: Math.max(1.6, Math.abs(extrudeAmount)) }
       : tess
 
   const mesh = generateForIntent(
@@ -355,7 +437,10 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     polyBudget,
     interpretation.intent,
     name,
-    interpretation.intent === 'path-tube' ? closedPoints : undefined
+    interpretation.intent === 'path-tube' || interpretation.intent === 'path-capsule'
+      ? closedPoints
+      : undefined,
+    preserveDetail
   )
 }
 

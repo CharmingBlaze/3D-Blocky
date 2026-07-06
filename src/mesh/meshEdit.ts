@@ -182,7 +182,7 @@ export function sceneObjectFromFace(
     faces: [],
     faceColors: [],
     topologyLocked: false,
-    polyBudget: 64,
+    polyBudget: 128,
     polyBudgetMode: 'strict',
     smoothShading: false,
     facetExaggeration: 0,

@@ -4,6 +4,12 @@ import { fitEllipse, totalCurvature } from './strokeCapture'
 import { classifyStroke, type StrokeType } from './strokeClassifier'
 import { isConcavePolygon, concavityScore, countReflexVertices } from '../mesh/concaveTriangulate'
 import type { StrokeMode } from '../store/appStore'
+import {
+  VECTOR_PEN_MAX_BOUNDARY_VERTS,
+  VECTOR_PEN_MAX_PATH_SAMPLES,
+  VECTOR_PEN_MIN_ANGLE_DEG,
+  VECTOR_PEN_RADIAL_SEGMENTS,
+} from '../vector/vectorPenLimits'
 
 import { detectRadialSymmetry } from './strokeClassifier'
 
@@ -15,6 +21,8 @@ export type StrokeIntent =
   | 'silhouette-lathe'
   | 'silhouette-extrude'
   | 'path-tube'
+  | 'path-capsule'
+  | 'capsule-pillow'
   | 'hole-line'
 
 export interface StrokeInterpretation {
@@ -67,14 +75,21 @@ export function estimateLobeCount(points: Vec2[]): number {
   return Math.max(1, Math.floor(countReflexVertices(points) / 2))
 }
 
+export interface InterpretStrokeOptions {
+  preserveDetail?: boolean
+  pathClosed?: boolean
+}
+
 export function interpretStroke(
   points: Vec2[],
   closeThreshold: number,
   strokeMode: StrokeMode,
-  extrudeMode = false
+  extrudeMode = false,
+  options: InterpretStrokeOptions = {}
 ): StrokeInterpretation {
-  const strokeType = classifyStroke(points, closeThreshold)
-  const isClosed = strokeType === 'closed'
+  const strokeType =
+    options.pathClosed === true ? 'closed' : classifyStroke(points, closeThreshold)
+  const isClosed = options.pathClosed === true || strokeType === 'closed'
   const concave = isClosed && isConcavePolygon(points)
   const lobes = isClosed ? estimateLobeCount(points) : 1
   const ellipse = isClosed ? fitEllipse(points) : null
@@ -96,16 +111,12 @@ export function interpretStroke(
     totalTurn: turn,
   }
 
-  // Extrude mode takes priority — flat 2D silhouette → 3D prism along view depth
+  // Extrude — closed outline becomes a capsule pillow; open stroke sweeps along the path.
   if (extrudeMode && points.length >= 2) {
     return {
       ...base,
-      intent: 'silhouette-extrude',
-      name: isClosed
-        ? lobes > 1
-          ? `Extrude (${lobes} lobes)`
-          : 'Extrude'
-        : 'Extrude',
+      intent: isClosed ? 'capsule-pillow' : 'path-capsule',
+      name: isClosed ? 'Doodle' : 'Capsule',
     }
   }
 
@@ -140,26 +151,26 @@ export function interpretStroke(
     return { ...base, intent: 'path-tube', name: 'Path' }
   }
 
-  if (isCircleOrOval(points)) {
+  if (!options.preserveDetail && isCircleOrOval(points)) {
     return { ...base, intent: 'bead', name: 'Bead' }
   }
 
-  if (detectRadialSymmetry(points, 0.72)) {
+  if (!options.preserveDetail && detectRadialSymmetry(points, 0.72)) {
     return { ...base, intent: 'silhouette-lathe', name: 'Bead' }
   }
 
   if (concave && lobes > 1) {
     return {
       ...base,
-      intent: 'soft-silhouette',
-      name: `Shape (${lobes} lobes)`,
+      intent: 'capsule-pillow',
+      name: `Doodle (${lobes} lobes)`,
     }
   }
 
   return {
     ...base,
-    intent: 'soft-silhouette',
-    name: 'Shape',
+    intent: 'capsule-pillow',
+    name: 'Doodle',
   }
 }
 
@@ -177,11 +188,14 @@ export function allocateTessellation(
   brushDensity: number,
   intent: StrokeIntent,
   profilePoints: Vec2[],
-  minAngleDeg = 15
+  minAngleDeg = 15,
+  preserveDetail = false
 ): TessellationBudget {
   const sampled = curvatureSampleProfile(profilePoints, minAngleDeg)
-  const curvatureRings = Math.max(3, Math.min(sampled.length, 16))
-  const cappedDensity = Math.max(4, Math.min(brushDensity, 24))
+  const curvatureRings = Math.max(3, Math.min(sampled.length, preserveDetail ? 128 : 16))
+  const cappedDensity = preserveDetail
+    ? Math.max(6, Math.min(brushDensity, 32))
+    : Math.max(4, Math.min(brushDensity, 24))
   const budget = Math.max(12, polyBudget)
 
   switch (intent) {
@@ -267,21 +281,41 @@ export function allocateTessellation(
         minAngleDeg,
       }
     }
-    case 'path-tube': {
-      const pathSamples = Math.max(
-        3,
-        Math.min(curvatureRings, Math.floor(budget / Math.max(5, cappedDensity)))
-      )
+    case 'path-tube':
+    case 'path-capsule': {
+      const pathSamples = preserveDetail
+        ? Math.min(
+            VECTOR_PEN_MAX_PATH_SAMPLES,
+            Math.max(3, Math.min(curvatureRings, profilePoints.length))
+          )
+        : Math.max(
+            3,
+            Math.min(curvatureRings, Math.floor(budget / Math.max(5, cappedDensity)))
+          )
       return {
-        radialSegments: Math.max(
-          6,
-          Math.min(cappedDensity, Math.floor(budget / Math.max(3, pathSamples)))
-        ),
+        radialSegments: preserveDetail
+          ? VECTOR_PEN_RADIAL_SEGMENTS
+          : Math.max(
+              6,
+              Math.min(cappedDensity, Math.floor(budget / Math.max(3, pathSamples)))
+            ),
         profileRings: 0,
         pathSamples,
         boundaryVerts: 0,
-        extrudeDepth: cappedDensity * 0.8,
-        minAngleDeg,
+        extrudeDepth: Math.max(4, cappedDensity),
+        minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : minAngleDeg,
+      }
+    }
+    case 'capsule-pillow': {
+      return {
+        radialSegments: 0,
+        profileRings: 0,
+        pathSamples: 0,
+        boundaryVerts: preserveDetail
+          ? VECTOR_PEN_MAX_BOUNDARY_VERTS
+          : Math.max(16, Math.min(Math.floor(budget * 0.85), 64)),
+        extrudeDepth: Math.max(4, cappedDensity * 1.1),
+        minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : Math.max(8, minAngleDeg - 4),
       }
     }
     case 'hole-line':

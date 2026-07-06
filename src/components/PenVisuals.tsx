@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { Billboard, Line } from '@react-three/drei'
 import * as THREE from 'three'
-import type { ViewType } from '../store/appStore'
+import type { ViewType, StrokeMode } from '../store/appStore'
 import { planeToStroke3D } from '../utils/screenToWorld'
 import { sampleAnchors, handleSegments } from '../vector/bezier'
 import type { VectorAnchor } from '../vector/types'
@@ -153,6 +153,7 @@ interface PenVisualsProps {
   depth: number
   showFillPreview: boolean
   extrudeMode: boolean
+  strokeMode: StrokeMode
 }
 
 export function PenVisuals({
@@ -161,6 +162,7 @@ export function PenVisuals({
   depth,
   showFillPreview,
   extrudeMode,
+  strokeMode,
 }: PenVisualsProps) {
   const theme = useTheme()
   const colors: PenThemeColors = {
@@ -195,17 +197,19 @@ export function PenVisuals({
   const handleLines = useMemo(() => handleSegments(draft.anchors), [draft.anchors])
   const pendingIndex = draft.pendingAnchorIndex
 
+  const previewClosed =
+    draft.closeTargetActive || (strokeMode === 'outline' && draft.anchors.length >= 3)
+  const showExtrudePreview =
+    previewPath.length >= 2 &&
+    (extrudeMode || strokeMode === 'outline' || strokeMode === 'centerline')
+
   return (
     <group>
-      {extrudeMode && previewPath.length >= 2 && (
-        <ExtrudePreviewMesh
-          points={previewPath}
-          view={view}
-          closed={draft.closeTargetActive}
-        />
+      {showExtrudePreview && (
+        <ExtrudePreviewMesh points={previewPath} view={view} closed={previewClosed} />
       )}
 
-      {showFillPreview && !extrudeMode && draft.anchors.length >= 3 && (
+      {showFillPreview && strokeMode === 'blob' && !extrudeMode && draft.anchors.length >= 3 && (
         <FillPreview
           anchors={draft.anchors}
           view={view}

@@ -19,6 +19,7 @@ import { ThemePicker } from './ThemeBar'
 import { SidePanelFileMenu } from './SidePanelFileMenu'
 import { SidePanelPrimitivesMenu, PRIMITIVE_KINDS } from './SidePanelPrimitivesMenu'
 import { SidePanelVectorShapesMenu } from './SidePanelVectorShapesMenu'
+import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
@@ -197,9 +198,9 @@ export function SidePanel() {
     setDrawInputMode,
     autoConnectPaths,
     setAutoConnectPaths,
-    extrudeMode,
+    sketchExtrudeMode,
+    penExtrudeMode,
     toggleExtrudeMode,
-    setExtrudeMode,
     extrudeAmount,
     setExtrudeAmount,
     commitExtrudeDepth,
@@ -297,9 +298,9 @@ export function SidePanel() {
       setDrawInputMode: s.setDrawInputMode,
       autoConnectPaths: s.autoConnectPaths,
       setAutoConnectPaths: s.setAutoConnectPaths,
-      extrudeMode: s.extrudeMode,
+      sketchExtrudeMode: s.sketchExtrudeMode,
+      penExtrudeMode: s.penExtrudeMode,
       toggleExtrudeMode: s.toggleExtrudeMode,
-      setExtrudeMode: s.setExtrudeMode,
       extrudeAmount: s.extrudeAmount,
       setExtrudeAmount: s.setExtrudeAmount,
       commitExtrudeDepth: s.commitExtrudeDepth,
@@ -399,10 +400,14 @@ export function SidePanel() {
     activeTool === 'draw' ||
     activeTool === 'vector-pen'
 
+  const activeExtrudeOn = activeExtrudeMode({ drawInputMode, sketchExtrudeMode, penExtrudeMode })
+
   const selectedSketchDoodle =
     selectedObj?.sketchSource?.isClosed ? selectedObj.sketchSource : null
+  const selectedVectorDoodle = selectedObj?.vectorSource ?? null
+  const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
 
-  const showExtrudeDepth = extrudeMode || isSketchOrPen || !!selectedSketchDoodle
+  const showExtrudeDepth = activeExtrudeOn || isSketchOrPen || !!selectedExtrudableDoodle
 
   const isSelectTool =
     activeTool === 'select-object' ||
@@ -582,11 +587,8 @@ export function SidePanel() {
               {STROKE_MODES.map((m) => (
                 <button
                   key={m.id}
-                  className={`side-btn ${strokeMode === m.id && !extrudeMode ? 'active' : ''}`}
-                  onClick={() => {
-                    setStrokeMode(m.id)
-                    if (extrudeMode) setExtrudeMode(false)
-                  }}
+                  className={`side-btn ${strokeMode === m.id && !activeExtrudeOn ? 'active' : ''}`}
+                  onClick={() => setStrokeMode(m.id)}
                   title={m.hint}
                 >
                   {m.label}
@@ -594,9 +596,13 @@ export function SidePanel() {
               ))}
             </SideBtnGroup>
             <button
-              className={`side-btn side-btn-wide ${extrudeMode ? 'active' : ''}`}
+              className={`side-btn side-btn-wide ${activeExtrudeOn ? 'active' : ''}`}
               onClick={toggleExtrudeMode}
-              title="Flat silhouette extrude"
+              title={
+                drawInputMode === 'vector-pen'
+                  ? 'Extrude vector pen strokes into 3D capsule doodles'
+                  : 'Extrude sketch strokes into 3D capsule doodles'
+              }
             >
               Extrude
             </button>
@@ -610,14 +616,14 @@ export function SidePanel() {
                   max={64}
                   step={1}
                   onChange={setExtrudeAmount}
-                  onCommit={selectedSketchDoodle ? commitExtrudeDepth : undefined}
+                  onCommit={selectedExtrudableDoodle ? commitExtrudeDepth : undefined}
                 />
-                {selectedSketchDoodle && (
+                {selectedExtrudableDoodle && (
                   <p className="side-color-hint muted">
                     Adjust depth for the selected doodle in real time.
                   </p>
                 )}
-                {extrudeMode && !selectedSketchDoodle && (
+                {activeExtrudeOn && !selectedExtrudableDoodle && (
                   <p className="side-color-hint muted">
                     Drag up or right to extrude farther; left or down extrudes the opposite way.
                   </p>
@@ -1058,8 +1064,8 @@ export function SidePanel() {
               label="Poly budget"
               value={polyBudget}
               display={String(polyBudget)}
-              min={12}
-              max={128}
+              min={24}
+              max={256}
               step={4}
               warn={!!overBudget}
               onChange={setPolyBudget}

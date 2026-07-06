@@ -40,6 +40,11 @@ export function extrusionDepth(w: number, h: number): number {
   return Math.max(Math.min(w, h), 1)
 }
 
+/** Capsule axis length — longer drag side becomes the pill axis (→ view depth after projection). */
+export function capsuleExtrusionDepth(w: number, h: number): number {
+  return Math.max(Math.max(w, h), 1)
+}
+
 /** Triangle silhouette: apex at top center, base along bottom edge (vertical extrusion). */
 export function dragTriangle(a: Vec2, b: Vec2): [Vec2, Vec2, Vec2] {
   const { minU, maxU, minV, maxV, cu } = dragBounds(a, b)

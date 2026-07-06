@@ -6,6 +6,9 @@ import { createPrimitiveInBox, type PrimitiveBoxType } from '../src/primitives/p
 import { primitiveBoxToSceneObject } from '../src/primitives/primitiveBoxCommit'
 import { heightAxisForView } from '../src/primitives/viewAxes'
 import { validateMesh, indexedMeshFromFlat, computeFaceNormal, faceCentroid } from '../src/mesh/MeshBuilder'
+import { weldSceneObjectCoincidentVertices } from '../src/mesh/subdivisionSurface'
+import { roundedBoxFromWorldBox } from '../src/mesh/roundedBox'
+import { prepareSceneObject } from '../src/mesh/objectTransform'
 
 const PRIMITIVES: PrimitiveBoxType[] = [
   'box',
@@ -35,7 +38,7 @@ function inwardFromObj(positions: { x: number; y: number; z: number }[], faces: 
 
 let failures = 0
 
-for (const view of ['front', 'side', 'top'] as const) {
+for (const view of ['front', 'right', 'top'] as const) {
   const ha = heightAxisForView(view)
   for (const type of PRIMITIVES) {
     const data = createPrimitiveInBox(type, box, ha, 8)
@@ -57,11 +60,14 @@ for (const view of ['front', 'side', 'top'] as const) {
 
     const obj = primitiveBoxToSceneObject(type, box, ha, 0x6ecbf5, 48)
     const inward = obj ? inwardFromObj(obj.positions, obj.faces) : -1
+    const unwelded =
+      obj != null &&
+      weldSceneObjectCoincidentVertices(obj).positions.length < obj.positions.length
 
     const label = `${type} @ ${view}`
-    if (!validation.ok || inward > 0) {
+    if (!validation.ok || inward > 0 || unwelded) {
       console.error(
-        `FAIL ${label}: validate ok=${validation.ok} inward=${inward} issues=${validation.issues.length}`
+        `FAIL ${label}: validate ok=${validation.ok} inward=${inward} unwelded=${unwelded} issues=${validation.issues.length}`
       )
       validation.issues.slice(0, 3).forEach((i) => console.error(`  - ${i.message}`))
       failures++
@@ -71,6 +77,17 @@ for (const view of ['front', 'side', 'top'] as const) {
       )
     }
   }
+}
+
+const rounded = prepareSceneObject(
+  roundedBoxFromWorldBox(box, 0x6ecbf5, { roundness: 0.25, subdivisions: 1 }, 48)
+)
+const roundedWelded = weldSceneObjectCoincidentVertices(rounded)
+if (roundedWelded.positions.length < rounded.positions.length) {
+  console.error('FAIL roundedBox: unwelded coincident vertices remain after commit')
+  failures++
+} else {
+  console.log(`OK   roundedBox: ${rounded.faces.length} faces, ${rounded.positions.length} verts, inward=0`)
 }
 
 if (failures > 0) {

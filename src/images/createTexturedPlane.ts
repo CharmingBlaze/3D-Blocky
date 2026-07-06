@@ -94,7 +94,7 @@ export function createTexturedPlaneObject(
     faceUvIndices,
     uvMappingMode: 'box',
     topologyLocked: false,
-    polyBudget: 64,
+    polyBudget: 128,
     polyBudgetMode: 'strict',
     smoothShading: false,
     facetExaggeration: 0,

@@ -1,13 +1,20 @@
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
+import { generateCapsulePillow } from '../mesh/capsulePillow'
+import { generateCapsuleSweep } from '../mesh/extrusion'
+import { ensureCCW } from '../mesh/concaveTriangulate'
 import { generateSoftInflateDome } from '../mesh/softInflate'
-import { extrudeSilhouette } from '../mesh/silhouetteExtrude'
-import { generateTube } from '../mesh/extrusion'
 import type { ViewType } from '../store/appStore'
 import type { Vec2 } from '../utils/math'
+import { curvatureSampleClosedLoop } from './rdp'
 import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
 import { orientTubeFacesOutward } from '../mesh/extrusion'
 import { ensureClosedMeshOutward } from '../mesh/meshWinding'
+import {
+  VECTOR_PEN_MAX_BOUNDARY_VERTS,
+  VECTOR_PEN_MIN_ANGLE_DEG,
+  VECTOR_PEN_RADIAL_SEGMENTS,
+} from '../vector/vectorPenLimits'
 
 export type SketchDoodleKind = 'soft' | 'sharp' | 'path'
 
@@ -43,14 +50,38 @@ function capBoundaryPoints(relative: Vec2[], maxPoints: number): Vec2[] {
 
 function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: number): HalfEdgeMesh | null {
   const { relative, brushDensity, polyBudget, isClosed, kind } = source
-  const depth = Math.max(4, extrudeDepth)
+  const depth = Math.max(1.6, Math.abs(extrudeDepth))
+
+  if (kind === 'sharp') {
+    if (!isClosed) {
+      return generateCapsuleSweep(relative, {
+        radius: Math.max(2, depth),
+        radialSegments: VECTOR_PEN_RADIAL_SEGMENTS,
+        minAngleDeg: VECTOR_PEN_MIN_ANGLE_DEG,
+        closed: false,
+        color,
+      })
+    }
+    const boundary = curvatureSampleClosedLoop(
+      ensureCCW(relative),
+      VECTOR_PEN_MIN_ANGLE_DEG,
+      VECTOR_PEN_MAX_BOUNDARY_VERTS
+    )
+    return generateCapsulePillow(boundary, {
+      depth,
+      minAngleDeg: VECTOR_PEN_MIN_ANGLE_DEG,
+      maxBoundaryVerts: VECTOR_PEN_MAX_BOUNDARY_VERTS,
+      color,
+    })
+  }
 
   if (!isClosed) {
-    return generateTube(relative, {
+    return generateCapsuleSweep(relative, {
       radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
-      radialSegments: 8,
-      minAngleDeg: 14,
-      capped: true,
+      radialSegments: VECTOR_PEN_RADIAL_SEGMENTS,
+      minAngleDeg: VECTOR_PEN_MIN_ANGLE_DEG,
+      closed: false,
+      color,
     })
   }
 
@@ -58,11 +89,33 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
   const boundary = capBoundaryPoints(relative, maxBoundary)
   const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (maxBoundary + 4))))
 
-  if (kind === 'sharp') {
-    return extrudeSilhouette(boundary, { depth, color })
-  }
-
   return generateSoftInflateDome(boundary, { depth, rings, color: 0 })
+}
+
+export function createSketchSource(
+  relative: Vec2[],
+  center: Vec2,
+  view: ViewType,
+  brushDensity: number,
+  polyBudget: number,
+  closeThreshold: number,
+  defaultDepth: number,
+  isClosed: boolean,
+  kind: SketchDoodleKind,
+  extrudeDepth: number
+): SketchSource {
+  return {
+    relative: relative.map((p) => ({ ...p })),
+    center: { ...center },
+    view,
+    brushDensity,
+    polyBudget,
+    closeThreshold,
+    defaultDepth,
+    isClosed,
+    kind,
+    extrudeDepth,
+  }
 }
 
 /** Rebuild a sketch doodle with a new extrusion depth, preserving id and transform. */

@@ -8,17 +8,22 @@ export function gridResolutionCap(polyBudget: number): number {
   return Math.max(8, Math.min(18, Math.round(Math.cbrt(polyBudget * 5))))
 }
 
+/** Radial segments for CAD / vector primitives derived from poly budget. */
+export function primitiveSegmentsForBudget(polyBudget: number, fallback = 8): number {
+  return Math.max(6, Math.min(12, Math.floor(Math.sqrt(polyBudget * 0.5)) || fallback))
+}
+
 export function icosphereSubdivisionsForBudget(polyBudget: number): number {
-  if (polyBudget <= 20) return 0
-  if (polyBudget <= 56) return 1
-  if (polyBudget <= 96) return 1
+  if (polyBudget <= 40) return 0
+  if (polyBudget <= 112) return 1
+  if (polyBudget <= 192) return 1
   return 2
 }
 
 export function maxRoundedBoxSubdivisionsForBudget(polyBudget: number): number {
-  if (polyBudget <= 24) return 0
-  if (polyBudget <= 48) return 1
-  if (polyBudget <= 96) return 2
+  if (polyBudget <= 48) return 0
+  if (polyBudget <= 96) return 1
+  if (polyBudget <= 192) return 2
   return 2
 }
 
@@ -43,7 +48,7 @@ export function enforceSceneObjectPolyBudget(
   budget: number,
   options?: { organic?: boolean }
 ): SceneObject {
-  if (obj.topologyLocked || budget <= 0) return obj
+  if (obj.topologyLocked || budget <= 0 || obj.polyBudgetMode === 'adaptive') return obj
   const mesh = HalfEdgeMesh.fromObject(obj)
   if (mesh.vertexCount() <= budget) return obj
 

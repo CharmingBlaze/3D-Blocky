@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, type ToolCategory } from '../store/appStore'
+import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
 import {
   isToolRingEntryDisabled,
   TOOL_RING_BRANCHES,
@@ -39,7 +40,8 @@ export function ToolRing({ onClose }: ToolRingProps) {
     strokeMode,
     polyDrawMode,
     drawInputMode,
-    extrudeMode,
+    sketchExtrudeMode,
+    penExtrudeMode,
     uvEditorOpen,
     selectionObjectIds,
     selectedObjectId,
@@ -56,7 +58,8 @@ export function ToolRing({ onClose }: ToolRingProps) {
       strokeMode: s.strokeMode,
       polyDrawMode: s.polyDrawMode,
       drawInputMode: s.drawInputMode,
-      extrudeMode: s.extrudeMode,
+      sketchExtrudeMode: s.sketchExtrudeMode,
+      penExtrudeMode: s.penExtrudeMode,
       uvEditorOpen: s.uvEditorOpen,
       selectionObjectIds: s.selectionObjectIds,
       selectedObjectId: s.selectedObjectId,
@@ -121,7 +124,9 @@ export function ToolRing({ onClose }: ToolRingProps) {
             ? activeTool === 'vector-pen'
             : activeTool === 'draw' && drawInputMode === 'regular'
         case 'action':
-          if (entry.id === 'extrude') return extrudeMode
+          if (entry.id === 'extrude') {
+            return activeExtrudeMode({ drawInputMode, sketchExtrudeMode, penExtrudeMode })
+          }
           if (entry.id === 'uv-editor') return uvEditorOpen
           return false
         default:
@@ -136,7 +141,8 @@ export function ToolRing({ onClose }: ToolRingProps) {
       strokeMode,
       polyDrawMode,
       drawInputMode,
-      extrudeMode,
+      sketchExtrudeMode,
+      penExtrudeMode,
       uvEditorOpen,
     ]
   )

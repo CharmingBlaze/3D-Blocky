@@ -7,6 +7,8 @@ import {
   type RoundedBoxParams,
 } from '../mesh/roundedBox'
 import { prepareSceneObject } from '../mesh/objectTransform'
+import { weldSceneObjectCoincidentVertices } from '../mesh/subdivisionSurface'
+import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 import { generateId } from '../utils/math'
 import type { WorldBox } from './primitiveBoxMath'
 import {
@@ -26,6 +28,11 @@ const PRIMITIVE_NAMES: Record<PrimitiveBoxType, string> = {
   pyramid: 'Pyramid',
 }
 
+/** Weld position-coincident corners so face/edge/vertex edits stay connected. */
+function finalizeCadPrimitive(obj: SceneObject): SceneObject {
+  return weldSceneObjectCoincidentVertices(prepareSceneObject(obj))
+}
+
 export function primitiveBoxToSceneObject(
   type: PrimitiveBoxType,
   box: WorldBox,
@@ -40,7 +47,7 @@ export function primitiveBoxToSceneObject(
     if (obj.positions.length === 0) return null
     const mesh = HalfEdgeMesh.fromObject(obj)
     ensurePositiveVolume(mesh)
-    return prepareSceneObject({
+    return finalizeCadPrimitive({
       ...mesh.toObject(generateId(), PRIMITIVE_NAMES.roundedBox, {
         polyBudget,
         color,
@@ -49,7 +56,12 @@ export function primitiveBoxToSceneObject(
     })
   }
 
-  const data = createPrimitiveInBox(type, box, heightAxis, 8)
+  const data = createPrimitiveInBox(
+    type,
+    box,
+    heightAxis,
+    primitiveSegmentsForBudget(polyBudget)
+  )
   if (data.indices.length === 0) return null
 
   const mesh = meshDataToHalfEdgeMesh(data, color)
@@ -70,7 +82,7 @@ export function primitiveBoxToSceneObject(
     polyBudgetMode: 'strict',
   })
 
-  return prepareSceneObject(obj)
+  return finalizeCadPrimitive(obj)
 }
 
 export function primitiveBoxPreviewMesh(
@@ -85,7 +97,12 @@ export function primitiveBoxPreviewMesh(
     const params = roundedParams ?? { roundness: 0.25, subdivisions: 1 }
     return roundedBoxHalfEdgeFromWorldBox(box, color, params, polyBudget)
   }
-  const data = createPrimitiveInBox(type, box, heightAxis, 8)
+  const data = createPrimitiveInBox(
+    type,
+    box,
+    heightAxis,
+    primitiveSegmentsForBudget(polyBudget)
+  )
   if (data.indices.length === 0) return null
   return meshDataToHalfEdgeMesh(data, color)
 }

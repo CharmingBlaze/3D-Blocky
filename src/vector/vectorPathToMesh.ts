@@ -4,6 +4,12 @@ import { blobStrokeToObject } from '../blob/strokeToBlob'
 import { polylineToMesh, type PolylineInput } from '../stroke/polylineToMesh'
 import { flattenVectorPath } from './bezier'
 import type { VectorPath } from './types'
+import {
+  VECTOR_PEN_FLATTEN_ERROR,
+  VECTOR_PEN_POLY_BUDGET,
+} from './vectorPenLimits'
+
+export { VECTOR_PEN_POLY_BUDGET } from './vectorPenLimits'
 
 export interface VectorPathMeshOptions {
   view: ViewType
@@ -20,14 +26,14 @@ export interface VectorPathMeshOptions {
 }
 
 function meshPointsFromPath(path: VectorPath): { x: number; y: number }[] {
-  const points = flattenVectorPath(path, 0.35)
+  const points = flattenVectorPath(path, VECTOR_PEN_FLATTEN_ERROR)
   if (points.length < 2) return points
   if (!path.closed) return points
 
-  const first = points[0]
-  const last = points[points.length - 1]
-  if (Math.hypot(first.x - last.x, first.y - last.y) > 0.5) {
-    return [...points, { ...first }]
+  const first = points[0]!
+  const last = points[points.length - 1]!
+  if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.5) {
+    return points.slice(0, -1)
   }
   return points
 }
@@ -37,10 +43,10 @@ export function vectorPathMeshName(
   extrudeMode: boolean,
   closed: boolean
 ): string {
-  if (extrudeMode && closed) return 'Extrude'
+  if (extrudeMode) return closed ? 'Doodle' : 'Capsule'
   if (strokeMode === 'blob') return 'Blob'
   if (strokeMode === 'centerline') return 'Path'
-  return closed ? 'Outline' : 'Path'
+  return closed ? 'Doodle' : 'Path'
 }
 
 /** Build a 3D mesh from a finished vector pen path using the active fill mode. */
@@ -56,7 +62,7 @@ export function vectorPathToMesh(
   const base: PolylineInput = {
     points,
     view: path.view,
-    polyBudget: options.polyBudget,
+    polyBudget: VECTOR_PEN_POLY_BUDGET,
     brushDensity: options.brushDensity,
     strokeMode: options.strokeMode,
     rdpTolerance: options.rdpTolerance,
@@ -68,6 +74,7 @@ export function vectorPathToMesh(
     extrudeAmount: options.extrudeAmount,
     name,
     pathClosed: path.closed,
+    preserveDetail: true,
   }
 
   if (options.extrudeMode) {

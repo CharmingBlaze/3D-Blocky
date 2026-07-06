@@ -20,7 +20,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     isDrawing,
     activeColor,
     defaultDepth,
-    extrudeMode,
+    sketchExtrudeMode,
     autoConnectPaths,
     closeThreshold,
   } = useAppStore(
@@ -31,7 +31,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       isDrawing: s.isDrawing,
       activeColor: s.activeColor,
       defaultDepth: s.defaultDepth,
-      extrudeMode: s.extrudeMode,
+      sketchExtrudeMode: s.sketchExtrudeMode,
       autoConnectPaths: s.autoConnectPaths,
       closeThreshold: s.closeThreshold,
     }))
@@ -69,14 +69,14 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
 
   return (
     <>
-      {extrudeMode && <ExtrudePreviewMesh points={currentStroke} view={view} />}
+      {sketchExtrudeMode && <ExtrudePreviewMesh points={currentStroke} view={view} />}
       {strokePath.length >= 2 && (
         <Line
           points={strokePath}
           color={color}
-          lineWidth={extrudeMode ? 1.5 : 2}
+          lineWidth={sketchExtrudeMode ? 1.5 : 2}
           transparent
-          opacity={extrudeMode ? 0.55 : 0.9}
+          opacity={sketchExtrudeMode ? 0.55 : 0.9}
           depthTest={false}
         />
       )}

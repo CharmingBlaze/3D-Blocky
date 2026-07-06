@@ -4,12 +4,17 @@
 import type { MeshData } from '../blob/types'
 import { createIcosphere } from '../blob/primitives'
 import {
+  createLowPolyCapsuleMeshData,
+  capsuleRadialSegments,
+} from './capsuleMesh'
+import {
   MeshBuilder,
   emptyMeshData,
   finalizeIndexedMesh,
   indexedMeshFromFlat,
   type IndexedMesh,
 } from '../mesh/MeshBuilder'
+import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 import type { Vec3 } from '../utils/math'
 import { axisComponent, type Axis } from './viewAxes'
 import { boxCenterSize, type WorldBox } from './primitiveBoxMath'
@@ -50,9 +55,18 @@ export function createBoxMesh(center: Vec3, size: Vec3): MeshData {
   const cz = center.z
 
   const b = new MeshBuilder()
-  const p = (dx: number, dy: number, dz: number) => b.addVertex(cx + dx, cy + dy, cz + dz)
-
+  const vtx = (dx: number, dy: number, dz: number) => b.addVertex(cx + dx, cy + dy, cz + dz)
   const uv = (u: number, v: number) => b.addUv(u, v)
+
+  // Eight welded corners — shared across all six faces so component edits stay connected.
+  const v000 = vtx(-hx, -hy, -hz)
+  const v100 = vtx(hx, -hy, -hz)
+  const v110 = vtx(hx, hy, -hz)
+  const v010 = vtx(-hx, hy, -hz)
+  const v001 = vtx(-hx, -hy, hz)
+  const v101 = vtx(hx, -hy, hz)
+  const v111 = vtx(hx, hy, hz)
+  const v011 = vtx(-hx, hy, hz)
 
   const pushFace = (
     a: number,
@@ -69,27 +83,27 @@ export function createBoxMesh(center: Vec3, size: Vec3): MeshData {
 
   // Six faces — CCW when viewed from outside.
   pushFace(
-    p(-hx, -hy, -hz), p(hx, -hy, -hz), p(hx, hy, -hz), p(-hx, hy, -hz),
+    v000, v100, v110, v010,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
   pushFace(
-    p(hx, -hy, hz), p(-hx, -hy, hz), p(-hx, hy, hz), p(hx, hy, hz),
+    v101, v001, v011, v111,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
   pushFace(
-    p(-hx, -hy, hz), p(-hx, -hy, -hz), p(-hx, hy, -hz), p(-hx, hy, hz),
+    v001, v000, v010, v011,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
   pushFace(
-    p(hx, -hy, -hz), p(hx, -hy, hz), p(hx, hy, hz), p(hx, hy, -hz),
+    v100, v101, v111, v110,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
   pushFace(
-    p(-hx, hy, -hz), p(hx, hy, -hz), p(hx, hy, hz), p(-hx, hy, hz),
+    v010, v110, v111, v011,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
   pushFace(
-    p(-hx, -hy, hz), p(hx, -hy, hz), p(hx, -hy, -hz), p(-hx, -hy, -hz),
+    v001, v101, v100, v000,
     uv(0, 0), uv(1, 0), uv(1, 1), uv(0, 1)
   )
 
@@ -254,18 +268,7 @@ export function createInscribedCylinder(
   return finalize(b.build(), center)
 }
 
-function connectRings(b: MeshBuilder, ringA: number[], ringB: number[]): number[] {
-  const faces: number[] = []
-  const segs = ringA.length
-  for (let i = 0; i < segs; i++) {
-    const j = (i + 1) % segs
-    faces.push(b.addTriangle(ringA[i]!, ringA[j]!, ringB[j]!))
-    faces.push(b.addTriangle(ringA[i]!, ringB[j]!, ringB[i]!))
-  }
-  return faces
-}
-
-/** Low-poly capsule inscribed in the box — hemispherical caps on a cylindrical body. */
+/** Low-poly capsule — cylindrical body with faceted hemispherical caps. */
 export function createInscribedCapsule(
   center: Vec3,
   size: Vec3,
@@ -278,68 +281,14 @@ export function createInscribedCapsule(
   if (radius < 1e-6 || height < 1e-6) return emptyMeshData()
 
   const halfH = height / 2
-  if (halfH <= radius) {
-    return createInscribedIcosphere(center, size, segments)
-  }
-
-  const segs = Math.max(6, segments)
-  const capRings = Math.max(2, Math.floor(segs / 2))
-  const bodyHalf = halfH - radius
-  const b = new MeshBuilder()
-
-  const buildRing = (y: number, scale: number): number[] => {
-    const ring: number[] = []
-    for (let i = 0; i < segs; i++) {
-      const t = (i / segs) * Math.PI * 2
-      const lx = Math.cos(t) * radius * scale
-      const lz = Math.sin(t) * radius * scale
-      ring.push(b.addVertexVec(mapLocal(lx, y, lz, heightAxis, center)))
-    }
-    return ring
-  }
-
-  const bottomRings: number[][] = []
-  for (let ri = 0; ri < capRings; ri++) {
-    const phi = (ri / capRings) * (Math.PI / 2)
-    const y = -bodyHalf - radius * Math.sin(phi)
-    bottomRings.push(buildRing(y, Math.cos(phi)))
-  }
-
-  const topRings: number[][] = []
-  for (let ri = 0; ri < capRings; ri++) {
-    const phi = (ri / capRings) * (Math.PI / 2)
-    const y = bodyHalf + radius * Math.sin(phi)
-    topRings.push(buildRing(y, Math.cos(phi)))
-  }
-
-  const bi = b.addVertexVec(mapLocal(0, -halfH, 0, heightAxis, center))
-  const ti = b.addVertexVec(mapLocal(0, halfH, 0, heightAxis, center))
-
-  const bottomCap: number[] = []
-  for (let ri = 0; ri < capRings - 1; ri++) {
-    bottomCap.push(...connectRings(b, bottomRings[ri]!, bottomRings[ri + 1]!))
-  }
-  const lastBottom = bottomRings[capRings - 1]!
-  for (let i = 0; i < segs; i++) {
-    const j = (i + 1) % segs
-    bottomCap.push(b.addTriangle(bi, lastBottom[j]!, lastBottom[i]!))
-  }
-  b.addFaceGroup(bottomCap)
-
-  b.addFaceGroup(connectRings(b, bottomRings[0]!, topRings[0]!))
-
-  const topCap: number[] = []
-  for (let ri = 0; ri < capRings - 1; ri++) {
-    topCap.push(...connectRings(b, topRings[ri]!, topRings[ri + 1]!))
-  }
-  const lastTop = topRings[capRings - 1]!
-  for (let i = 0; i < segs; i++) {
-    const j = (i + 1) % segs
-    topCap.push(b.addTriangle(ti, lastTop[i]!, lastTop[j]!))
-  }
-  b.addFaceGroup(topCap)
-
-  return finalize(b.build(), center)
+  return createLowPolyCapsuleMeshData({
+    axisMin: -halfH,
+    axisMax: halfH,
+    radius,
+    radialSegs: capsuleRadialSegments(segments),
+    mapPoint: (lx, axis, lz) => mapLocal(lx, axis, lz, heightAxis, center),
+    outwardCenter: center,
+  })
 }
 
 export function createInscribedCone(
@@ -429,7 +378,7 @@ export function createPrimitiveInBox(
   type: PrimitiveBoxType,
   box: WorldBox,
   heightAxis: Axis,
-  segments = 8
+  segments = primitiveSegmentsForBudget(128)
 ): MeshData {
   const { center, size } = boxCenterSize(box)
   switch (type) {

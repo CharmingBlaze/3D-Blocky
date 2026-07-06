@@ -18,7 +18,7 @@ describe('subdivisionSurface', () => {
         64
       )!
     )
-    expect(obj.positions.length).toBeGreaterThan(8)
+    expect(obj.positions.length).toBe(8)
 
     const welded = weldSceneObjectCoincidentVertices(obj)
     expect(welded.positions.length).toBe(8)

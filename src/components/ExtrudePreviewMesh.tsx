@@ -12,20 +12,18 @@ interface ExtrudePreviewMeshProps {
 }
 
 export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshProps) {
-  const { extrudeMode, extrudeAmount, defaultDepth, brushDensity, closeThreshold, activeColor } =
-    useAppStore(
-      useShallow((s) => ({
-        extrudeMode: s.extrudeMode,
-        extrudeAmount: s.extrudeAmount,
-        defaultDepth: s.defaultDepth,
-        brushDensity: s.brushDensity,
-        closeThreshold: s.closeThreshold,
-        activeColor: s.activeColor,
-      }))
-    )
+  const { extrudeAmount, defaultDepth, brushDensity, closeThreshold, activeColor } = useAppStore(
+    useShallow((s) => ({
+      extrudeAmount: s.extrudeAmount,
+      defaultDepth: s.defaultDepth,
+      brushDensity: s.brushDensity,
+      closeThreshold: s.closeThreshold,
+      activeColor: s.activeColor,
+    }))
+  )
 
   const geometry = useMemo(() => {
-    if (!extrudeMode || points.length < 2) return null
+    if (points.length < 2) return null
     return buildExtrudePreviewGeometry(
       points,
       view,
@@ -35,16 +33,7 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       closeThreshold,
       closed
     )
-  }, [
-    extrudeMode,
-    points,
-    view,
-    defaultDepth,
-    extrudeAmount,
-    brushDensity,
-    closeThreshold,
-    closed,
-  ])
+  }, [points, view, defaultDepth, extrudeAmount, brushDensity, closeThreshold, closed])
 
   useEffect(() => () => geometry?.dispose(), [geometry])
 

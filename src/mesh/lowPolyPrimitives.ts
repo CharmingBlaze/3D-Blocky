@@ -1,4 +1,10 @@
 import { HalfEdgeMesh, type SceneObject } from './HalfEdgeMesh'
+import { meshDataToHalfEdgeMesh } from '../blob/adapters'
+import { primitiveSegmentsForBudget } from './meshPolyBudget'
+import {
+  createLowPolyCapsuleMeshData,
+  capsuleRadialSegments,
+} from '../primitives/capsuleMesh'
 import type { ViewType } from '../store/appStore'
 import { projectMeshToView } from '../stroke/worldProjection'
 import { isOrthoView } from '../primitives/viewAxes'
@@ -6,6 +12,7 @@ import type { ShapeKind } from '../vector/types'
 import {
   dragBounds,
   dragTriangle,
+  capsuleExtrusionDepth,
   extrusionDepth,
 } from '../vector/shapeDraftGeometry'
 import { generateId, type Vec2 } from '../utils/math'
@@ -26,7 +33,7 @@ export interface ShapeMeshOptions {
 }
 
 function segmentsForBudget(polyBudget: number, cap = 16): number {
-  return Math.max(4, Math.min(cap, Math.floor(Math.sqrt(polyBudget * 1.2))))
+  return Math.min(cap, primitiveSegmentsForBudget(polyBudget))
 }
 
 function sphereResolutionForBudget(polyBudget: number): {
@@ -326,7 +333,7 @@ export function generateLowPolyCone(
   return mesh
 }
 
-/** Capsule — elliptical cross-section, hemispherical caps at z = 0 and z = depth */
+/** Capsule — elliptical cross-section in the drag plane, axis along +Z (view depth after projection). */
 export function generateLowPolyCapsule(
   a: Vec2,
   b: Vec2,
@@ -334,85 +341,24 @@ export function generateLowPolyCapsule(
   color: number
 ): HalfEdgeMesh {
   const { cu, cv, rx, ry, w, h } = dragBounds(a, b)
-  const depth = extrusionDepth(w, h)
-  const r = Math.min(rx, ry)
-  const segs = Math.max(6, segments)
-  const capRings = Math.max(2, Math.floor(segs / 2))
-  const mesh = new HalfEdgeMesh()
+  const depth = capsuleExtrusionDepth(w, h)
+  const r = Math.max(1e-6, Math.min(rx, ry))
 
-  if (depth <= 2 * r) {
-    const squashed = generateLowPolySphere(a, b, Math.max(24, segs * 4), color)
-    let zMin = Infinity
-    let zMax = -Infinity
-    for (const p of squashed.positions) {
-      zMin = Math.min(zMin, p.z)
-      zMax = Math.max(zMax, p.z)
-    }
-    const zSpan = zMax - zMin || 1
-    for (const p of squashed.positions) {
-      p.z = ((p.z - zMin) / zSpan) * depth
-    }
-    return squashed
-  }
+  const data = createLowPolyCapsuleMeshData({
+    axisMin: 0,
+    axisMax: depth,
+    radius: r,
+    radialSegs: capsuleRadialSegments(segments),
+    mapPoint: (lx, axis, lz) => ({
+      x: cu + (lx / r) * rx,
+      y: cv + (lz / r) * ry,
+      z: axis,
+    }),
+    outwardCenter: { x: cu, y: cv, z: depth / 2 },
+  })
 
-  const bodyZ0 = r
-  const bodyZ1 = depth - r
-
-  const buildRing = (z: number, scale: number): number[] => {
-    const ring: number[] = []
-    for (let i = 0; i < segs; i++) {
-      const t = (i / segs) * Math.PI * 2
-      ring.push(addVertex(mesh, cu + Math.cos(t) * rx * scale, cv + Math.sin(t) * ry * scale, z))
-    }
-    return ring
-  }
-
-  const bottomRings: number[][] = []
-  for (let ri = 0; ri < capRings; ri++) {
-    const phi = (ri / capRings) * (Math.PI / 2)
-    const z = bodyZ0 - r * Math.sin(phi)
-    bottomRings.push(buildRing(z, Math.cos(phi)))
-  }
-
-  const topRings: number[][] = []
-  for (let ri = 0; ri < capRings; ri++) {
-    const phi = (ri / capRings) * (Math.PI / 2)
-    const z = bodyZ1 + r * Math.sin(phi)
-    topRings.push(buildRing(z, Math.cos(phi)))
-  }
-
-  const bottomPole = addVertex(mesh, cu, cv, 0)
-  const topPole = addVertex(mesh, cu, cv, depth)
-
-  const connectRings = (ringA: number[], ringB: number[]) => {
-    for (let i = 0; i < segs; i++) {
-      const j = (i + 1) % segs
-      pushQuad(mesh, ringA[i]!, ringB[i]!, ringB[j]!, ringA[j]!, color)
-    }
-  }
-
-  for (let ri = 0; ri < capRings - 1; ri++) {
-    connectRings(bottomRings[ri]!, bottomRings[ri + 1]!)
-  }
-  const lastBottom = bottomRings[capRings - 1]!
-  for (let i = 0; i < segs; i++) {
-    const j = (i + 1) % segs
-    pushTri(mesh, bottomPole, lastBottom[j]!, lastBottom[i]!, color)
-  }
-
-  connectRings(bottomRings[0]!, topRings[0]!)
-
-  for (let ri = 0; ri < capRings - 1; ri++) {
-    connectRings(topRings[ri]!, topRings[ri + 1]!)
-  }
-  const lastTop = topRings[capRings - 1]!
-  for (let i = 0; i < segs; i++) {
-    const j = (i + 1) % segs
-    pushTri(mesh, topPole, lastTop[i]!, lastTop[j]!, color)
-  }
-
-  mesh.buildHalfEdges()
-  return mesh
+  if (data.indices.length === 0) return new HalfEdgeMesh()
+  return meshDataToHalfEdgeMesh(data, color)
 }
 
 /** Subdivided rounded box — drag rect is the near face (z = 0), depth extends along +Z */

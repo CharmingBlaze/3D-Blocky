@@ -40,7 +40,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
     autoConnectPaths,
     vectorDocument,
     strokeMode,
-    extrudeMode,
+    penExtrudeMode,
     polyBudget,
     roundedBoxRoundness,
     roundedBoxSubdivisions,
@@ -57,7 +57,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
       autoConnectPaths: s.autoConnectPaths,
       vectorDocument: s.vectorDocument,
       strokeMode: s.strokeMode,
-      extrudeMode: s.extrudeMode,
+      penExtrudeMode: s.penExtrudeMode,
       polyBudget: s.polyBudget,
       roundedBoxRoundness: s.roundedBoxRoundness,
       roundedBoxSubdivisions: s.roundedBoxSubdivisions,
@@ -144,7 +144,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
   }, [autoConnectPaths, activeTool, vectorDocument.paths, view, defaultDepth])
 
   const showFillPreview =
-    strokeMode === 'outline' || strokeMode === 'blob' || extrudeMode
+    strokeMode === 'outline' || strokeMode === 'blob' || penExtrudeMode
 
   if (roundedBoxPreviewGeometry) {
     return (
@@ -191,7 +191,8 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
           view={view}
           depth={defaultDepth}
           showFillPreview={showFillPreview}
-          extrudeMode={extrudeMode}
+          extrudeMode={penExtrudeMode}
+          strokeMode={strokeMode}
         />
       )}
     </>

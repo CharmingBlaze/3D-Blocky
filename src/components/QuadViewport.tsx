@@ -1114,7 +1114,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         vectorGestureViewRef.current = view
         const hadPenDraft = useAppStore.getState().vectorPenDraft != null
         penPointerDown(pt, view)
-        if (useAppStore.getState().extrudeMode && !hadPenDraft) {
+        if (useAppStore.getState().penExtrudeMode && !hadPenDraft) {
           beginExtrudeDrag(e.clientX, e.clientY)
         }
         return
@@ -1136,7 +1136,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       if (DRAW_TOOLS.includes(activeTool) && view !== 'perspective') {
         strokeGestureViewRef.current = view
         startStroke(pt, view)
-        if (useAppStore.getState().extrudeMode) {
+        if (useAppStore.getState().sketchExtrudeMode) {
           beginExtrudeDrag(e.clientX, e.clientY)
         }
         return
@@ -1320,7 +1320,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         view !== 'perspective' &&
         store.vectorPenDraft?.view === view
       ) {
-        if (store.extrudeMode && store.extrudeDragAnchor) {
+        if (store.penExtrudeMode && store.extrudeDragAnchor) {
           updateExtrudeFromPointer(e.clientX, e.clientY)
         }
         const pt = getPlanePoint(e)
@@ -1364,7 +1364,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         strokeView === view &&
         store.isDrawing
       ) {
-        if (store.extrudeMode && store.extrudeDragAnchor) {
+        if (store.sketchExtrudeMode && store.extrudeDragAnchor) {
           updateExtrudeFromPointer(e.clientX, e.clientY)
         }
         if ((e.buttons & 1) === 1) {

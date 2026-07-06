@@ -1,11 +1,27 @@
 import { curvatureSampleProfile } from '../stroke/rdp'
-import { normalize3, type Vec2, type Vec3 } from '../utils/math'
+import {
+  add3,
+  cross3,
+  dot3,
+  normalize3,
+  scale3,
+  sub3,
+  type Vec2,
+  type Vec3,
+} from '../utils/math'
+import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
 
 export interface TubeOptions {
   radius: number
   radialSegments: number
   minAngleDeg?: number
+}
+
+export interface CapsuleSweepOptions extends TubeOptions {
+  closed?: boolean
+  hemiRings?: number
+  color?: number
 }
 
 function faceNormal3(mesh: HalfEdgeMesh, face: number[]): Vec3 {
@@ -85,7 +101,11 @@ function estimateTubeRadius(mesh: HalfEdgeMesh, pathStart: Vec3, pathEnd: Vec3):
 }
 
 /** Orient tube side walls and end caps outward in world space (after view projection). */
-export function orientTubeFacesOutward(mesh: HalfEdgeMesh, pathWorld: Vec3[]): void {
+export function orientTubeFacesOutward(
+  mesh: HalfEdgeMesh,
+  pathWorld: Vec3[],
+  closed = false
+): void {
   if (pathWorld.length < 2 || mesh.faces.length === 0) return
 
   const pathStart = pathWorld[0]!
@@ -118,8 +138,8 @@ export function orientTubeFacesOutward(mesh: HalfEdgeMesh, pathWorld: Vec3[]): v
 
     const distStart = dist3(center, pathStart)
     const distEnd = dist3(center, pathEnd)
-    const atStart = param < 0.15 && distStart <= endRadius * 1.25
-    const atEnd = param > pathWorld.length - 1.15 && distEnd <= endRadius * 1.25
+    const atStart = !closed && param < 0.15 && distStart <= endRadius * 1.25
+    const atEnd = !closed && param > pathWorld.length - 1.15 && distEnd <= endRadius * 1.25
 
     if (atStart && distStart <= distEnd) {
       const out = { x: -startTan.x, y: -startTan.y, z: -startTan.z }
@@ -234,6 +254,214 @@ export function generateTube(path: Vec2[], options: TubeOptions & { capped?: boo
       mesh.faces.push([endPole, endRing[next]!, endRing[si]!])
       mesh.faceColors.push(capColor)
     }
+  }
+
+  mesh.buildHalfEdges()
+  return mesh
+}
+
+interface SweepFrame {
+  center: Vec3
+  tangent: Vec3
+  normal: Vec3
+  binormal: Vec3
+}
+
+function vec2To3(p: Vec2): Vec3 {
+  return { x: p.x, y: p.y, z: 0 }
+}
+
+function rotateAroundAxis(v: Vec3, axis: Vec3, angle: number): Vec3 {
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const kxv = cross3(axis, v)
+  const kdv = dot3(axis, v)
+  return add3(add3(scale3(v, cos), scale3(kxv, sin)), scale3(axis, kdv * (1 - cos)))
+}
+
+/** Parallel-transport frames along a 3D polyline (avoids Frenet twist on bends). */
+function buildSweepFrames(curve: Vec3[], closed: boolean): SweepFrame[] {
+  const n = curve.length
+  if (n < 2) return []
+
+  const frames: SweepFrame[] = []
+  const firstTan = normalize3(sub3(curve[1]!, curve[0]!))
+  const seed: Vec3 = Math.abs(firstTan.y) < 0.99 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 }
+  let normal = normalize3(cross3(seed, firstTan))
+  let binormal = normalize3(cross3(firstTan, normal))
+  frames.push({ center: curve[0]!, tangent: firstTan, normal, binormal })
+
+  for (let i = 1; i < n; i++) {
+    const prev = frames[i - 1]!
+    const prevTan = prev.tangent
+    const nextIdx = closed && i === n - 1 ? 0 : Math.min(i + 1, n - 1)
+    const prevIdx = i === 1 ? (closed ? n - 1 : 0) : i - 1
+    const tangent = normalize3(sub3(curve[nextIdx]!, curve[prevIdx]!))
+
+    const axis = cross3(prevTan, tangent)
+    const axisLen = Math.hypot(axis.x, axis.y, axis.z)
+    let rotatedNormal = prev.normal
+    if (axisLen > 1e-6) {
+      const a = normalize3(axis)
+      const angle = Math.acos(Math.max(-1, Math.min(1, dot3(prevTan, tangent))))
+      rotatedNormal = rotateAroundAxis(rotatedNormal, a, angle)
+    }
+    normal = normalize3(sub3(rotatedNormal, scale3(tangent, dot3(rotatedNormal, tangent))))
+    binormal = normalize3(cross3(tangent, normal))
+    frames.push({ center: curve[i]!, tangent, normal, binormal })
+  }
+
+  return frames
+}
+
+function addRing(
+  mesh: HalfEdgeMesh,
+  frame: SweepFrame,
+  radius: number,
+  segments: number,
+  scale = 1
+): number[] {
+  const ring: number[] = []
+  const r = radius * scale
+  for (let si = 0; si < segments; si++) {
+    const angle = (si / segments) * Math.PI * 2
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const offset = add3(scale3(frame.normal, cos * r), scale3(frame.binormal, sin * r))
+    ring.push(mesh.positions.length)
+    mesh.positions.push(add3(frame.center, offset))
+  }
+  return ring
+}
+
+function connectRingQuads(
+  mesh: HalfEdgeMesh,
+  ringA: number[],
+  ringB: number[],
+  segments: number,
+  color: number
+): void {
+  for (let si = 0; si < segments; si++) {
+    const next = (si + 1) % segments
+    mesh.faces.push([ringA[si]!, ringA[next]!, ringB[si]!])
+    mesh.faces.push([ringA[next]!, ringB[next]!, ringB[si]!])
+    mesh.faceColors.push(color, color)
+  }
+}
+
+function fanPoleRing(
+  mesh: HalfEdgeMesh,
+  pole: number,
+  ring: number[],
+  outward: boolean,
+  color: number
+): void {
+  const segments = ring.length
+  for (let si = 0; si < segments; si++) {
+    const next = (si + 1) % segments
+    if (outward) {
+      mesh.faces.push([pole, ring[si]!, ring[next]!])
+    } else {
+      mesh.faces.push([pole, ring[next]!, ring[si]!])
+    }
+    mesh.faceColors.push(color)
+  }
+}
+
+/** Faceted hemisphere cap at an open sweep end (multi-ring, not a flat disk). */
+function appendSweepEndCap(
+  mesh: HalfEdgeMesh,
+  frame: SweepFrame,
+  equatorRing: number[],
+  radius: number,
+  segments: number,
+  hemiRings: number,
+  atStart: boolean,
+  color: number
+): void {
+  const bands = Math.max(1, hemiRings)
+  const sign = atStart ? -1 : 1
+  const pole = add3(frame.center, scale3(frame.tangent, sign * radius))
+  const poleIdx = mesh.positions.length
+  mesh.positions.push(pole)
+
+  const capRings: number[][] = []
+  for (let ri = bands - 1; ri >= 1; ri--) {
+    const t = ri / bands
+    const scale = Math.sqrt(Math.max(0, t * (2 - t)))
+    const ringCenter = add3(frame.center, scale3(frame.tangent, sign * radius * (1 - t)))
+    const capFrame: SweepFrame = { ...frame, center: ringCenter }
+    capRings.push(addRing(mesh, capFrame, radius, segments, scale))
+  }
+  capRings.push(equatorRing)
+
+  if (capRings.length > 1) {
+    fanPoleRing(mesh, poleIdx, capRings[0]!, !atStart, color)
+    for (let ri = 0; ri < capRings.length - 1; ri++) {
+      connectRingQuads(mesh, capRings[ri]!, capRings[ri + 1]!, segments, color)
+    }
+  } else {
+    fanPoleRing(mesh, poleIdx, equatorRing, !atStart, color)
+  }
+}
+
+function normalizeClosedSpine(path: Vec2[], closed: boolean): Vec2[] {
+  if (!closed || path.length < 2) return path
+  const first = path[0]!
+  const last = path[path.length - 1]!
+  if (Math.hypot(first.x - last.x, first.y - last.y) < 0.5) {
+    return path.slice(0, -1)
+  }
+  return path
+}
+
+/**
+ * Sweep a low-poly pill cross-section along a 2D path.
+ * Canonical space: path in XY, cross-section in the plane perpendicular to tangent.
+ */
+export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions): HalfEdgeMesh {
+  const {
+    radius,
+    radialSegments,
+    minAngleDeg = 15,
+    closed = false,
+    hemiRings = LOW_POLY_CAPSULE_HEMI_RINGS,
+    color = 0xf5a66e,
+  } = options
+
+  const mesh = new HalfEdgeMesh()
+  const segments = Math.max(6, Math.min(10, radialSegments))
+  if (path.length < 2 || radius < 1e-6) return mesh
+
+  const spine = normalizeClosedSpine(path, closed)
+  const sampled = curvatureSampleProfile(spine, minAngleDeg)
+  if (sampled.length < 2) return mesh
+
+  const curve = sampled.map(vec2To3)
+  const frames = buildSweepFrames(curve, closed)
+  if (frames.length < 2) return mesh
+
+  const ringVerts: number[][] = frames.map((frame) => addRing(mesh, frame, radius, segments))
+
+  const ringCount = ringVerts.length
+  for (let ri = 0; ri < ringCount - 1; ri++) {
+    connectRingQuads(mesh, ringVerts[ri]!, ringVerts[ri + 1]!, segments, color)
+  }
+
+  if (closed && ringCount > 2) {
+    connectRingQuads(mesh, ringVerts[ringCount - 1]!, ringVerts[0]!, segments, color)
+  } else if (ringCount >= 1) {
+    appendSweepEndCap(mesh, frames[0]!, ringVerts[0]!, radius, segments, hemiRings, true, color)
+    appendSweepEndCap(
+      mesh,
+      frames[ringCount - 1]!,
+      ringVerts[ringCount - 1]!,
+      radius,
+      segments,
+      hemiRings,
+      false,
+      color
+    )
   }
 
   mesh.buildHalfEdges()

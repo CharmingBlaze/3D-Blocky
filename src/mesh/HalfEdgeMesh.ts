@@ -11,6 +11,7 @@ import { defaultMaterial, cloneMaterial, type Material } from '../material/mater
 import type { CornerColor } from '../material/colorObject'
 import type { Uv2 } from '../uv/uvTypes'
 import type { SketchSource } from '../stroke/sketchSource'
+import type { VectorSource } from '../vector/vectorSource'
 
 export interface HalfEdge {
   origin: number
@@ -70,6 +71,8 @@ export interface SceneObject {
   transform?: ObjectTransform
   /** When set, mesh can be rebuilt from stroke data (sketch doodles). */
   sketchSource?: SketchSource
+  /** When set, mesh can be rebuilt from vector pen path data. */
+  vectorSource?: VectorSource
 }
 
 function emptyMesh(): SceneObject {
@@ -80,7 +83,7 @@ function emptyMesh(): SceneObject {
     faces: [],
     faceColors: [],
     topologyLocked: false,
-    polyBudget: 64,
+    polyBudget: 128,
     polyBudgetMode: 'strict',
     smoothShading: false,
     facetExaggeration: 0,
@@ -145,7 +148,7 @@ export class HalfEdgeMesh {
           ? this.faceGroups.map((g) => [...g])
           : meta.faceGroups,
       topologyLocked: this.topologyLocked,
-      polyBudget: meta.polyBudget ?? 64,
+      polyBudget: meta.polyBudget ?? 128,
       polyBudgetMode: meta.polyBudgetMode ?? 'strict',
       smoothShading: meta.smoothShading ?? false,
       facetExaggeration: meta.facetExaggeration ?? 0,
@@ -163,6 +166,23 @@ export class HalfEdgeMesh {
             ...meta.sketchSource,
             relative: meta.sketchSource.relative.map((p) => ({ ...p })),
             center: { ...meta.sketchSource.center },
+          }
+        : undefined,
+      vectorSource: meta.vectorSource
+        ? {
+            ...meta.vectorSource,
+            path: {
+              ...meta.vectorSource.path,
+              anchors: meta.vectorSource.path.anchors.map((a) => ({
+                ...a,
+                position: { ...a.position },
+                inHandle: a.inHandle ? { ...a.inHandle } : null,
+                outHandle: a.outHandle ? { ...a.outHandle } : null,
+              })),
+              shapeParams: meta.vectorSource.path.shapeParams
+                ? { ...meta.vectorSource.path.shapeParams }
+                : undefined,
+            },
           }
         : undefined,
     }

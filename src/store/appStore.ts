@@ -4,8 +4,13 @@ import { simplifyMesh } from '../mesh/simplification'
 import { punchHoleAlongLine } from '../mesh/boolean'
 import { applySculpt, type SculptTool } from '../sculpt/sculptTools'
 import { strokeToMesh, isHoleLineStroke } from '../stroke/strokeToMesh'
-import { snapSketchStrokeClosed, isSketchNearClose } from '../stroke/sketchDoodle'
-import { isSketchDoodleObject, regenerateSketchObject } from '../stroke/sketchSource'
+import {
+  snapSketchStrokeClosed,
+  isSketchNearClose,
+  prepareSketchStroke,
+} from '../stroke/sketchDoodle'
+import { isSketchDoodleObject, regenerateSketchObject, createSketchSource } from '../stroke/sketchSource'
+import { attachVectorSource, isVectorDoodleObject, regenerateVectorObject } from '../vector/vectorSource'
 import { cloneTransform, ensureTransform, localPointFromWorld, prepareSceneObject, selectionWorldCenter, worldDeltaToLocal } from '../mesh/objectTransform'
 import { ensurePositiveVolume } from '../mesh/meshWinding'
 import {
@@ -427,7 +432,8 @@ export interface AppState {
   lastPenEndpoint: { view: ViewType; position: { x: number; y: number } } | null
   lastStrokeEndpoint: { view: ViewType; position: { x: number; y: number } } | null
   lastPenClickAt: number
-  extrudeMode: boolean
+  sketchExtrudeMode: boolean
+  penExtrudeMode: boolean
   extrudeAmount: number
   extrudeDragAnchor: ExtrudeDragAnchor | null
   showGrid: boolean
@@ -1114,7 +1120,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastPenEndpoint: null,
   lastStrokeEndpoint: null,
   lastPenClickAt: 0,
-  extrudeMode: false,
+  sketchExtrudeMode: false,
+  penExtrudeMode: false,
   extrudeAmount: 16,
   extrudeDragAnchor: null,
   showGrid: true,
@@ -1140,7 +1147,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loopCutDraft: null,
   knifeDraft: null,
 
-  polyBudget: 64,
+  polyBudget: 128,
   polyBudgetMode: 'strict',
   brushDensity: 12,
   brushStrength: 0.5,
@@ -1320,7 +1327,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const extrudeSync =
         isSketchDoodleObject(obj) && obj.sketchSource.isClosed
           ? { extrudeAmount: obj.sketchSource.extrudeDepth }
-          : {}
+          : isVectorDoodleObject(obj)
+            ? { extrudeAmount: obj.vectorSource.extrudeDepth }
+            : {}
       set({
         selectedObjectId: id,
         selectionObjectIds: [id],
@@ -1340,7 +1349,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const extrudeSync =
       isSketchDoodleObject(obj) && obj.sketchSource.isClosed
         ? { extrudeAmount: obj.sketchSource.extrudeDepth }
-        : {}
+        : isVectorDoodleObject(obj)
+          ? { extrudeAmount: obj.vectorSource.extrudeDepth }
+          : {}
     set({
       selectionObjectIds: ids,
       selectedObjectId: primaryId,
@@ -1455,8 +1466,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     }))
   },
 
-  setExtrudeMode: (on) => set({ extrudeMode: on }),
-  toggleExtrudeMode: () => set((s) => ({ extrudeMode: !s.extrudeMode })),
+  setExtrudeMode: (on) =>
+    set((s) =>
+      s.drawInputMode === 'vector-pen'
+        ? { penExtrudeMode: on }
+        : { sketchExtrudeMode: on }
+    ),
+  toggleExtrudeMode: () =>
+    set((s) =>
+      s.drawInputMode === 'vector-pen'
+        ? { penExtrudeMode: !s.penExtrudeMode }
+        : { sketchExtrudeMode: !s.sketchExtrudeMode }
+    ),
   setExtrudeAmount: (amount) => {
     const state = get()
     const { selectedObjectId, selectionObjectIds, objects } = state
@@ -1464,6 +1485,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const obj = objects.find((o) => o.id === selectedObjectId)
       if (isSketchDoodleObject(obj) && obj.sketchSource.isClosed) {
         const updated = regenerateSketchObject(obj, amount)
+        if (updated) {
+          set({
+            extrudeAmount: amount,
+            objects: objects.map((o) => (o.id === obj.id ? updated : o)),
+          })
+          return
+        }
+      }
+      if (isVectorDoodleObject(obj)) {
+        const updated = regenerateVectorObject(obj, amount)
         if (updated) {
           set({
             extrudeAmount: amount,
@@ -1481,7 +1512,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   beginExtrudeDrag: (clientX, clientY) => {
-    if (!get().extrudeMode) return
+    const state = get()
+    const extrudeOn =
+      state.drawInputMode === 'vector-pen' ? state.penExtrudeMode : state.sketchExtrudeMode
+    if (!extrudeOn) return
     set({
       extrudeDragAnchor: {
         clientX,
@@ -1492,8 +1526,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateExtrudeFromPointer: (clientX, clientY) => {
-    const { extrudeMode, extrudeDragAnchor } = get()
-    if (!extrudeMode || !extrudeDragAnchor) return
+    const { extrudeDragAnchor, drawInputMode, sketchExtrudeMode, penExtrudeMode } = get()
+    const extrudeOn = drawInputMode === 'vector-pen' ? penExtrudeMode : sketchExtrudeMode
+    if (!extrudeOn || !extrudeDragAnchor) return
     const dx = clientX - extrudeDragAnchor.clientX
     const dy = extrudeDragAnchor.clientY - clientY
     get().setExtrudeAmount(
@@ -1831,7 +1866,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       closeThreshold,
       defaultDepth,
       facetExaggeration,
-      extrudeMode,
+      penExtrudeMode,
       extrudeAmount,
     } = get()
 
@@ -1845,14 +1880,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       defaultDepth,
       color: path.color,
       stylize: facetExaggeration,
-      extrudeMode,
+      extrudeMode: penExtrudeMode,
       extrudeAmount,
     })
 
     const pathWithObject = { ...path, objectId: obj?.id }
 
-    if (obj) {
-      get().addObject(obj, { skipHistory: options?.skipHistory, skipSymmetry: options?.skipSymmetry })
+    const objToAdd =
+      obj && path.source === 'pen'
+        ? attachVectorSource(obj, {
+            path: pathWithObject,
+            strokeMode: penExtrudeMode ? 'outline' : strokeMode,
+            extrudeMode: penExtrudeMode,
+            brushDensity,
+            rdpTolerance,
+            closeThreshold,
+            defaultDepth,
+            stylize: facetExaggeration,
+            extrudeDepth: extrudeAmount,
+          })
+        : obj
+
+    if (objToAdd) {
+      get().addObject(objToAdd, { skipHistory: options?.skipHistory, skipSymmetry: options?.skipSymmetry })
     }
 
     set((s) => ({
@@ -2941,7 +2991,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           case 'extrude': {
             get().penCancelPath()
             set({
-              extrudeMode: true,
+              sketchExtrudeMode: true,
               drawInputMode: 'regular',
               activeTool: 'draw',
               toolCategory: 'draw',
@@ -5012,7 +5062,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedObjectId,
       objects,
       facetExaggeration,
-      extrudeMode,
+      sketchExtrudeMode,
       extrudeAmount,
     } = get()
 
@@ -5039,7 +5089,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       defaultDepth,
       color: activeColor,
       stylize: facetExaggeration,
-      extrudeMode,
+      extrudeMode: sketchExtrudeMode,
       extrudeAmount,
     }
 
@@ -5074,6 +5124,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     let obj = strokeToMesh(strokeInput)
+
+    if (obj && sketchExtrudeMode) {
+      const prepared = prepareSketchStroke(snappedStroke, closeThreshold, brushDensity)
+      if (prepared) {
+        obj = {
+          ...obj,
+          sketchSource: createSketchSource(
+            prepared.relative,
+            prepared.center,
+            view,
+            brushDensity,
+            polyBudget,
+            closeThreshold,
+            defaultDepth,
+            prepared.isClosed,
+            prepared.isClosed ? 'sharp' : 'path',
+            extrudeAmount
+          ),
+        }
+      }
+    }
 
     const lastPt = currentStroke[currentStroke.length - 1]
 

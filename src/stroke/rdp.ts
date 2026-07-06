@@ -75,16 +75,26 @@ export function curvatureSampleClosedLoop(
   minAngleDeg: number,
   maxPoints?: number
 ): Vec2[] {
-  if (loop.length <= 3) return [...loop]
+  let working = [...loop]
+  if (working.length >= 2) {
+    const first = working[0]!
+    const last = working[working.length - 1]!
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.01) {
+      working = working.slice(0, -1)
+    }
+  }
+  if (working.length <= 3) {
+    return capClosedLoopPoints(working, maxPoints)
+  }
 
   const minAngle = (minAngleDeg * Math.PI) / 180
-  const n = loop.length
+  const n = working.length
   const result: Vec2[] = []
 
   for (let i = 0; i < n; i++) {
-    const prev = loop[(i + n - 1) % n]
-    const curr = loop[i]
-    const next = loop[(i + 1) % n]
+    const prev = working[(i + n - 1) % n]!
+    const curr = working[i]!
+    const next = working[(i + 1) % n]!
 
     const v1 = { x: curr.x - prev.x, y: curr.y - prev.y }
     const v2 = { x: next.x - curr.x, y: next.y - curr.y }
@@ -95,33 +105,37 @@ export function curvatureSampleClosedLoop(
     const dot = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2)
     const angle = Math.acos(Math.max(-1, Math.min(1, dot)))
 
-    if (i === 0 || angle > minAngle) {
+    if (angle > minAngle) {
       result.push(curr)
     }
   }
 
-  if (result.length < 3) return [...loop]
-
-  if (maxPoints && result.length > maxPoints) {
-    const scored = result.map((p, i) => {
-      const prevPt = result[(i + result.length - 1) % result.length]
-      const nextPt = result[(i + 1) % result.length]
-      const v1 = { x: p.x - prevPt.x, y: p.y - prevPt.y }
-      const v2 = { x: nextPt.x - p.x, y: nextPt.y - p.y }
-      const len1 = Math.hypot(v1.x, v1.y)
-      const len2 = Math.hypot(v2.x, v2.y)
-      let score = 0
-      if (len1 > 1e-10 && len2 > 1e-10) {
-        const dot = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2)
-        score = Math.acos(Math.max(-1, Math.min(1, dot)))
-      }
-      return { i, score }
-    })
-    scored.sort((a, b) => b.score - a.score)
-    const keep = new Set<number>()
-    for (const s of scored.slice(0, maxPoints)) keep.add(s.i)
-    return result.filter((_, i) => keep.has(i))
+  if (result.length < 3) {
+    return capClosedLoopPoints(working, maxPoints)
   }
 
-  return result
+  return capClosedLoopPoints(result, maxPoints)
+}
+
+function capClosedLoopPoints(points: Vec2[], maxPoints?: number): Vec2[] {
+  if (!maxPoints || points.length <= maxPoints) return [...points]
+
+  const scored = points.map((p, i) => {
+    const prevPt = points[(i + points.length - 1) % points.length]!
+    const nextPt = points[(i + 1) % points.length]!
+    const v1 = { x: p.x - prevPt.x, y: p.y - prevPt.y }
+    const v2 = { x: nextPt.x - p.x, y: nextPt.y - p.y }
+    const len1 = Math.hypot(v1.x, v1.y)
+    const len2 = Math.hypot(v2.x, v2.y)
+    let score = 0
+    if (len1 > 1e-10 && len2 > 1e-10) {
+      const dot = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2)
+      score = Math.acos(Math.max(-1, Math.min(1, dot)))
+    }
+    return { i, score }
+  })
+  scored.sort((a, b) => b.score - a.score)
+  const keep = new Set<number>()
+  for (const s of scored.slice(0, maxPoints)) keep.add(s.i)
+  return points.filter((_, i) => keep.has(i))
 }
