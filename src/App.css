@@ -1973,137 +1973,372 @@
 /* UV Editor */
 .uv-editor {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   min-height: 0;
 }
 
-.uv-editor-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-}
-
-.uv-editor-texture-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 180px;
-}
-
-.uv-editor-texture-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.uv-texture-select {
+.uv-editor-main {
   flex: 1;
   min-width: 0;
-  max-width: 280px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.uv-editor-shortcuts {
-  padding: 4px 10px;
-  font-size: 10px;
+.uv-sidebar {
+  flex: 0 0 188px;
+  width: 188px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-dark);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.uv-sidebar-section {
+  padding: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.uv-sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.uv-sidebar-section-head {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-  line-height: 1.35;
+  margin-bottom: 8px;
 }
 
-.uv-tool-btn:disabled {
-  opacity: 0.4;
+.uv-sidebar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.uv-sidebar-stack-spaced {
+  margin-top: 8px;
+}
+
+.uv-sidebar-control {
+  width: 100%;
+}
+
+.uv-btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  width: 100%;
+}
+
+.uv-btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+.uv-segment-block {
+  display: flex;
+  width: 100%;
+}
+
+.uv-segment-block .uv-segment-btn {
+  flex: 1;
+  text-align: center;
+}
+
+.uv-toggle-block {
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.uv-toggle-block:hover {
+  border-color: var(--border);
+  background: var(--bg-panel);
+}
+
+.uv-field-block {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.uv-field-block .uv-num-input {
+  flex: 1;
+  max-width: 72px;
+  margin-left: auto;
+}
+
+/* Portal dropdown (not clipped by floating panel) */
+.uv-dropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.uv-sidebar .uv-dropdown-trigger {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 4px;
+  padding: 6px 8px;
+}
+
+.uv-sidebar .uv-dropdown-label {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.uv-sidebar .uv-dropdown-value {
+  grid-column: 1;
+  width: auto;
+}
+
+.uv-sidebar .uv-dropdown-chevron {
+  grid-column: 2;
+  grid-row: 2;
+  margin-left: 0;
+}
+
+.uv-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.uv-dropdown-trigger:hover:not(:disabled),
+.uv-dropdown-trigger.open {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-panel) 88%, var(--accent-soft));
+}
+
+.uv-dropdown-trigger:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.uv-editor-mode-group {
+.uv-dropdown-label {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.uv-dropdown-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.uv-dropdown-chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.uv-dropdown-menu {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  max-height: min(280px, 50vh);
+  overflow-y: auto;
+}
+
+.uv-dropdown-item {
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uv-dropdown-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.uv-dropdown-item.active {
+  background: color-mix(in srgb, var(--accent-soft) 80%, var(--bg-hover));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.uv-dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.uv-segment {
   display: inline-flex;
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
+  background: var(--bg-panel);
 }
 
-.uv-mode-btn {
-  padding: 4px 10px;
+.uv-segment-btn {
+  padding: 6px 8px;
   border: none;
-  background: var(--bg-hover);
+  background: transparent;
   color: var(--text-muted);
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
 }
 
-.uv-mode-btn + .uv-mode-btn {
+.uv-segment-btn + .uv-segment-btn {
   border-left: 1px solid var(--border);
 }
 
-.uv-mode-btn.active {
-  background: rgba(110, 203, 245, 0.2);
+.uv-segment-btn.active {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.uv-mode-btn:hover:not(.active) {
+.uv-segment-btn:hover:not(.active) {
   color: var(--text);
-}
-
-.uv-editor-hint {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.uv-editor-import {
-  padding: 4px 10px;
-  border-radius: 6px;
   background: var(--bg-hover);
-  border: 1px solid var(--border);
-  font-size: 11px;
-  cursor: pointer;
 }
 
-.uv-tool-btn {
-  padding: 4px 8px;
+.uv-btn {
+  padding: 6px 8px;
   border-radius: 6px;
-  background: var(--bg-hover);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.uv-tool-btn:hover {
+.uv-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.uv-editor-toggle {
+.uv-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.uv-btn-primary {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--bg-panel));
+}
+
+.uv-btn-primary:hover {
+  background: var(--accent-soft);
+}
+
+.uv-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.uv-toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.uv-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.uv-grid-input {
-  width: 44px;
-  padding: 2px 4px;
-  border-radius: 4px;
+.uv-field-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.uv-field-suffix {
+  font-size: 11px;
+}
+
+.uv-num-input {
+  width: 48px;
+  padding: 5px 6px;
+  border-radius: 5px;
   border: 1px solid var(--border);
-  background: var(--bg-dark);
+  background: var(--bg-panel);
   color: var(--text);
   font-size: 11px;
 }
 
-.uv-editor-meta {
-  padding: 4px 10px;
-  font-size: 10px;
-  color: var(--text-muted);
+.uv-num-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.uv-editor-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  flex-shrink: 0;
+}
+
+.uv-editor-status-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.uv-editor-status-hint {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 .uv-editor-canvas-wrap {
@@ -2903,25 +3138,6 @@
   background: var(--bg-hover);
   color: var(--text);
   cursor: pointer;
-}
-
-.uv-unwrap-select,
-.uv-snap-select {
-  min-width: 108px;
-  max-width: 140px;
-}
-
-.uv-tool-btn-primary {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.uv-editor-angle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .side-color-hint.warn {

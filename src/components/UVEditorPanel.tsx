@@ -41,8 +41,9 @@ import {
   type UvSnapContext,
   type UvSnapMode,
 } from '../uv/uvSnap'
-import { UV_UNWRAP_METHODS, type UvUnwrapMethod } from '../uv/uvUnwrap'
+import { type UvUnwrapMethod } from '../uv/uvUnwrap'
 import type { Uv2 } from '../uv/uvTypes'
+import { UvEditorToolbar } from './uv/UvEditorToolbar'
 
 const CHECKER = 16
 const HANDLE_SIZE = 7
@@ -2005,8 +2006,8 @@ export function UVEditorPanel() {
       title="UV Editor"
       open={uvEditorOpen}
       state={uvEditorPanel}
-      minWidth={360}
-      minHeight={320}
+      minWidth={560}
+      minHeight={360}
       onClose={() => setUvEditorOpen(false)}
       onStateChange={setUvEditorPanel}
     >
@@ -2015,254 +2016,81 @@ export function UVEditorPanel() {
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
       >
-        <div className="uv-editor-toolbar">
-          {objectId && (
-            <label
-              className="uv-editor-texture-select"
-              title="Scene textures — pick an atlas shared by any number of objects"
-            >
-              <span className="uv-editor-texture-label">Texture</span>
-              <select
-                className="shape-kind-select side-select uv-texture-select"
-                value={activeTextureId ?? ''}
-                onChange={(e) => {
-                  const id = e.target.value
-                  if (id) assignObjectTextureDocument(objectId, id)
-                }}
-                disabled={sceneTextures.length === 0}
-              >
-                {sceneTextures.length === 0 ? (
-                  <option value="">No textures — import one</option>
-                ) : (
-                  <>
-                    {!activeTextureId && <option value="">Select texture…</option>}
-                    {sceneTextures.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.label}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-            </label>
-          )}
-          <div className="uv-editor-mode-group">
-            <button
-              type="button"
-              className={`uv-mode-btn ${uvEditorMode === 'points' ? 'active' : ''}`}
-              onClick={() => setUvEditorMode('points')}
-              title="Select and move UV points"
-            >
-              Points
-            </button>
-            <button
-              type="button"
-              className={`uv-mode-btn ${uvEditorMode === 'faces' ? 'active' : ''}`}
-              onClick={() => setUvEditorMode('faces')}
-              title="Select and move UV face islands"
-            >
-              Faces
-            </button>
+        <UvEditorToolbar
+          objectId={objectId}
+          obj={obj}
+          sceneTextures={sceneTextures}
+          activeTextureId={activeTextureId}
+          uvEditorMode={uvEditorMode}
+          uvEditorSnap={uvEditorSnap}
+          uvEditorSnapMode={uvEditorSnapMode}
+          uvEditorSmartUvAngle={uvEditorSmartUvAngle}
+          uvEditorShowGrid={uvEditorShowGrid}
+          uvEditorTilePreview={uvEditorTilePreview}
+          uvEditorViewAll={uvEditorViewAll}
+          uvEditorAutoFit={uvEditorAutoFit}
+          uvEditorSticky={uvEditorSticky}
+          uvEditorGridDivisions={uvEditorGridDivisions}
+          unwrapMethod={unwrapMethod}
+          onImport={onImport}
+          onAssignTexture={(id) => assignObjectTextureDocument(objectId!, id)}
+          onSetUvEditorMode={setUvEditorMode}
+          onSetMappingMode={(mode) => objectId && setObjectUvMappingMode(objectId, mode)}
+          onTransform={(op) => transformSelectedUvIslands(op)}
+          onUnwrap={unwrapSelectedUvFaces}
+          onSetUnwrapMethod={setUnwrapMethod}
+          onSetSmartUvAngle={setUvEditorSmartUvAngle}
+          onFrameSelection={frameSelection}
+          onSetAutoFit={setUvEditorAutoFit}
+          onSetSticky={setUvEditorSticky}
+          onSetViewAll={setUvEditorViewAll}
+          onSetShowGrid={setUvEditorShowGrid}
+          onSetSnap={setUvEditorSnap}
+          onSetSnapMode={setUvEditorSnapMode}
+          onSetTilePreview={setUvEditorTilePreview}
+          onSetGridDivisions={setUvEditorGridDivisions}
+        />
+
+        <div className="uv-editor-main">
+          <div className="uv-editor-status">
+            {(texture || pixelDoc) && (
+              <span className="uv-editor-status-text">
+                {pixelDoc ? 'Pixel texture' : texture!.name} · {texW}×{texH}px
+              </span>
+            )}
+            <span className="uv-editor-status-hint">
+              {uvEditorMode === 'faces'
+                ? uvEditorViewAll
+                  ? 'Full atlas view'
+                  : 'Face island edit'
+                : 'Point edit'}
+              {' · Scroll zoom · Space pan · F frame'}
+            </span>
           </div>
-          {obj && objectId && (
-            <div className="uv-editor-mode-group" title="UV mapping mode">
-              <button
-                type="button"
-                className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'perFace' ? 'active' : ''}`}
-                onClick={() => setObjectUvMappingMode(objectId, 'perFace')}
-                title="Per-face planar UV (scale-correct per face)"
-              >
-                Per-Face
-              </button>
-              <button
-                type="button"
-                className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'box' ? 'active' : ''}`}
-                onClick={() => setObjectUvMappingMode(objectId, 'box')}
-                title="Box UV — each face maps to a full 0–1 square"
-              >
-                Box UV
-              </button>
-            </div>
-          )}
-          <button type="button" className="uv-tool-btn" onClick={() => void onImport()}>
-            Import…
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')}>
-            Flip H
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipV')}>
-            Flip V
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCW')}>
-            Rot 90°
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCCW')}>
-            Rot −90°
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('fit')}>
-            Fit
-          </button>
-          <select
-            className="shape-kind-select side-select uv-unwrap-select"
-            value={unwrapMethod}
-            onChange={(e) => setUnwrapMethod(e.target.value as UvUnwrapMethod)}
-            title="Unwrap method"
-          >
-            {UV_UNWRAP_METHODS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="uv-tool-btn uv-tool-btn-primary"
-            onClick={() => unwrapSelectedUvFaces(unwrapMethod)}
-            title={
-              UV_UNWRAP_METHODS.find((m) => m.id === unwrapMethod)?.hint ??
-              'Unwrap selected faces (or all if none selected)'
-            }
-          >
-            Unwrap
-          </button>
-          {(unwrapMethod === 'smart' || unwrapMethod === 'auto') && (
-            <label className="uv-editor-angle" title="Smart UV angle limit (degrees)">
-              °
-              <input
-                className="uv-grid-input"
-                type="number"
-                min={1}
-                max={180}
-                value={uvEditorSmartUvAngle}
-                onChange={(e) => setUvEditorSmartUvAngle(Number(e.target.value))}
-              />
-            </label>
-          )}
-          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Mirror UV horizontally">
-            Mirror
-          </button>
-          <button type="button" className="uv-tool-btn" onClick={frameSelection} title="Frame view (F · double-click)">
-            Frame
-          </button>
-          <label className="uv-editor-toggle" title="When selecting a face, pan/zoom to it only if it is off-screen. Manual pan and zoom are kept otherwise.">
-            <input
-              type="checkbox"
-              checked={uvEditorAutoFit}
-              onChange={(e) => setUvEditorAutoFit(e.target.checked)}
-            />
-            Auto fit
-          </label>
-          <label
-            className="uv-editor-toggle"
-            title="When on, coplanar faces move together. When off, each face breaks away on move."
-          >
-            <input
-              type="checkbox"
-              checked={uvEditorSticky}
-              onChange={(e) => setUvEditorSticky(e.target.checked)}
-            />
-            Sticky
-          </label>
-          <button
-            type="button"
-            className={`uv-tool-btn ${uvEditorViewAll ? 'active' : ''}`}
-            onClick={() => setUvEditorViewAll(!uvEditorViewAll)}
-            title="Show all UV islands in the atlas (Blockbench UV window)"
-          >
-            All
-          </button>
-          <label className="uv-editor-toggle">
-            <input
-              type="checkbox"
-              checked={uvEditorShowGrid}
-              onChange={(e) => setUvEditorShowGrid(e.target.checked)}
-            />
-            Grid
-          </label>
-          <label className="uv-editor-toggle">
-            <input type="checkbox" checked={uvEditorSnap} onChange={(e) => setUvEditorSnap(e.target.checked)} />
-            Snap
-          </label>
-          <select
-            className="shape-kind-select side-select uv-snap-select"
-            value={uvEditorSnapMode}
-            disabled={!uvEditorSnap}
-            onChange={(e) => setUvEditorSnapMode(e.target.value as UvSnapMode)}
-            title={
-              uvEditorMode === 'faces'
-                ? 'Island snap aligns selected faces to other UV islands'
-                : 'Vertex snap aligns points to other UV vertices'
-            }
-          >
-            <option value="grid">Grid</option>
-            <option value="vertex">Vertices</option>
-            <option value="island">Islands</option>
-          </select>
-          <label className="uv-editor-toggle" title="3×3 tiled texture preview">
-            <input
-              type="checkbox"
-              checked={uvEditorTilePreview}
-              onChange={(e) => setUvEditorTilePreview(e.target.checked)}
-            />
-            Tile
-          </label>
-          <input
-            className="uv-grid-input"
-            type="number"
-            min={1}
-            max={64}
-            value={uvEditorGridDivisions}
-            onChange={(e) => setUvEditorGridDivisions(Number(e.target.value))}
-            title="Grid divisions"
-          />
-        </div>
 
-        <div className="uv-editor-shortcuts">
-          <span>
-            {uvEditorMode === 'faces'
-              ? uvEditorViewAll
-                ? 'All islands: full packed atlas · toggle All off to focus selection'
-                : 'Selected face(s) only · All = full atlas · Unwrap repacks islands'
-              : 'Points: drag handles · Snap to verts/grid'}
-            {' · Scroll zoom · Space/middle pan · Alt+click reposition · F frame'}
-          </span>
-        </div>
-
-        {(texture || pixelDoc) && (
-          <div className="uv-editor-meta">
-            {pixelDoc ? 'Pixel texture' : texture!.name} — {texW}×{texH}px
-            <span className="uv-editor-hint"> · Shift+click toggle region · Ctrl+drag box-select</span>
+          <div
+            ref={containerRef}
+            className="uv-editor-canvas-wrap"
+            style={{ cursor: hoverCursor }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerLeave={(e) => {
+              if (dragRef.current?.kind === 'pan') {
+                onPointerUp(e)
+                return
+              }
+              hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
+              setHoverCursor('crosshair')
+              scheduleRedraw()
+            }}
+            onAuxClick={(e) => e.preventDefault()}
+          >
+            <canvas ref={canvasRef} className="uv-editor-canvas" />
+            {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
           </div>
-        )}
-        {!texture && (
-          <div className="uv-editor-meta uv-editor-hint">
-            Shift+click toggle planar region · Ctrl+drag box-select · Alt+click move selection to cursor
-          </div>
-        )}
 
-        <div
-          ref={containerRef}
-          className="uv-editor-canvas-wrap"
-          style={{ cursor: hoverCursor }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={(e) => {
-            if (dragRef.current?.kind === 'pan') {
-              onPointerUp(e)
-              return
-            }
-            hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
-            setHoverCursor('crosshair')
-            scheduleRedraw()
-          }}
-          onAuxClick={(e) => e.preventDefault()}
-        >
-          <canvas ref={canvasRef} className="uv-editor-canvas" />
-          {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
-        </div>
-
-        <div className="uv-editor-precision">
+          <div className="uv-editor-precision">
           <div className="uv-precision-group">
             <span className="uv-precision-label">Point (px)</span>
             <label>
@@ -2349,6 +2177,7 @@ export function UVEditorPanel() {
               />
             </label>
           </div>
+        </div>
         </div>
       </div>
     </FloatingPanel>

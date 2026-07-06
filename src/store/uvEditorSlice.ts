@@ -103,7 +103,7 @@ export type UvEditorSlice = UvEditorLayoutState & UvEditorLayoutActions
 
 export const uvEditorInitialState: UvEditorLayoutState = {
   uvEditorOpen: false,
-  uvEditorPanel: { x: 80, y: 80, width: 520, height: 560, minimized: false },
+  uvEditorPanel: { x: 80, y: 80, width: 680, height: 620, minimized: false },
   uvEditorGridDivisions: 16,
   uvEditorSnap: false,
   uvEditorSnapMode: 'vertex',
