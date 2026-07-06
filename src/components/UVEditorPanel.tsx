@@ -281,6 +281,19 @@ export function UVEditorPanel() {
   }>({ face: null, point: null, cursor: 'crosshair' })
   const [hoverCursor, setHoverCursor] = useState('crosshair')
   const [uvEditorDisplayMode, setUvEditorDisplayMode] = useState<'polys' | 'tris' | 'regions'>('regions')
+  const [activeMenu, setActiveMenu] = useState<'transform' | 'unwrap' | 'view' | null>(null)
+
+  useEffect(() => {
+    if (!activeMenu) return
+    const handleOutsideClick = (e: PointerEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.uv-dropdown-container')) {
+        setActiveMenu(null)
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsideClick)
+    return () => document.removeEventListener('pointerdown', handleOutsideClick)
+  }, [activeMenu])
 
   const {
     uvEditorOpen,
@@ -2100,244 +2113,269 @@ export function UVEditorPanel() {
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
       >
-        <div className="uv-editor-toolbar">
-          <div className="uv-toolbar-row">
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Texture</span>
-              {objectId && (
-                <select
-                  className="shape-kind-select side-select uv-texture-select"
-                  value={activeTextureId ?? ''}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    if (id) assignObjectTextureDocument(objectId, id)
-                  }}
-                  disabled={sceneTextures.length === 0}
-                  title="Scene textures — pick an atlas shared by any number of objects"
-                >
-                  {sceneTextures.length === 0 ? (
-                    <option value="">No textures — import one</option>
-                  ) : (
-                    <>
-                      {!activeTextureId && <option value="">Select texture…</option>}
-                      {sceneTextures.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.label}
-                        </option>
-                      ))}
-                    </>
-                  )}
-                </select>
-              )}
-              <button type="button" className="uv-tool-btn" onClick={() => void onImport()} title="Import a new texture image">
-                Import…
-              </button>
-            </div>
+        <div className="uv-editor-toolbar-single">
+          {/* Select Mode */}
+          <div className="uv-editor-mode-group">
+            <button
+              type="button"
+              className={`uv-mode-btn ${uvEditorMode === 'points' ? 'active' : ''}`}
+              onClick={() => setUvEditorMode('points')}
+              title="Select and move UV points"
+            >
+              Points
+            </button>
+            <button
+              type="button"
+              className={`uv-mode-btn ${uvEditorMode === 'faces' ? 'active' : ''}`}
+              onClick={() => setUvEditorMode('faces')}
+              title="Select and move UV face islands"
+            >
+              Faces
+            </button>
+          </div>
 
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Selection</span>
+          <div className="uv-toolbar-divider" />
+
+          {/* Display Mode */}
+          <select
+            className="shape-kind-select side-select uv-display-select-compact"
+            value={uvEditorDisplayMode}
+            onChange={(e) => setUvEditorDisplayMode(e.target.value as any)}
+            title="UV Display mode: Regions, Polys, or Triangles"
+          >
+            <option value="regions">Regions</option>
+            <option value="polys">Quads/Polys</option>
+            <option value="tris">Triangles</option>
+          </select>
+
+          <button
+            type="button"
+            className={`uv-tool-btn compact-btn ${uvEditorViewAll ? 'active' : ''}`}
+            onClick={() => setUvEditorViewAll(!uvEditorViewAll)}
+            title="Show all UV islands (All)"
+          >
+            All
+          </button>
+
+          <label
+            className="uv-editor-toggle compact-toggle"
+            title="Sticky selection: adjacent coplanar faces move together"
+          >
+            <input
+              type="checkbox"
+              checked={uvEditorSticky}
+              onChange={(e) => setUvEditorSticky(e.target.checked)}
+            />
+            Sticky
+          </label>
+
+          {obj && objectId && (
+            <>
+              <div className="uv-toolbar-divider" />
               <div className="uv-editor-mode-group">
                 <button
                   type="button"
-                  className={`uv-mode-btn ${uvEditorMode === 'points' ? 'active' : ''}`}
-                  onClick={() => setUvEditorMode('points')}
-                  title="Select and move UV points"
+                  className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'perFace' ? 'active' : ''}`}
+                  onClick={() => setObjectUvMappingMode(objectId, 'perFace')}
+                  title="Per-Face Mapping"
                 >
-                  Points
+                  Per-Face
                 </button>
                 <button
                   type="button"
-                  className={`uv-mode-btn ${uvEditorMode === 'faces' ? 'active' : ''}`}
-                  onClick={() => setUvEditorMode('faces')}
-                  title="Select and move UV face islands"
+                  className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'box' ? 'active' : ''}`}
+                  onClick={() => setObjectUvMappingMode(objectId, 'box')}
+                  title="Box UV Mapping"
                 >
-                  Faces
+                  Box UV
                 </button>
               </div>
-              <button
-                type="button"
-                className={`uv-tool-btn ${uvEditorViewAll ? 'active' : ''}`}
-                onClick={() => setUvEditorViewAll(!uvEditorViewAll)}
-                title="Show all UV islands in the atlas (Blockbench UV window)"
-              >
-                All
-              </button>
-              <label
-                className="uv-editor-toggle"
-                title="When on, coplanar faces move together. When off, each face breaks away on move."
-              >
-                <input
-                  type="checkbox"
-                  checked={uvEditorSticky}
-                  onChange={(e) => setUvEditorSticky(e.target.checked)}
-                />
-                Sticky
-              </label>
-            </div>
+            </>
+          )}
 
-            {obj && objectId && (
-              <div className="uv-toolbar-group">
-                <span className="uv-group-label">Mapping</span>
-                <div className="uv-editor-mode-group" title="UV mapping mode">
-                  <button
-                    type="button"
-                    className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'perFace' ? 'active' : ''}`}
-                    onClick={() => setObjectUvMappingMode(objectId, 'perFace')}
-                    title="Per-face planar UV (scale-correct per face)"
-                  >
-                    Per-Face
-                  </button>
-                  <button
-                    type="button"
-                    className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'box' ? 'active' : ''}`}
-                    onClick={() => setObjectUvMappingMode(objectId, 'box')}
-                    title="Box UV — each face maps to a full 0–1 square"
-                  >
-                    Box UV
-                  </button>
-                </div>
+          <div className="uv-toolbar-divider" />
+
+          {/* Transform Dropdown */}
+          <div className="uv-dropdown-container">
+            <button
+              type="button"
+              className={`uv-dropdown-trigger ${activeMenu === 'transform' ? 'active' : ''}`}
+              onClick={() => setActiveMenu(activeMenu === 'transform' ? null : 'transform')}
+            >
+              Transform ▾
+            </button>
+            {activeMenu === 'transform' && (
+              <div className="uv-dropdown-menu">
+                <button type="button" onClick={() => { transformSelectedUvIslands('flipH'); setActiveMenu(null); }}>Flip Horizontal</button>
+                <button type="button" onClick={() => { transformSelectedUvIslands('flipV'); setActiveMenu(null); }}>Flip Vertical</button>
+                <button type="button" onClick={() => { transformSelectedUvIslands('rotateCW'); setActiveMenu(null); }}>Rotate 90° CW</button>
+                <button type="button" onClick={() => { transformSelectedUvIslands('rotateCCW'); setActiveMenu(null); }}>Rotate 90° CCW</button>
+                <button type="button" onClick={() => { transformSelectedUvIslands('fit'); setActiveMenu(null); }}>Fit UV Area</button>
+                <button type="button" onClick={() => { transformSelectedUvIslands('flipH'); setActiveMenu(null); }}>Mirror UV</button>
+                <button type="button" onClick={() => { frameSelection(); setActiveMenu(null); }}>Frame Selection (F)</button>
               </div>
             )}
           </div>
 
-          <div className="uv-toolbar-row">
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Transform</span>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Flip horizontally">
-                Flip H
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipV')} title="Flip vertically">
-                Flip V
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCW')} title="Rotate 90° clockwise">
-                Rot 90°
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCCW')} title="Rotate 90° counter-clockwise">
-                Rot −90°
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('fit')} title="Fit selected face UVs to fill 0-1 texture area">
-                Fit
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Mirror UV horizontally">
-                Mirror
-              </button>
-              <button type="button" className="uv-tool-btn" onClick={frameSelection} title="Frame view (F · double-click)">
-                Frame
-              </button>
-            </div>
+          {/* Unwrap Dropdown */}
+          <div className="uv-dropdown-container">
+            <button
+              type="button"
+              className={`uv-dropdown-trigger ${activeMenu === 'unwrap' ? 'active' : ''}`}
+              onClick={() => setActiveMenu(activeMenu === 'unwrap' ? null : 'unwrap')}
+            >
+              Unwrap ▾
+            </button>
+            {activeMenu === 'unwrap' && (
+              <div className="uv-dropdown-menu uv-dropdown-menu-wide">
+                <div className="uv-dropdown-form-row">
+                  <label>Method:</label>
+                  <select
+                    className="shape-kind-select side-select"
+                    value={unwrapMethod}
+                    onChange={(e) => setUnwrapMethod(e.target.value as UvUnwrapMethod)}
+                  >
+                    {UV_UNWRAP_METHODS.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {(unwrapMethod === 'smart' || unwrapMethod === 'auto') && (
+                  <div className="uv-dropdown-form-row">
+                    <label>Angle Limit:</label>
+                    <input
+                      className="uv-grid-input"
+                      type="number"
+                      min={1}
+                      max={180}
+                      value={uvEditorSmartUvAngle}
+                      onChange={(e) => setUvEditorSmartUvAngle(Number(e.target.value))}
+                    />
+                    <span>°</span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="uv-tool-btn uv-tool-btn-primary"
+                  onClick={() => { unwrapSelectedUvFaces(unwrapMethod); setActiveMenu(null); }}
+                  style={{ marginTop: '8px', width: '100%' }}
+                >
+                  Run Unwrap
+                </button>
+              </div>
+            )}
+          </div>
 
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Unwrap</span>
-              <select
-                className="shape-kind-select side-select uv-unwrap-select"
-                value={unwrapMethod}
-                onChange={(e) => setUnwrapMethod(e.target.value as UvUnwrapMethod)}
-                title="Unwrap method"
-              >
-                {UV_UNWRAP_METHODS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="uv-tool-btn uv-tool-btn-primary"
-                onClick={() => unwrapSelectedUvFaces(unwrapMethod)}
-                title={
-                  UV_UNWRAP_METHODS.find((m) => m.id === unwrapMethod)?.hint ??
-                  'Unwrap selected faces (or all if none selected)'
-                }
-              >
-                Unwrap
-              </button>
-              {(unwrapMethod === 'smart' || unwrapMethod === 'auto') && (
-                <label className="uv-editor-angle" title="Smart UV angle limit (degrees)">
-                  °
+          {/* View / Grid Dropdown */}
+          <div className="uv-dropdown-container">
+            <button
+              type="button"
+              className={`uv-dropdown-trigger ${activeMenu === 'view' ? 'active' : ''}`}
+              onClick={() => setActiveMenu(activeMenu === 'view' ? null : 'view')}
+            >
+              Grid & View ▾
+            </button>
+            {activeMenu === 'view' && (
+              <div className="uv-dropdown-menu uv-dropdown-menu-wide">
+                <label className="uv-dropdown-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={uvEditorShowGrid}
+                    onChange={(e) => setUvEditorShowGrid(e.target.checked)}
+                  />
+                  <span>Show Grid</span>
+                </label>
+                <div className="uv-dropdown-form-row">
+                  <label>Grid Divisions:</label>
                   <input
                     className="uv-grid-input"
                     type="number"
                     min={1}
-                    max={180}
-                    value={uvEditorSmartUvAngle}
-                    onChange={(e) => setUvEditorSmartUvAngle(Number(e.target.value))}
+                    max={64}
+                    value={uvEditorGridDivisions}
+                    onChange={(e) => setUvEditorGridDivisions(Number(e.target.value))}
                   />
+                </div>
+                <div className="uv-dropdown-divider" />
+                <label className="uv-dropdown-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={uvEditorSnap}
+                    onChange={(e) => setUvEditorSnap(e.target.checked)}
+                  />
+                  <span>Enable Snapping</span>
                 </label>
+                <div className="uv-dropdown-form-row">
+                  <label>Snap Target:</label>
+                  <select
+                    className="shape-kind-select side-select"
+                    value={uvEditorSnapMode}
+                    disabled={!uvEditorSnap}
+                    onChange={(e) => setUvEditorSnapMode(e.target.value as UvSnapMode)}
+                  >
+                    <option value="grid">Grid</option>
+                    <option value="vertex">Vertices</option>
+                    <option value="island">Islands</option>
+                  </select>
+                </div>
+                <div className="uv-dropdown-divider" />
+                <label className="uv-dropdown-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={uvEditorTilePreview}
+                    onChange={(e) => setUvEditorTilePreview(e.target.checked)}
+                  />
+                  <span>Tile Preview (3x3)</span>
+                </label>
+                <label className="uv-dropdown-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={uvEditorAutoFit}
+                    onChange={(e) => setUvEditorAutoFit(e.target.checked)}
+                  />
+                  <span>Auto-fit Selection</span>
+                </label>
+              </div>
+            )}
+          </div>
+
+          <div className="uv-toolbar-divider" />
+
+          {/* Texture & Import */}
+          {objectId && (
+            <select
+              className="shape-kind-select side-select uv-texture-select-compact"
+              value={activeTextureId ?? ''}
+              onChange={(e) => {
+                const id = e.target.value
+                if (id) assignObjectTextureDocument(objectId, id)
+              }}
+              disabled={sceneTextures.length === 0}
+              title="Scene textures"
+            >
+              {sceneTextures.length === 0 ? (
+                <option value="">No textures</option>
+              ) : (
+                <>
+                  {!activeTextureId && <option value="">Select texture…</option>}
+                  {sceneTextures.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </>
               )}
-            </div>
-          </div>
+            </select>
+          )}
 
-          <div className="uv-toolbar-row">
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Display</span>
-              <select
-                className="shape-kind-select side-select uv-display-select"
-                value={uvEditorDisplayMode}
-                onChange={(e) => setUvEditorDisplayMode(e.target.value as any)}
-                title="UV Display mode: Quads/Polys, Triangles, or coplanar Regions"
-              >
-                <option value="polys">Quads/Polys</option>
-                <option value="tris">Triangles</option>
-                <option value="regions">Regions</option>
-              </select>
-              <label className="uv-editor-toggle" title="When selecting a face, pan/zoom to it only if it is off-screen. Manual pan and zoom are kept otherwise.">
-                <input
-                  type="checkbox"
-                  checked={uvEditorAutoFit}
-                  onChange={(e) => setUvEditorAutoFit(e.target.checked)}
-                />
-                Auto fit
-              </label>
-              <label className="uv-editor-toggle" title="3×3 tiled texture preview">
-                <input
-                  type="checkbox"
-                  checked={uvEditorTilePreview}
-                  onChange={(e) => setUvEditorTilePreview(e.target.checked)}
-                />
-                Tile
-              </label>
-            </div>
-
-            <div className="uv-toolbar-group">
-              <span className="uv-group-label">Grid & Snap</span>
-              <label className="uv-editor-toggle">
-                <input
-                  type="checkbox"
-                  checked={uvEditorShowGrid}
-                  onChange={(e) => setUvEditorShowGrid(e.target.checked)}
-                />
-                Grid
-              </label>
-              <input
-                className="uv-grid-input"
-                type="number"
-                min={1}
-                max={64}
-                value={uvEditorGridDivisions}
-                onChange={(e) => setUvEditorGridDivisions(Number(e.target.value))}
-                title="Grid divisions"
-              />
-              <label className="uv-editor-toggle">
-                <input type="checkbox" checked={uvEditorSnap} onChange={(e) => setUvEditorSnap(e.target.checked)} />
-                Snap
-              </label>
-              <select
-                className="shape-kind-select side-select uv-snap-select"
-                value={uvEditorSnapMode}
-                disabled={!uvEditorSnap}
-                onChange={(e) => setUvEditorSnapMode(e.target.value as UvSnapMode)}
-                title={
-                  uvEditorMode === 'faces'
-                    ? 'Island snap aligns selected faces to other UV islands'
-                    : 'Vertex snap aligns points to other UV vertices'
-                }
-              >
-                <option value="grid">Grid</option>
-                <option value="vertex">Vertices</option>
-                <option value="island">Islands</option>
-              </select>
-            </div>
-          </div>
+          <button
+            type="button"
+            className="uv-tool-btn compact-btn"
+            onClick={() => void onImport()}
+            title="Import Texture Image"
+          >
+            Import…
+          </button>
         </div>
 
         <div className="uv-editor-shortcuts">
