@@ -178,7 +178,7 @@ function edgeKey(a: number, b: number): string {
 export function ensureOutwardWinding(mesh: IndexedMesh, refPoint?: Vec3): IndexedMesh {
   if (mesh.faces.length === 0) return mesh
   const center = refPoint ?? meshCentroid(mesh.positions)
-  const faceUvIndices = mesh.faceUvIndices ? mesh.faceUvIndices.map((f) => [...f]) : undefined
+  const faceUvIndices = mesh.faceUvIndices ? mesh.faceUvIndices.map((f) => [...f] as TriangleFace) : undefined
   const faces = mesh.faces.map((face, fi) => {
     if (face.length !== 3) return face
     const n = computeFaceNormal(mesh.positions, face)
