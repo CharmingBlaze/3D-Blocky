@@ -3,7 +3,7 @@ import { ThemedTransformControls } from './ThemedTransformControls'
 import { useThree } from '@react-three/fiber'
 import type * as THREE from 'three'
 import { useAppStore, type ActiveTool, type SelectionMode } from '../store/appStore'
-import { ensureTransform, getObjectPivot } from '../mesh/objectTransform'
+import { ensureTransform, getObjectPivot, cloneTransform, transformFromObject3D, transformsEqual } from '../mesh/objectTransform'
 import { registerPickTarget, unregisterPickTarget } from '../select/pickRegistry'
 import { MeshRenderer } from './MeshRenderer'
 import { MeshEditVisuals } from './MeshEditVisuals'
@@ -79,10 +79,10 @@ function ObjectNodeInner({
 }: ObjectNodeProps) {
   const rootRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
+  const dragBaseTransformRef = useRef<ReturnType<typeof cloneTransform> | null>(null)
   const activeTool = useAppStore((s) => s.activeTool)
   const updateObjectTransform = useAppStore((s) => s.updateObjectTransform)
   const commitHistory = useAppStore((s) => s.commitHistory)
-  const changedRef = useRef(false)
   const glDomElement = useThree((s) => s.gl.domElement)
 
   const tr = ensureTransform(object)
@@ -111,11 +111,11 @@ function ObjectNodeInner({
   const syncFromGroup = () => {
     const g = rootRef.current
     if (!g) return
-    updateObjectTransform(object.id, {
-      position: { x: g.position.x, y: g.position.y, z: g.position.z },
-      rotation: { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z },
-      scale: { x: g.scale.x, y: g.scale.y, z: g.scale.z },
-    })
+    const next = transformFromObject3D(g)
+    const live = useAppStore.getState().objects.find((o) => o.id === object.id)
+    const current = live ? ensureTransform(live) : null
+    if (current && transformsEqual(next, current)) return
+    updateObjectTransform(object.id, next)
   }
 
   return (
@@ -148,18 +148,22 @@ function ObjectNodeInner({
           size={1.2}
           onMouseDown={() => {
             draggingRef.current = true
-            changedRef.current = false
+            dragBaseTransformRef.current = cloneTransform(ensureTransform(object))
           }}
           onMouseUp={() => {
             draggingRef.current = false
-            if (changedRef.current) {
-              commitHistory('Transform')
+            const base = dragBaseTransformRef.current
+            const g = rootRef.current
+            if (base && g) {
+              const final = transformFromObject3D(g)
+              if (!transformsEqual(base, final)) {
+                syncFromGroup()
+                commitHistory('Transform')
+              }
             }
-            changedRef.current = false
-            syncFromGroup()
+            dragBaseTransformRef.current = null
           }}
           onObjectChange={() => {
-            changedRef.current = true
             syncFromGroup()
           }}
         />

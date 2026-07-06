@@ -53,14 +53,34 @@ export function serializePixelDocument(doc: PixelDocument): SerializedPixelDocum
 
 export function deserializePixelDocument(data: SerializedPixelDocument): PixelDocument {
   if (data.version !== 1) throw new Error('Unsupported pixel document version.')
-  const layers: PixelLayer[] = data.layers.map((layer) => ({
-    id: layer.id,
-    name: layer.name,
-    visible: layer.visible,
-    opacity: layer.opacity,
-    blendMode: layer.blendMode,
-    pixels: new Uint8ClampedArray(base64ToBytes(layer.pixelsBase64)),
-  }))
+  if (!Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width <= 0 || data.height <= 0) {
+    throw new Error('Invalid pixel document: width and height must be positive numbers.')
+  }
+  if (!Array.isArray(data.layers) || data.layers.length === 0) {
+    throw new Error('Invalid pixel document: missing layers.')
+  }
+  const expectedBytes = data.width * data.height * 4
+  const layers: PixelLayer[] = data.layers.map((layer, index) => {
+    let pixels: Uint8ClampedArray
+    try {
+      pixels = new Uint8ClampedArray(base64ToBytes(layer.pixelsBase64))
+    } catch {
+      throw new Error(`Invalid pixel layer "${layer.name || String(index + 1)}": could not decode image data.`)
+    }
+    if (pixels.length !== expectedBytes) {
+      throw new Error(
+        `Invalid pixel layer "${layer.name || String(index + 1)}": expected ${expectedBytes} bytes, got ${pixels.length}.`
+      )
+    }
+    return {
+      id: layer.id,
+      name: layer.name,
+      visible: layer.visible,
+      opacity: layer.opacity,
+      blendMode: layer.blendMode,
+      pixels,
+    }
+  })
   return clonePixelDocument({
     id: data.id,
     width: data.width,
@@ -71,6 +91,11 @@ export function deserializePixelDocument(data: SerializedPixelDocument): PixelDo
 }
 
 export function parsePixelDocumentFile(text: string): PixelDocument {
-  const parsed = JSON.parse(text) as SerializedPixelDocument
+  let parsed: SerializedPixelDocument
+  try {
+    parsed = JSON.parse(text) as SerializedPixelDocument
+  } catch {
+    throw new Error('Invalid pixel project file: not valid JSON.')
+  }
   return deserializePixelDocument(parsed)
 }

@@ -249,10 +249,56 @@ export function subdivideSurfaceLevels(obj: SceneObject, levels: number): SceneO
   return current
 }
 
+type SubdPreviewCacheEntry = {
+  key: string
+  preview: SceneObject
+}
+
+const subdPreviewCache = new Map<string, SubdPreviewCacheEntry>()
+
+function meshTopologySig(obj: SceneObject): string {
+  let sig = `${obj.positions.length}|${obj.faces.length}`
+  if (obj.faceGroups?.length) {
+    sig += `|fg:${obj.faceGroups.map((g) => g.join('+')).join(';')}`
+  }
+  for (let fi = 0; fi < Math.min(obj.faces.length, 64); fi++) {
+    sig += `|${obj.faces[fi]!.join(',')}`
+  }
+  if (obj.faces.length > 64) sig += `|${obj.faces.length}`
+  return sig
+}
+
+function positionsChecksum(positions: Vec3[]): string {
+  let hash = 2166136261 >>> 0
+  for (const p of positions) {
+    for (const v of [p.x, p.y, p.z]) {
+      hash ^= Math.floor(v * 10000)
+      hash = Math.imul(hash, 16777619)
+    }
+  }
+  return `${positions.length}:${hash >>> 0}`
+}
+
+function subdPreviewCacheKey(obj: SceneObject, levels: number): string {
+  return `${levels}|${meshTopologySig(obj)}|${positionsChecksum(obj.positions)}`
+}
+
+export function invalidateSubdivisionPreviewCache(objectId?: string): void {
+  if (objectId) subdPreviewCache.delete(objectId)
+  else subdPreviewCache.clear()
+}
+
 /** Non-destructive viewport preview — cage stays in `obj`, returns smoothed copy. */
 export function resolveSubdivisionPreview(obj: SceneObject): SceneObject {
   if (!obj.subdEnabled || !obj.subdLevels || obj.subdLevels <= 0) return obj
-  return subdivideSurfaceLevels(obj, obj.subdLevels)
+  const levels = clampSubdLevels(obj.subdLevels)
+  const key = subdPreviewCacheKey(obj, levels)
+  const cached = subdPreviewCache.get(obj.id)
+  if (cached?.key === key) return cached.preview
+
+  const preview = subdivideSurfaceLevels(obj, levels)
+  subdPreviewCache.set(obj.id, { key, preview })
+  return preview
 }
 
 export function clampSubdLevels(levels: number): number {

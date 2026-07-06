@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { useAppStore, type ActiveTool } from '../store/appStore'
 import type { BillboardImage } from '../images/imageDropTypes'
 import { useLoadedTexture } from '../rendering/textureCache'
+import { popViewportInteraction, pushViewportInteraction } from '../rendering/viewportFrameLoop'
 
 const TRANSFORM_TOOLS: ActiveTool[] = ['move', 'rotate', 'scale']
 
@@ -90,6 +91,37 @@ function BillboardMesh({ billboard, isSelected }: BillboardNodeProps) {
   )
 }
 
+const TRANSFORM_EPS = 1e-6
+
+function billboardStatesEqual(
+  a: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; width: number; height: number },
+  b: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; width: number; height: number }
+): boolean {
+  return (
+    Math.abs(a.position.x - b.position.x) <= TRANSFORM_EPS &&
+    Math.abs(a.position.y - b.position.y) <= TRANSFORM_EPS &&
+    Math.abs(a.position.z - b.position.z) <= TRANSFORM_EPS &&
+    Math.abs(a.rotation.x - b.rotation.x) <= TRANSFORM_EPS &&
+    Math.abs(a.rotation.y - b.rotation.y) <= TRANSFORM_EPS &&
+    Math.abs(a.rotation.z - b.rotation.z) <= TRANSFORM_EPS &&
+    Math.abs(a.width - b.width) <= TRANSFORM_EPS &&
+    Math.abs(a.height - b.height) <= TRANSFORM_EPS
+  )
+}
+
+function billboardStateFromGroup(
+  g: THREE.Group,
+  widthBase: number,
+  heightBase: number
+) {
+  return {
+    position: { x: g.position.x, y: g.position.y, z: g.position.z },
+    rotation: { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z },
+    width: Math.max(0.5, widthBase * g.scale.x),
+    height: Math.max(0.5, heightBase * g.scale.y),
+  }
+}
+
 export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
   const activeTool = useAppStore((s) => s.activeTool)
   const updateBillboardImage = useAppStore((s) => s.updateBillboardImage)
@@ -97,7 +129,8 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
   const groupRef = useRef<THREE.Group>(null)
   const faceRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
-  const changedRef = useRef(false)
+  const dragBaseRef = useRef<ReturnType<typeof billboardStateFromGroup> | null>(null)
+  const scaleBaseRef = useRef<{ width: number; height: number } | null>(null)
   const glDomElement = useThree((s) => s.gl.domElement)
 
   const gizmoActive = isSelected && TRANSFORM_TOOLS.includes(activeTool)
@@ -126,11 +159,23 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
   const syncFromGroup = () => {
     const g = groupRef.current
     if (!g) return
+    const scaleBase = scaleBaseRef.current ?? { width: billboard.width, height: billboard.height }
+    const next = billboardStateFromGroup(g, scaleBase.width, scaleBase.height)
+    const current = useAppStore.getState().billboardImages.find((bb) => bb.id === billboard.id)
+    if (current) {
+      const currentState = {
+        position: current.position,
+        rotation: current.rotation ?? { x: 0, y: 0, z: 0 },
+        width: current.width,
+        height: current.height,
+      }
+      if (billboardStatesEqual(next, currentState)) return
+    }
     updateBillboardImage(billboard.id, {
-      position: { x: g.position.x, y: g.position.y, z: g.position.z },
-      rotation: { x: g.rotation.x, y: g.rotation.y, z: g.rotation.z },
-      width: Math.max(0.5, billboard.width * g.scale.x),
-      height: Math.max(0.5, billboard.height * g.scale.y),
+      position: next.position,
+      rotation: next.rotation,
+      width: next.width,
+      height: next.height,
     })
     g.scale.set(1, 1, 1)
   }
@@ -156,19 +201,33 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
           space="world"
           size={1.2}
           onMouseDown={() => {
+            pushViewportInteraction()
             draggingRef.current = true
-            changedRef.current = false
+            scaleBaseRef.current = { width: billboard.width, height: billboard.height }
+            dragBaseRef.current = {
+              position: { ...billboard.position },
+              rotation: { ...(billboard.rotation ?? { x: 0, y: 0, z: 0 }) },
+              width: billboard.width,
+              height: billboard.height,
+            }
           }}
           onMouseUp={() => {
+            popViewportInteraction()
             draggingRef.current = false
-            if (changedRef.current) {
-              commitHistory('Edit billboard')
+            const base = dragBaseRef.current
+            const scaleBase = scaleBaseRef.current
+            const g = groupRef.current
+            if (base && scaleBase && g) {
+              const final = billboardStateFromGroup(g, scaleBase.width, scaleBase.height)
+              if (!billboardStatesEqual(base, final)) {
+                syncFromGroup()
+                commitHistory('Edit billboard')
+              }
             }
-            changedRef.current = false
-            syncFromGroup()
+            dragBaseRef.current = null
+            scaleBaseRef.current = null
           }}
           onObjectChange={() => {
-            changedRef.current = true
             syncFromGroup()
           }}
         />

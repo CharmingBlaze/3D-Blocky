@@ -11,7 +11,7 @@ import {
 } from '../stroke/sketchDoodle'
 import { isSketchDoodleObject, regenerateSketchObject, createSketchSource } from '../stroke/sketchSource'
 import { attachVectorSource, isVectorDoodleObject, regenerateVectorObject } from '../vector/vectorSource'
-import { cloneTransform, ensureTransform, localPointFromWorld, prepareSceneObject, selectionWorldCenter, worldDeltaToLocal } from '../mesh/objectTransform'
+import { cloneTransform, ensureTransform, localPointFromWorld, prepareSceneObject, selectionWorldCenter, transformsEqual, worldDeltaToLocal } from '../mesh/objectTransform'
 import { ensurePositiveVolume } from '../mesh/meshWinding'
 import {
   applyObjectTransformModal,
@@ -177,7 +177,6 @@ import type { Uv2 } from '../uv/uvTypes'
 import { cloneUv2 } from '../uv/uvTypes'
 import {
   SceneHistoryStack,
-  captureSceneSnapshot,
   sanitizeSceneSnapshot,
   type SceneSnapshot,
 } from '../history/sceneHistory'
@@ -222,6 +221,7 @@ import {
 } from '../mesh/meshTopologyOps'
 import {
   clampSubdLevels,
+  invalidateSubdivisionPreviewCache,
   subdivideSurfaceLevels,
 } from '../mesh/subdivisionSurface'
 import {
@@ -861,8 +861,8 @@ export interface AppState {
   resizeOpenPixelDocument: (width: number, height: number) => void
   importPixelImage: (file: File, mode: 'new' | 'layer') => Promise<void>
   savePixelDocument: () => Promise<void>
-  exportPixelDocumentPng: () => void
-  exportPixelDocumentProject: () => void
+  exportPixelDocumentPng: () => Promise<void>
+  exportPixelDocumentProject: () => Promise<void>
   importPixelDocumentProject: (file: File) => Promise<void>
   selectPixelEditorDocument: (docId: string) => void
   addPixelEditorLayer: () => void
@@ -907,6 +907,8 @@ export interface AppState {
 
   applySculptAt: (center: Vec3, tool: SculptTool, options?: { saveHistory?: boolean }) => void
   simplifySelected: () => void
+  /** Re-upload GPU textures after a WebGL context restore. */
+  reconcileGpuResources: () => void
 }
 
 const MAX_HISTORY = 50
@@ -995,6 +997,7 @@ function restoreSceneToStore(
   options?: { resetEditors?: boolean; extra?: Partial<AppState> }
 ): void {
   invalidateFaceGroupCache()
+  invalidateSubdivisionPreviewCache()
   const restored = sanitizeSceneSnapshot(snapshot)
   const imageSelection = sanitizeImageSelectionIds(
     restored.referenceImages,
@@ -1243,11 +1246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   commitHistory: (label, options) => {
     if (get().historyPaused > 0) return false
-    const added = sceneHistory.push(
-      captureSceneSnapshot(snapshotFromState(get())),
-      label,
-      options
-    )
+    const added = sceneHistory.push(snapshotFromState(get()), label, options)
     if (added) {
       reconcileAppBlobUrls(get)
       set(syncHistoryFlags())
@@ -1258,7 +1257,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   captureUndoPoint: (label) => get().commitHistory(label, { force: true }),
 
   replaceHistoryHead: (label) => {
-    sceneHistory.replaceHead(captureSceneSnapshot(snapshotFromState(get())), label)
+    sceneHistory.replaceHead(snapshotFromState(get()), label)
     reconcileAppBlobUrls(get)
     set(syncHistoryFlags())
   },
@@ -1327,6 +1326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     textureLoadGeneration.delete(id)
     invalidateFaceGroupCache(id)
+    invalidateSubdivisionPreviewCache(id)
     reconcileAppBlobUrls(get)
     get().commitHistory('Delete object')
   },
@@ -1418,9 +1418,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateObjectTransform: (id, transform) => {
     set((s) => ({
-      objects: s.objects.map((o) =>
-        o.id === id ? { ...o, transform: cloneTransform(transform) } : o
-      ),
+      objects: s.objects.map((o) => {
+        if (o.id !== id) return o
+        const current = ensureTransform(o)
+        if (transformsEqual(current, transform)) return o
+        return { ...o, transform: cloneTransform(transform) }
+      }),
     }))
   },
 
@@ -3859,6 +3862,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowToolRing: (show) => set({ showToolRing: show }),
   setShowExportDialog: (show) => set({ showExportDialog: show }),
 
+  reconcileGpuResources: () => {
+    reconcileAppBlobUrls(get)
+    set((s) => ({ pixelTextureRevision: s.pixelTextureRevision + 1 }))
+  },
+
   requestProjectLoad: () => {
     void get().loadProjectFromDialog()
   },
@@ -3903,11 +3911,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadProjectFile: async (file) => {
-    const text = await file.text()
-    const parsed = parseProjectFile(text)
-    const snapshot = await snapshotFromProjectFile(parsed)
-    sceneHistory.reset(snapshot)
-    restoreSceneToStore(set, get, snapshot, { resetEditors: true })
+    try {
+      const text = await file.text()
+      const parsed = parseProjectFile(text)
+      const snapshot = await snapshotFromProjectFile(parsed)
+      sceneHistory.reset(snapshot)
+      restoreSceneToStore(set, get, snapshot, { resetEditors: true })
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Unknown error'
+      throw new Error(`Could not load "${file.name}": ${detail}`)
+    }
   },
 
   importSceneFile: async (file) => {
@@ -4691,32 +4704,37 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   importPixelImage: async (file, mode) => {
-    if (mode === 'new') {
-      const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
-      const doc = docs[docId]
-      set((s) => ({
-        pixelDocuments: docs,
-        pixelEditorDocId: docId,
-        objectTextures: {
-          ...s.objectTextures,
-          [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
-        },
-        pixelTextureRevision: s.pixelTextureRevision + 1,
-      }))
-      reconcileAppBlobUrls(get)
-      const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
-      if (objectId) {
-        get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+    try {
+      if (mode === 'new') {
+        const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
+        const doc = docs[docId]
+        set((s) => ({
+          pixelDocuments: docs,
+          pixelEditorDocId: docId,
+          objectTextures: {
+            ...s.objectTextures,
+            [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
+          },
+          pixelTextureRevision: s.pixelTextureRevision + 1,
+        }))
+        reconcileAppBlobUrls(get)
+        const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
+        if (objectId) {
+          get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+        }
+        get().commitHistory('Import pixel image')
+        return
       }
-      get().commitHistory('Import pixel image')
-      return
+      const docId = get().pixelEditorDocId
+      if (!docId) return
+      const docs = await importImageAsLayer(get().pixelDocuments, docId, file)
+      set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+      reconcileAppBlobUrls(get)
+      get().commitHistory('Import pixel layer')
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Unknown error'
+      throw new Error(`Could not import "${file.name}": ${detail}`)
     }
-    const docId = get().pixelEditorDocId
-    if (!docId) return
-    const docs = await importImageAsLayer(get().pixelDocuments, docId, file)
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
-    reconcileAppBlobUrls(get)
-    get().commitHistory('Import pixel layer')
   },
 
   savePixelDocument: async () => {
@@ -4754,35 +4772,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  exportPixelDocumentProject: () => {
-    get().savePixelDocument()
+  exportPixelDocumentProject: async () => {
+    await get().savePixelDocument()
   },
 
   importPixelDocumentProject: async (file) => {
-    const text = await file.text()
-    const imported = parsePixelDocumentFile(text)
-    const docId = get().pixelEditorDocId ?? imported.id
-    const doc = { ...imported, id: docId }
-    set((s) => ({
-      pixelDocuments: registerPixelDocument(s.pixelDocuments, doc),
-      pixelEditorDocId: docId,
-      objectTextures: {
-        ...s.objectTextures,
-        [docId]: {
-          url: '',
-          name: file.name.replace(/\.[^.]+$/, ''),
-          width: doc.width,
-          height: doc.height,
+    try {
+      const text = await file.text()
+      const imported = parsePixelDocumentFile(text)
+      const docId = get().pixelEditorDocId ?? imported.id
+      const doc = { ...imported, id: docId }
+      set((s) => ({
+        pixelDocuments: registerPixelDocument(s.pixelDocuments, doc),
+        pixelEditorDocId: docId,
+        objectTextures: {
+          ...s.objectTextures,
+          [docId]: {
+            url: '',
+            name: file.name.replace(/\.[^.]+$/, ''),
+            width: doc.width,
+            height: doc.height,
+          },
         },
-      },
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
-    reconcileAppBlobUrls(get)
-    const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
-    if (objectId) {
-      get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+        pixelTextureRevision: s.pixelTextureRevision + 1,
+      }))
+      reconcileAppBlobUrls(get)
+      const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
+      if (objectId) {
+        get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+      }
+      get().commitHistory('Import pixel project')
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Unknown error'
+      throw new Error(`Could not import "${file.name}": ${detail}`)
     }
-    get().commitHistory('Import pixel project')
   },
 
   selectPixelEditorDocument: (docId) => {

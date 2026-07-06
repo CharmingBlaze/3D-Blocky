@@ -1,5 +1,10 @@
 import type { PixelDocument } from '../pixel/pixelTypes'
-import { clonePixelDocuments } from '../pixel/pixelDocument'
+import {
+  clonePixelDocument,
+  clonePixelDocuments,
+  pixelDocumentEqual,
+  pixelDocumentsEqual,
+} from '../pixel/pixelDocument'
 import { cloneTransform, prepareSceneObject } from '../mesh/objectTransform'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
@@ -31,26 +36,26 @@ export interface HistoryEntry {
 
 const DEFAULT_MAX_DEPTH = 50
 
-export function cloneSceneObjects(objects: SceneObject[]): SceneObject[] {
-  return objects.map((o) => ({
-    ...o,
-    positions: o.positions.map((p) => ({ ...p })),
-    faces: o.faces.map((f) => [...f]),
-    faceColors: [...o.faceColors],
-    faceGroups: o.faceGroups?.map((g) => [...g]),
-    uvs: o.uvs?.map((u) => ({ ...u })),
-    faceUvIndices: o.faceUvIndices?.map((f) => [...f]),
-    cornerColors: o.cornerColors?.map((c) => [c[0], c[1], c[2], c[3]] as [number, number, number, number]),
-    faceColorIndices: o.faceColorIndices?.map((f) => [...f]),
-    material: o.material
+export function cloneSceneObject(obj: SceneObject): SceneObject {
+  return {
+    ...obj,
+    positions: obj.positions.map((p) => ({ ...p })),
+    faces: obj.faces.map((f) => [...f]),
+    faceColors: [...obj.faceColors],
+    faceGroups: obj.faceGroups?.map((g) => [...g]),
+    uvs: obj.uvs?.map((u) => ({ ...u })),
+    faceUvIndices: obj.faceUvIndices?.map((f) => [...f]),
+    cornerColors: obj.cornerColors?.map((c) => [c[0], c[1], c[2], c[3]] as [number, number, number, number]),
+    faceColorIndices: obj.faceColorIndices?.map((f) => [...f]),
+    material: obj.material
       ? {
-          ...o.material,
-          solidColor: o.material.solidColor
-            ? ([...o.material.solidColor] as [number, number, number, number])
+          ...obj.material,
+          solidColor: obj.material.solidColor
+            ? ([...obj.material.solidColor] as [number, number, number, number])
             : undefined,
         }
       : undefined,
-    faceMaterials: o.faceMaterials?.map((m) =>
+    faceMaterials: obj.faceMaterials?.map((m) =>
       m
         ? {
             ...m,
@@ -60,9 +65,13 @@ export function cloneSceneObjects(objects: SceneObject[]): SceneObject[] {
           }
         : null
     ),
-    pivot: o.pivot ? { ...o.pivot } : undefined,
-    transform: o.transform ? cloneTransform(o.transform) : undefined,
-  }))
+    pivot: obj.pivot ? { ...obj.pivot } : undefined,
+    transform: obj.transform ? cloneTransform(obj.transform) : undefined,
+  }
+}
+
+export function cloneSceneObjects(objects: SceneObject[]): SceneObject[] {
+  return objects.map(cloneSceneObject)
 }
 
 export function cloneObjectTextures(
@@ -82,23 +91,132 @@ export function cloneBillboardImages(images: BillboardImage[]): BillboardImage[]
   }))
 }
 
-export function captureSceneSnapshot(input: SceneSnapshot): SceneSnapshot {
+function meshSelectionEqual(
+  a: MeshComponentSelection | null,
+  b: MeshComponentSelection | null
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.objectId === b.objectId &&
+    a.vertices.length === b.vertices.length &&
+    a.edges.length === b.edges.length &&
+    a.faces.length === b.faces.length &&
+    a.vertices.every((v, i) => v === b.vertices[i]) &&
+    a.edges.every((e, i) => e === b.edges[i]) &&
+    a.faces.every((f, i) => f === b.faces[i])
+  )
+}
+
+function objectTexturesEqual(
+  a: Record<string, SnapshotTextureInfo>,
+  b: Record<string, SnapshotTextureInfo>
+): boolean {
+  const keysA = Object.keys(a).sort()
+  const keysB = Object.keys(b).sort()
+  if (keysA.length !== keysB.length) return false
+  for (let i = 0; i < keysA.length; i++) {
+    const key = keysA[i]
+    if (key !== keysB[i]) return false
+    const ta = a[key]
+    const tb = b[key]
+    if (ta.url !== tb.url || ta.name !== tb.name || ta.width !== tb.width || ta.height !== tb.height) {
+      return false
+    }
+  }
+  return true
+}
+
+function referenceImagesEqual(a: ReferenceImage[], b: ReferenceImage[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const ra = a[i]
+    const rb = b[i]
+    if (
+      ra.id !== rb.id ||
+      ra.url !== rb.url ||
+      ra.view !== rb.view ||
+      ra.x !== rb.x ||
+      ra.y !== rb.y ||
+      ra.width !== rb.width
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function billboardImagesEqual(a: BillboardImage[], b: BillboardImage[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const ba = a[i]
+    const bb = b[i]
+    if (
+      ba.id !== bb.id ||
+      ba.url !== bb.url ||
+      ba.position.x !== bb.position.x ||
+      ba.position.y !== bb.position.y ||
+      ba.position.z !== bb.position.z
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function captureObjects(input: SceneObject[], previous?: SceneObject[]): SceneObject[] {
+  if (!previous) return cloneSceneObjects(input)
+  const prevById = new Map(previous.map((obj) => [obj.id, obj]))
+  return input.map((obj) => {
+    const prevObj = prevById.get(obj.id)
+    if (prevObj && objectDataSignature(prevObj) === objectDataSignature(obj)) return prevObj
+    return cloneSceneObject(obj)
+  })
+}
+
+function capturePixelDocuments(
+  input: Record<string, PixelDocument>,
+  previous?: Record<string, PixelDocument>
+): Record<string, PixelDocument> {
+  if (!previous) return clonePixelDocuments(input)
+  const out: Record<string, PixelDocument> = {}
+  for (const [id, doc] of Object.entries(input)) {
+    const prevDoc = previous[id]
+    out[id] = prevDoc && pixelDocumentEqual(doc, prevDoc) ? prevDoc : clonePixelDocument(doc)
+  }
+  return out
+}
+
+/** Deep snapshot for undo history. Reuses unchanged data from `previous` to save RAM. */
+export function captureSceneSnapshot(input: SceneSnapshot, previous?: SceneSnapshot): SceneSnapshot {
   return {
-    objects: cloneSceneObjects(input.objects),
-    objectTextures: cloneObjectTextures(input.objectTextures),
-    pixelDocuments: clonePixelDocuments(input.pixelDocuments ?? {}),
-    referenceImages: cloneReferenceImages(input.referenceImages),
-    billboardImages: cloneBillboardImages(input.billboardImages),
+    objects: captureObjects(input.objects, previous?.objects),
+    objectTextures:
+      previous && objectTexturesEqual(input.objectTextures, previous.objectTextures)
+        ? previous.objectTextures
+        : cloneObjectTextures(input.objectTextures),
+    pixelDocuments: capturePixelDocuments(input.pixelDocuments ?? {}, previous?.pixelDocuments),
+    referenceImages:
+      previous && referenceImagesEqual(input.referenceImages, previous.referenceImages)
+        ? previous.referenceImages
+        : cloneReferenceImages(input.referenceImages),
+    billboardImages:
+      previous && billboardImagesEqual(input.billboardImages, previous.billboardImages)
+        ? previous.billboardImages
+        : cloneBillboardImages(input.billboardImages),
     selectedObjectId: input.selectedObjectId,
     selectionObjectIds: [...input.selectionObjectIds],
-    meshSelection: input.meshSelection
-      ? {
-          objectId: input.meshSelection.objectId,
-          vertices: [...input.meshSelection.vertices],
-          edges: [...input.meshSelection.edges],
-          faces: [...input.meshSelection.faces],
-        }
-      : null,
+    meshSelection:
+      previous && meshSelectionEqual(input.meshSelection, previous.meshSelection)
+        ? previous.meshSelection
+        : input.meshSelection
+          ? {
+              objectId: input.meshSelection.objectId,
+              vertices: [...input.meshSelection.vertices],
+              edges: [...input.meshSelection.edges],
+              faces: [...input.meshSelection.faces],
+            }
+          : null,
   }
 }
 
@@ -120,29 +238,9 @@ export function snapshotsEqual(a: SceneSnapshot, b: SceneSnapshot): boolean {
   if (a.selectionObjectIds.length !== b.selectionObjectIds.length) return false
   if (!a.selectionObjectIds.every((id, i) => id === b.selectionObjectIds[i])) return false
 
-  const meshA = a.meshSelection
-  const meshB = b.meshSelection
-  if (Boolean(meshA) !== Boolean(meshB)) return false
-  if (meshA && meshB) {
-    if (meshA.objectId !== meshB.objectId) return false
-    if (meshA.vertices.length !== meshB.vertices.length) return false
-    if (meshA.edges.length !== meshB.edges.length) return false
-    if (meshA.faces.length !== meshB.faces.length) return false
-    if (!meshA.vertices.every((v, i) => v === meshB.vertices[i])) return false
-    if (!meshA.edges.every((e, i) => e === meshB.edges[i])) return false
-    if (!meshA.faces.every((f, i) => f === meshB.faces[i])) return false
-  }
-
-  const texA = Object.keys(a.objectTextures).sort()
-  const texB = Object.keys(b.objectTextures).sort()
-  if (texA.length !== texB.length) return false
-  for (let i = 0; i < texA.length; i++) {
-    const key = texA[i]
-    if (key !== texB[i]) return false
-    const ta = a.objectTextures[key]
-    const tb = b.objectTextures[key]
-    if (ta.url !== tb.url || ta.name !== tb.name) return false
-  }
+  if (!meshSelectionEqual(a.meshSelection, b.meshSelection)) return false
+  if (!objectTexturesEqual(a.objectTextures, b.objectTextures)) return false
+  if (!pixelDocumentsEqual(a.pixelDocuments ?? {}, b.pixelDocuments ?? {})) return false
 
   if (a.objects.length !== b.objects.length) return false
   const sortedA = [...a.objects].sort((x, y) => x.id.localeCompare(y.id))
@@ -152,36 +250,8 @@ export function snapshotsEqual(a: SceneSnapshot, b: SceneSnapshot): boolean {
     if (objectDataSignature(sortedA[i]) !== objectDataSignature(sortedB[i])) return false
   }
 
-  if (a.referenceImages.length !== b.referenceImages.length) return false
-  for (let i = 0; i < a.referenceImages.length; i++) {
-    const ra = a.referenceImages[i]
-    const rb = b.referenceImages[i]
-    if (
-      ra.id !== rb.id ||
-      ra.url !== rb.url ||
-      ra.view !== rb.view ||
-      ra.x !== rb.x ||
-      ra.y !== rb.y ||
-      ra.width !== rb.width
-    ) {
-      return false
-    }
-  }
-
-  if (a.billboardImages.length !== b.billboardImages.length) return false
-  for (let i = 0; i < a.billboardImages.length; i++) {
-    const ba = a.billboardImages[i]
-    const bb = b.billboardImages[i]
-    if (
-      ba.id !== bb.id ||
-      ba.url !== bb.url ||
-      ba.position.x !== bb.position.x ||
-      ba.position.y !== bb.position.y ||
-      ba.position.z !== bb.position.z
-    ) {
-      return false
-    }
-  }
+  if (!referenceImagesEqual(a.referenceImages, b.referenceImages)) return false
+  if (!billboardImagesEqual(a.billboardImages, b.billboardImages)) return false
 
   return true
 }
@@ -249,24 +319,31 @@ export function sanitizeSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
   const pixelDocuments: Record<string, PixelDocument> = {}
   for (const [id, doc] of Object.entries(snapshot.pixelDocuments ?? {})) {
     if (textureIds.has(id) || objectIds.has(id)) {
-      pixelDocuments[id] = clonePixelDocuments({ [id]: doc })[id]
+      pixelDocuments[id] = clonePixelDocument(doc)
     }
   }
 
   return {
-    objects,
+    objects: cloneSceneObjects(objects),
     objectTextures,
     pixelDocuments,
     referenceImages: cloneReferenceImages(snapshot.referenceImages ?? []),
     billboardImages: cloneBillboardImages(snapshot.billboardImages ?? []),
     selectedObjectId,
     selectionObjectIds,
-    meshSelection,
+    meshSelection: meshSelection
+      ? {
+          objectId: meshSelection.objectId,
+          vertices: [...meshSelection.vertices],
+          edges: [...meshSelection.edges],
+          faces: [...meshSelection.faces],
+        }
+      : null,
   }
 }
 
 export function applySceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
-  return sanitizeSceneSnapshot(captureSceneSnapshot(snapshot))
+  return sanitizeSceneSnapshot(snapshot)
 }
 
 export class SceneHistoryStack {
@@ -324,9 +401,9 @@ export class SceneHistoryStack {
     label?: string,
     options?: { force?: boolean }
   ): boolean {
-    const captured = captureSceneSnapshot(snapshot)
-    const current = this.entries[this.index]?.snapshot
-    if (!options?.force && current && snapshotsEqual(current, captured)) return false
+    const previous = this.entries[this.index]?.snapshot
+    const captured = captureSceneSnapshot(snapshot, previous)
+    if (!options?.force && previous && snapshotsEqual(previous, captured)) return false
 
     const trimmed = this.entries.slice(0, this.index + 1)
     trimmed.push({ snapshot: captured, label })
@@ -338,7 +415,8 @@ export class SceneHistoryStack {
 
   /** Replace the current history entry (e.g. commit a live preview). */
   replaceHead(snapshot: SceneSnapshot, label?: string): void {
-    const captured = captureSceneSnapshot(snapshot)
+    const previous = this.entries[this.index]?.snapshot
+    const captured = captureSceneSnapshot(snapshot, previous)
     const next = [...this.entries]
     next[this.index] = { snapshot: captured, label: label ?? next[this.index]?.label }
     this.entries = next
@@ -347,13 +425,13 @@ export class SceneHistoryStack {
   undo(): SceneSnapshot | null {
     if (!this.canUndo) return null
     this.index -= 1
-    return captureSceneSnapshot(this.entries[this.index].snapshot)
+    return this.entries[this.index].snapshot
   }
 
   redo(): SceneSnapshot | null {
     if (!this.canRedo) return null
     this.index += 1
-    return captureSceneSnapshot(this.entries[this.index].snapshot)
+    return this.entries[this.index].snapshot
   }
 
   reset(snapshot: SceneSnapshot): void {

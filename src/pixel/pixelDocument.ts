@@ -52,6 +52,50 @@ export function clonePixelDocuments(
   return out
 }
 
+export function pixelDocumentEqual(a: PixelDocument, b: PixelDocument): boolean {
+  if (
+    a.id !== b.id ||
+    a.width !== b.width ||
+    a.height !== b.height ||
+    a.activeLayerId !== b.activeLayerId ||
+    a.layers.length !== b.layers.length
+  ) {
+    return false
+  }
+  for (let i = 0; i < a.layers.length; i++) {
+    const la = a.layers[i]
+    const lb = b.layers[i]
+    if (
+      la.id !== lb.id ||
+      la.name !== lb.name ||
+      la.visible !== lb.visible ||
+      la.opacity !== lb.opacity ||
+      la.blendMode !== lb.blendMode ||
+      la.pixels.length !== lb.pixels.length
+    ) {
+      return false
+    }
+    for (let p = 0; p < la.pixels.length; p++) {
+      if (la.pixels[p] !== lb.pixels[p]) return false
+    }
+  }
+  return true
+}
+
+export function pixelDocumentsEqual(
+  a: Record<string, PixelDocument>,
+  b: Record<string, PixelDocument>
+): boolean {
+  const keysA = Object.keys(a).sort()
+  const keysB = Object.keys(b).sort()
+  if (keysA.length !== keysB.length) return false
+  for (let i = 0; i < keysA.length; i++) {
+    if (keysA[i] !== keysB[i]) return false
+    if (!pixelDocumentEqual(a[keysA[i]], b[keysB[i]])) return false
+  }
+  return true
+}
+
 export function getActiveLayer(doc: PixelDocument): PixelLayer | null {
   return doc.layers.find((l) => l.id === doc.activeLayerId) ?? doc.layers[0] ?? null
 }

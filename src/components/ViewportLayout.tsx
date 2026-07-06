@@ -86,23 +86,34 @@ function ViewportSlot({
   isActive,
   onActivate,
   flex,
+  layoutVisible,
+  maximizedMode,
 }: {
   slotIndex: ViewportSlotIndex
   view: ViewType
   isActive: boolean
   onActivate: () => void
   flex?: number
+  layoutVisible: boolean
+  maximizedMode: boolean
 }) {
   return (
     <div
-      className={`viewport-slot ${isActive ? 'active-slot' : ''}`}
-      style={{ flex: flex ?? 1 }}
+      className={`viewport-slot${isActive ? ' active-slot' : ''}${layoutVisible ? '' : ' viewport-slot-dormant'}`}
+      style={
+        maximizedMode
+          ? layoutVisible
+            ? { flex: 1 }
+            : undefined
+          : { flex: flex ?? 1 }
+      }
     >
       <QuadViewport
         view={view}
         slotIndex={slotIndex}
         isActive={isActive}
         onActivate={onActivate}
+        layoutVisible={layoutVisible}
       />
     </div>
   )
@@ -131,60 +142,74 @@ export function ViewportLayout() {
     }))
   )
 
-  if (maximizedView) {
-    const slotIndex = findActiveSlot(maximizedView, viewportSlotViews)
-    return (
-      <div className="viewport-layout maximized">
-        <ViewportSlot
-          slotIndex={slotIndex}
-          view={maximizedView}
-          isActive={activeView === maximizedView}
-          onActivate={() => setActiveView(maximizedView)}
-        />
-      </div>
-    )
-  }
-
   const rowB = 1 - viewportRowSplit
   const colB = 1 - viewportColSplit
+  const maximizedSlot = maximizedView
+    ? findActiveSlot(maximizedView, viewportSlotViews)
+    : null
+  const maximizedMode = maximizedSlot !== null
+  const row0Visible = !maximizedMode || maximizedSlot === 0 || maximizedSlot === 1
+  const row1Visible = !maximizedMode || maximizedSlot === 2 || maximizedSlot === 3
+  const slotLayoutVisible = (index: ViewportSlotIndex) =>
+    !maximizedMode || maximizedSlot === index
 
   return (
-    <div className="viewport-layout">
-      <div className="viewport-row" style={{ flex: viewportRowSplit }}>
+    <div className={`viewport-layout${maximizedMode ? ' maximized' : ''}`}>
+      <div
+        className="viewport-row"
+        style={{
+          flex: maximizedMode ? (row0Visible ? 1 : undefined) : viewportRowSplit,
+          display: maximizedMode && !row0Visible ? 'none' : undefined,
+        }}
+      >
         <ViewportSlot
           slotIndex={0}
           view={viewportSlotViews[0]!}
           isActive={activeView === viewportSlotViews[0]}
           onActivate={() => setActiveView(viewportSlotViews[0]!)}
           flex={viewportColSplit}
+          layoutVisible={slotLayoutVisible(0)}
+          maximizedMode={maximizedMode}
         />
-        <ResizeHandle axis="column" onDrag={setViewportColSplit} />
+        {!maximizedMode && <ResizeHandle axis="column" onDrag={setViewportColSplit} />}
         <ViewportSlot
           slotIndex={1}
           view={viewportSlotViews[1]!}
           isActive={activeView === viewportSlotViews[1]}
           onActivate={() => setActiveView(viewportSlotViews[1]!)}
           flex={colB}
+          layoutVisible={slotLayoutVisible(1)}
+          maximizedMode={maximizedMode}
         />
       </div>
 
-      <ResizeHandle axis="row" onDrag={setViewportRowSplit} />
+      {!maximizedMode && <ResizeHandle axis="row" onDrag={setViewportRowSplit} />}
 
-      <div className="viewport-row" style={{ flex: rowB }}>
+      <div
+        className="viewport-row"
+        style={{
+          flex: maximizedMode ? (row1Visible ? 1 : undefined) : rowB,
+          display: maximizedMode && !row1Visible ? 'none' : undefined,
+        }}
+      >
         <ViewportSlot
           slotIndex={2}
           view={viewportSlotViews[2]!}
           isActive={activeView === viewportSlotViews[2]}
           onActivate={() => setActiveView(viewportSlotViews[2]!)}
           flex={viewportColSplit}
+          layoutVisible={slotLayoutVisible(2)}
+          maximizedMode={maximizedMode}
         />
-        <ResizeHandle axis="column" onDrag={setViewportColSplit} />
+        {!maximizedMode && <ResizeHandle axis="column" onDrag={setViewportColSplit} />}
         <ViewportSlot
           slotIndex={3}
           view={viewportSlotViews[3]!}
           isActive={activeView === viewportSlotViews[3]}
           onActivate={() => setActiveView(viewportSlotViews[3]!)}
           flex={colB}
+          layoutVisible={slotLayoutVisible(3)}
+          maximizedMode={maximizedMode}
         />
       </div>
     </div>

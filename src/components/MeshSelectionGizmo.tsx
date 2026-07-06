@@ -104,14 +104,55 @@ export function MeshSelectionGizmo({
       anchor.scale
     )
 
+    const live = useAppStore.getState().objects.find((o) => o.id === object.id)
+    if (live) {
+      let moved = false
+      for (const vi of verts) {
+        const next = positions[vi]
+        const prev = live.positions[vi]
+        if (!next || !prev) continue
+        if (
+          Math.abs(next.x - prev.x) > 1e-6 ||
+          Math.abs(next.y - prev.y) > 1e-6 ||
+          Math.abs(next.z - prev.z) > 1e-6
+        ) {
+          moved = true
+          break
+        }
+      }
+      if (!moved) return
+    }
+
     updateObject(object.id, { positions })
     changedRef.current = true
   }
 
   const endDrag = () => {
+    const drag = dragStateRef.current
     draggingRef.current = false
+
+    let changed = false
+    if (drag) {
+      const latest = useAppStore.getState().objects.find((o) => o.id === object.id)
+      if (latest) {
+        for (const vi of Object.keys(drag.basePositions).map(Number)) {
+          const base = drag.basePositions[vi]
+          const cur = latest.positions[vi]
+          if (!base || !cur) continue
+          if (
+            Math.abs(base.x - cur.x) > 1e-6 ||
+            Math.abs(base.y - cur.y) > 1e-6 ||
+            Math.abs(base.z - cur.z) > 1e-6
+          ) {
+            changed = true
+            break
+          }
+        }
+      }
+    }
+
     dragStateRef.current = null
-    if (changedRef.current) {
+    if (changed) {
       commitHistory('Transform components')
     }
     changedRef.current = false

@@ -1,8 +1,9 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useRef, useCallback, useState, useLayoutEffect, useEffect } from 'react'
 import { MOUSE, Vector3 } from 'three'
 import type * as THREE from 'three'
+import { subscribeViewportInteraction, popViewportInteraction, pushViewportInteraction } from '../rendering/viewportFrameLoop'
 
 const _viewMoveRight = new Vector3()
 const _viewMoveUp = new Vector3()
@@ -22,10 +23,12 @@ import { SymmetryPlaneOverlay } from './SymmetryPlaneOverlay'
 import { SymmetryPlaneVisual } from './SymmetryPlaneVisual'
 import { ReferenceImageOverlay } from './ReferenceImageOverlay'
 import { BillboardImages } from './BillboardImages'
+import { ViewportRenderContext, requestViewportFrame, useViewportRender } from './ViewportRenderContext'
 import { ViewportDomContext } from './ViewportDomContext'
 import { ViewportPointerPolicy } from './ViewportPointerPolicy'
 import { ViewportGrid } from './ViewportGrid'
 import { ViewportLighting } from './ViewportLighting'
+import { WebGLContextHandler } from './WebGLContextHandler'
 import { useAppStore, type ViewType, type ActiveTool, type SelectionMode } from '../store/appStore'
 import { getViewportBackground } from '../theme/themes'
 import {
@@ -221,6 +224,55 @@ interface QuadViewportProps {
   slotIndex: ViewportSlotIndex
   isActive: boolean
   onActivate: () => void
+  /** False when hidden during maximize; canvas stays mounted either way. */
+  layoutVisible: boolean
+}
+
+/** Request a draw when a dormant viewport becomes visible again. */
+function ViewportDemandSync() {
+  const { layoutVisible, continuousFrames } = useViewportRender()
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    requestViewportFrame(invalidate, layoutVisible, continuousFrames)
+  }, [layoutVisible, continuousFrames, invalidate])
+  return null
+}
+
+/** Keep demand-mode peer viewports in sync during store-driven edits. */
+function ViewportSceneInvalidator({
+  objects,
+  themeId,
+  meshSelection,
+  viewportDisplayMode,
+  facetExaggeration,
+  showDensityHeatmap,
+  pixelTextureRevision,
+}: {
+  objects: unknown
+  themeId: unknown
+  meshSelection: unknown
+  viewportDisplayMode: unknown
+  facetExaggeration: unknown
+  showDensityHeatmap: unknown
+  pixelTextureRevision: unknown
+}) {
+  const { layoutVisible, continuousFrames } = useViewportRender()
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    requestViewportFrame(invalidate, layoutVisible, continuousFrames)
+  }, [
+    objects,
+    themeId,
+    meshSelection,
+    viewportDisplayMode,
+    facetExaggeration,
+    showDensityHeatmap,
+    pixelTextureRevision,
+    layoutVisible,
+    continuousFrames,
+    invalidate,
+  ])
+  return null
 }
 
 function applyOrthoCamera(view: ViewType, camera: THREE.Camera): void {
@@ -244,6 +296,8 @@ function ViewportControls({
   enableZoom?: boolean
   disableMiddlePan?: boolean
 }) {
+  const { layoutVisible, continuousFrames } = useViewportRender()
+  const invalidate = useThree((s) => s.invalidate)
   const [domElement, setDomElement] = useState<HTMLElement | null>(null)
   const isPerspective = view === 'perspective'
 
@@ -253,6 +307,18 @@ function ViewportControls({
 
   useEffect(() => {
     return () => setDomElement(null)
+  }, [])
+
+  const handleControlsChange = useCallback(() => {
+    requestViewportFrame(invalidate, layoutVisible, continuousFrames)
+  }, [invalidate, layoutVisible, continuousFrames])
+
+  const handleControlsStart = useCallback(() => {
+    pushViewportInteraction()
+  }, [])
+
+  const handleControlsEnd = useCallback(() => {
+    popViewportInteraction()
   }, [])
 
   if (!domElement) return null
@@ -265,6 +331,9 @@ function ViewportControls({
       enableRotate={isPerspective}
       enablePan
       enableZoom={enableZoom}
+      onChange={handleControlsChange}
+      onStart={handleControlsStart}
+      onEnd={handleControlsEnd}
       mouseButtons={{
         LEFT: undefined,
         MIDDLE: disableMiddlePan ? undefined : MOUSE.PAN,
@@ -293,7 +362,7 @@ function pickPixelOnTexturedMesh(
   return uvToPixelCoords(hit.uv, docW, docH)
 }
 
-export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadViewportProps) {
+export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisible }: QuadViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
   const lastSculptRef = useRef(0)
@@ -402,6 +471,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
     selectBillboardImage,
     setActiveView,
     setViewportSlotView,
+    pixelTextureRevision,
   } = useAppStore(
     useShallow((s) => ({
       objects: s.objects,
@@ -471,8 +541,28 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       selectBillboardImage: s.selectBillboardImage,
       setActiveView: s.setActiveView,
       setViewportSlotView: s.setViewportSlotView,
+      pixelTextureRevision: s.pixelTextureRevision,
     }))
   )
+
+  const [interactionActive, setInteractionActive] = useState(false)
+  const pointerInteractionRef = useRef(false)
+
+  useEffect(() => subscribeViewportInteraction(setInteractionActive), [])
+
+  const continuousFrames = layoutVisible && (isActive || interactionActive)
+
+  const beginPointerInteraction = useCallback(() => {
+    if (!layoutVisible || pointerInteractionRef.current) return
+    pointerInteractionRef.current = true
+    pushViewportInteraction()
+  }, [layoutVisible])
+
+  const endPointerInteraction = useCallback(() => {
+    if (!pointerInteractionRef.current) return
+    pointerInteractionRef.current = false
+    popViewportInteraction()
+  }, [])
 
   const handleSelectView = useCallback(
     (nextView: SelectableViewType) => {
@@ -831,6 +921,8 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (useAppStore.getState().meshModal || useAppStore.getState().objectTransformModal) return
+
+      if (e.button === 0) beginPointerInteraction()
 
       const store = useAppStore.getState()
       if (
@@ -1243,6 +1335,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       beginObjectDrag,
       tryBeginMeshSelectionDrag,
       commitHistory,
+      beginPointerInteraction,
     ]
   )
 
@@ -1491,6 +1584,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      try {
       if (useAppStore.getState().meshModal || useAppStore.getState().objectTransformModal) return
       if (e.button === 1) return
 
@@ -1701,6 +1795,9 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         strokeGestureViewRef.current = null
         primitiveGestureViewRef.current = null
       }
+      } finally {
+        if (e.button === 0) endPointerInteraction()
+      }
     },
     [
       view,
@@ -1724,6 +1821,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       knifeCommit,
       commitHistory,
       viewportXRay,
+      endPointerInteraction,
     ]
   )
 
@@ -1918,9 +2016,11 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
 
       <SymmetryPlaneOverlay view={view} containerRef={containerRef} cameraRef={cameraRef} />
 
+      <ViewportRenderContext.Provider value={{ layoutVisible, continuousFrames }}>
       <ViewportDomContext.Provider value={interactionDom}>
       <Canvas
         className="viewport-canvas-root"
+        frameloop={continuousFrames ? 'always' : 'demand'}
         orthographic={isOrtho}
         eventSource={containerRef as React.RefObject<HTMLElement>}
         camera={{
@@ -1942,6 +2042,17 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           applyOrthoCamera(view, camera)
         }}
       >
+        <ViewportDemandSync />
+        <ViewportSceneInvalidator
+          objects={objects}
+          themeId={themeId}
+          meshSelection={meshSelection}
+          viewportDisplayMode={viewportDisplayMode}
+          facetExaggeration={facetExaggeration}
+          showDensityHeatmap={showDensityHeatmap}
+          pixelTextureRevision={pixelTextureRevision}
+        />
+        <WebGLContextHandler />
         <ViewportPointerPolicy gizmoActive={canvasPointerEvents} />
 
         <ViewMoveBasisSync enabled={isActiveViewport && view === 'perspective'} />
@@ -1997,6 +2108,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         )}
       </Canvas>
       </ViewportDomContext.Provider>
+      </ViewportRenderContext.Provider>
     </div>
   )
 }

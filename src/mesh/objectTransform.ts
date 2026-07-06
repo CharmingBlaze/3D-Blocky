@@ -26,6 +26,34 @@ export function cloneTransform(t: ObjectTransform): ObjectTransform {
   }
 }
 
+const TRANSFORM_EPS = 1e-6
+
+export function transformsEqual(
+  a: ObjectTransform,
+  b: ObjectTransform,
+  eps = TRANSFORM_EPS
+): boolean {
+  return (
+    Math.abs(a.position.x - b.position.x) <= eps &&
+    Math.abs(a.position.y - b.position.y) <= eps &&
+    Math.abs(a.position.z - b.position.z) <= eps &&
+    Math.abs(a.rotation.x - b.rotation.x) <= eps &&
+    Math.abs(a.rotation.y - b.rotation.y) <= eps &&
+    Math.abs(a.rotation.z - b.rotation.z) <= eps &&
+    Math.abs(a.scale.x - b.scale.x) <= eps &&
+    Math.abs(a.scale.y - b.scale.y) <= eps &&
+    Math.abs(a.scale.z - b.scale.z) <= eps
+  )
+}
+
+export function transformFromObject3D(obj: THREE.Object3D): ObjectTransform {
+  return {
+    position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
+    rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z },
+    scale: { x: obj.scale.x, y: obj.scale.y, z: obj.scale.z },
+  }
+}
+
 export function computeCentroid(positions: Vec3[]): Vec3 {
   if (positions.length === 0) return { x: 0, y: 0, z: 0 }
   let x = 0

@@ -139,7 +139,12 @@ export async function serializeProjectFromSnapshot(
 }
 
 export function parseProjectFile(text: string): SerializedProjectFile {
-  const parsed = JSON.parse(text) as SerializedProjectFile
+  let parsed: SerializedProjectFile
+  try {
+    parsed = JSON.parse(text) as SerializedProjectFile
+  } catch {
+    throw new Error('Invalid project file: not valid JSON.')
+  }
   if (parsed.version !== 1) {
     throw new Error('Unsupported project file version.')
   }

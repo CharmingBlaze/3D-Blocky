@@ -1,5 +1,6 @@
-import { useEffect, useCallback, lazy, Suspense } from 'react'
+import { useEffect, useCallback, lazy, Suspense, useState } from 'react'
 import './App.css'
+import { subscribeGraphicsNotice } from './rendering/webglContextNotice'
 import { ViewportLayout } from './components/ViewportLayout'
 import { SidePanel } from './components/SidePanel'
 import { ToolRing } from './components/ToolRing'
@@ -74,6 +75,9 @@ export default function App() {
   const uvEditorOpen = useAppStore((s) => s.uvEditorOpen)
   const materialEditorOpen = useAppStore((s) => s.materialEditorOpen)
   const pixelEditorOpen = useAppStore((s) => s.pixelEditorOpen)
+  const [graphicsNotice, setGraphicsNotice] = useState<string | null>(null)
+
+  useEffect(() => subscribeGraphicsNotice(setGraphicsNotice), [])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -105,12 +109,16 @@ export default function App() {
       }
       if (ctrlOrMeta && e.code === 'KeyS' && !e.shiftKey) {
         e.preventDefault()
-        void useAppStore.getState().saveProject()
+        void useAppStore.getState().saveProject().catch((err) => {
+          window.alert(err instanceof Error ? err.message : 'Save failed.')
+        })
         return
       }
       if (ctrlOrMeta && e.code === 'KeyO' && !e.shiftKey) {
         e.preventDefault()
-        useAppStore.getState().requestProjectLoad()
+        void useAppStore.getState().loadProjectFromDialog().catch((err) => {
+          window.alert(err instanceof Error ? err.message : 'Load failed.')
+        })
         return
       }
       if (ctrlOrMeta && e.code === 'KeyN' && !e.shiftKey) {
@@ -431,6 +439,12 @@ export default function App() {
         </div>
         <SidePanel />
       </div>
+
+      {graphicsNotice && (
+        <div className="graphics-notice" role="status" aria-live="polite">
+          {graphicsNotice}
+        </div>
+      )}
 
       {showToolRing && <ToolRing onClose={() => setShowToolRing(false)} />}
       {showExportDialog && <ExportDialog onClose={() => setShowExportDialog(false)} />}

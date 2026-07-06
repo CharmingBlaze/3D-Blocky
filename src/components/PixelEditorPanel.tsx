@@ -124,6 +124,7 @@ export function PixelEditorPanel() {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [customW, setCustomW] = useState(64)
   const [customH, setCustomH] = useState(64)
+  const [fileMessage, setFileMessage] = useState<string | null>(null)
   const [spacePan, setSpacePan] = useState(false)
   const [shapePreview, setShapePreview] = useState<{
     x0: number
@@ -399,58 +400,63 @@ export function PixelEditorPanel() {
   }
 
   const handleFileMenu = async (action: string) => {
-    if (action === 'new') {
-      store.createNew(customW, customH, objectId ?? undefined)
-      return
-    }
-    if (action === 'import') {
-      const file = await pickOpenFile({
-        title: 'Import image',
-        filters: IMAGE_IMPORT_FILTERS,
-      })
-      if (file) await store.importImage(file, 'new')
-      return
-    }
-    if (action === 'import-layer') {
-      const file = await pickOpenFile({
-        title: 'Import image as layer',
-        filters: IMAGE_IMPORT_FILTERS,
-      })
-      if (file) await store.importImage(file, 'layer')
-      return
-    }
-    if (action === 'save') {
-      await store.saveDoc()
-      return
-    }
-    if (action === 'export-png') {
-      await store.exportPng()
-      return
-    }
-    if (action === 'export-project') {
-      store.exportProject()
-      return
-    }
-    if (action === 'import-project') {
-      const file = await pickOpenFile({
-        title: 'Import pixel texture project',
-        filters: PIXEL_PROJECT_FILTERS,
-      })
-      if (file) await store.importProject(file)
-      return
-    }
-    if (action === 'resize' || action === 'custom') {
-      if (doc) store.resizeDoc(customW, customH)
-      else store.createNew(customW, customH, objectId ?? undefined)
-      return
-    }
-    if (action.startsWith('preset-')) {
-      const preset = PIXEL_SIZE_PRESETS.find((p) => p.label === action.replace(/^preset-/, ''))
-      if (!preset) return
-      setCustomW(preset.width)
-      setCustomH(preset.height)
-      if (doc) store.resizeDoc(preset.width, preset.height)
-      else store.createNew(preset.width, preset.height, objectId ?? undefined)
+    setFileMessage(null)
+    try {
+      if (action === 'new') {
+        store.createNew(customW, customH, objectId ?? undefined)
+        return
+      }
+      if (action === 'import') {
+        const file = await pickOpenFile({
+          title: 'Import image',
+          filters: IMAGE_IMPORT_FILTERS,
+        })
+        if (file) await store.importImage(file, 'new')
+        return
+      }
+      if (action === 'import-layer') {
+        const file = await pickOpenFile({
+          title: 'Import image as layer',
+          filters: IMAGE_IMPORT_FILTERS,
+        })
+        if (file) await store.importImage(file, 'layer')
+        return
+      }
+      if (action === 'save') {
+        await store.saveDoc()
+        return
+      }
+      if (action === 'export-png') {
+        await store.exportPng()
+        return
+      }
+      if (action === 'export-project') {
+        await store.exportProject()
+        return
+      }
+      if (action === 'import-project') {
+        const file = await pickOpenFile({
+          title: 'Import pixel texture project',
+          filters: PIXEL_PROJECT_FILTERS,
+        })
+        if (file) await store.importProject(file)
+        return
+      }
+      if (action === 'resize' || action === 'custom') {
+        if (doc) store.resizeDoc(customW, customH)
+        else store.createNew(customW, customH, objectId ?? undefined)
+        return
+      }
+      if (action.startsWith('preset-')) {
+        const preset = PIXEL_SIZE_PRESETS.find((p) => p.label === action.replace(/^preset-/, ''))
+        if (!preset) return
+        setCustomW(preset.width)
+        setCustomH(preset.height)
+        if (doc) store.resizeDoc(preset.width, preset.height)
+        else store.createNew(preset.width, preset.height, objectId ?? undefined)
+      }
+    } catch (err) {
+      setFileMessage(err instanceof Error ? err.message : 'File operation failed.')
     }
   }
 
@@ -797,7 +803,11 @@ export function PixelEditorPanel() {
       </div>
       <footer className="px-statusbar">
         <span>Scroll zoom · Space pan · Shift constrain · Alt bucket global</span>
-        <span>I pick · B bucket · P E L R O shortcuts</span>
+        {fileMessage ? (
+          <span className="muted">{fileMessage}</span>
+        ) : (
+          <span>I pick · B bucket · P E L R O shortcuts</span>
+        )}
       </footer>
     </div>
   )

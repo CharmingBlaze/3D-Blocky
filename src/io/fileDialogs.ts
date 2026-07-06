@@ -243,15 +243,23 @@ export async function pickSavePath(options: SaveFileOptions): Promise<string | n
 export async function saveBlob(blob: Blob, options: SaveFileOptions): Promise<boolean> {
   const target = await pickSaveTarget(options)
   if (!target) return false
-  await writeBlobTarget(target, blob)
-  return true
+  try {
+    await writeBlobTarget(target, blob)
+    return true
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('Save failed.')
+  }
 }
 
 export async function saveText(content: string, options: SaveFileOptions): Promise<boolean> {
   const target = await pickSaveTarget(options)
   if (!target) return false
-  await writeTextTarget(target, content)
-  return true
+  try {
+    await writeTextTarget(target, content)
+    return true
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('Save failed.')
+  }
 }
 
 export async function saveJson(data: object, options: SaveFileOptions): Promise<boolean> {
