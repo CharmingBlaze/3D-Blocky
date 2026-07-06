@@ -3,27 +3,10 @@ import { THEMES, type ThemeGroup, type ThemeId } from '../theme/themes'
 
 const THEME_GROUPS: ThemeGroup[] = ['Classic', 'Game Systems']
 
-interface ThemePickerProps {
-  variant?: 'side' | 'bar'
-}
-
-export function ThemePicker({ variant = 'side' }: ThemePickerProps) {
+export function ThemePicker() {
   const themeId = useAppStore((s) => s.themeId)
   const setThemeId = useAppStore((s) => s.setThemeId)
   const theme = THEMES.find((t) => t.id === themeId) ?? THEMES[0]!
-
-  if (variant === 'bar') {
-    return (
-      <footer className="bottom-bar">
-        <ThemePickerControls
-          themeId={themeId}
-          setThemeId={setThemeId}
-          themeName={theme.name}
-          theme={theme}
-        />
-      </footer>
-    )
-  }
 
   return (
     <div className="side-theme-picker">
@@ -51,7 +34,6 @@ function ThemePickerControls({
   return (
     <>
       <label className="theme-picker">
-        <span className="theme-picker-label">Theme</span>
         <select
           className="theme-select side-select shape-kind-select"
           value={themeId}

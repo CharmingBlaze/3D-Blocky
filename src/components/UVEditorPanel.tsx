@@ -9,11 +9,11 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { FloatingPanel } from './FloatingPanel'
 import { useAppStore } from '../store/appStore'
-import { resolveEffectiveMaterial } from '../material/materials'
 import { compositeLayers } from '../pixel/compositeLayers'
 import { pickOpenFile } from '../io/fileDialogs'
 import { IMAGE_IMPORT_FILTERS } from '../io/download'
 import { ensureObjectUVs, resolveUvMappingMode, detachFacesUvTopology, type SceneObjectWithUVs } from '../uv/uvObject'
+import { activeObjectTextureId, listSceneTextures } from '../uv/sceneTextures'
 import {
   boundaryEdgesForFacesSpatial,
   expandFaceToPlanarRegion,
@@ -272,6 +272,7 @@ export function UVEditorPanel() {
 
   const draftUvsRef = useRef<Uv2[] | null>(null)
   const redrawRafRef = useRef<number | null>(null)
+  const canvasSizeRef = useRef({ w: 0, h: 0 })
   const liveViewRef = useRef<{ panX: number; panY: number; zoom: number } | null>(null)
   const hoverRef = useRef<{
     face: number | null
@@ -316,12 +317,14 @@ export function UVEditorPanel() {
     selectedObjectId,
     meshSelection,
     loadObjectTexture,
+    assignObjectTextureDocument,
     setObjectUvPoints,
     transformSelectedUvIslands,
     unwrapSelectedUvFaces,
     selectUvFaces,
     setObjectUvMappingMode,
-    pushHistory,
+    captureUndoPoint,
+    replaceHistoryHead,
     updateObject,
   } = useAppStore(
     useShallow((s) => ({
@@ -360,12 +363,14 @@ export function UVEditorPanel() {
       selectedObjectId: s.selectedObjectId,
       meshSelection: s.meshSelection,
       loadObjectTexture: s.loadObjectTexture,
+      assignObjectTextureDocument: s.assignObjectTextureDocument,
       setObjectUvPoints: s.setObjectUvPoints,
       transformSelectedUvIslands: s.transformSelectedUvIslands,
       unwrapSelectedUvFaces: s.unwrapSelectedUvFaces,
       selectUvFaces: s.selectUvFaces,
       setObjectUvMappingMode: s.setObjectUvMappingMode,
-      pushHistory: s.pushHistory,
+      captureUndoPoint: s.captureUndoPoint,
+      replaceHistoryHead: s.replaceHistoryHead,
       updateObject: s.updateObject,
     }))
   )
@@ -374,12 +379,11 @@ export function UVEditorPanel() {
   const obj = useAppStore((s) =>
     objectId ? s.objects.find((o) => o.id === objectId) ?? null : null
   )
-  const texId = useMemo(() => {
-    if (!obj) return null
-    const mat = resolveEffectiveMaterial(obj)
-    if (mat.mode === 'texture') return mat.textureId ?? obj.id
-    return obj.id
-  }, [obj])
+  const sceneTextures = useAppStore(
+    useShallow((s) => listSceneTextures(s.pixelDocuments, s.objectTextures, s.objects))
+  )
+  const activeTextureId = useMemo(() => activeObjectTextureId(obj), [obj])
+  const texId = activeTextureId
   const texture = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
   const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
   const texW = pixelDoc?.width ?? texture?.width ?? 256
@@ -732,6 +736,31 @@ export function UVEditorPanel() {
     setZoom,
   ])
 
+  const getViewPanZoom = useCallback(() => {
+    const live = liveViewRef.current
+    if (live) return live
+    const state = useAppStore.getState()
+    return {
+      panX: state.uvEditorPanX,
+      panY: state.uvEditorPanY,
+      zoom: state.uvEditorZoom,
+    }
+  }, [])
+
+  const clearPanPreview = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.style.transform = ''
+    canvas.style.willChange = ''
+  }, [])
+
+  const applyPanPreview = useCallback((dx: number, dy: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.style.willChange = 'transform'
+    canvas.style.transform = `translate3d(${dx}px, ${dy}px, 0)`
+  }, [])
+
   const screenToUvPixel = useCallback(
     (clientX: number, clientY: number) => {
       const canvas = canvasRef.current
@@ -739,26 +768,14 @@ export function UVEditorPanel() {
       const rect = canvas.getBoundingClientRect()
       const sx = clientX - rect.left
       const sy = clientY - rect.top
-      const live = liveViewRef.current
-      const panX = live?.panX ?? pan.x
-      const panY = live?.panY ?? pan.y
-      const z = live?.zoom ?? zoom
+      const { panX, panY, zoom: z } = getViewPanZoom()
       return {
         x: (sx - panX) / z,
         y: (sy - panY) / z,
       }
     },
-    [pan, zoom]
+    [getViewPanZoom]
   )
-
-  const getViewPanZoom = useCallback(() => {
-    const live = liveViewRef.current
-    return {
-      panX: live?.panX ?? pan.x,
-      panY: live?.panY ?? pan.y,
-      zoom: live?.zoom ?? zoom,
-    }
-  }, [pan, zoom])
 
   const ensureSelectionVisible = useCallback(
     (faceIndices: number[]) => {
@@ -783,8 +800,12 @@ export function UVEditorPanel() {
     if (!canvas || !container || !ensured) return
     const cw = container.clientWidth
     const ch = container.clientHeight
-    canvas.width = cw
-    canvas.height = ch
+    if (canvasSizeRef.current.w !== cw || canvasSizeRef.current.h !== ch) {
+      canvas.width = cw
+      canvas.height = ch
+      canvasSizeRef.current = { w: cw, h: ch }
+    }
+    clearPanPreview()
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
@@ -1100,6 +1121,7 @@ export function UVEditorPanel() {
     getSelectionPivotUv,
     getUvs,
     theme,
+    clearPanPreview,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -1353,7 +1375,7 @@ export function UVEditorPanel() {
     const d = dragRef.current
     if (!d || d.kind !== 'pending' || !d.activeKind || !ensured || !objectId) return false
     d.kind = d.activeKind
-    pushHistory()
+    captureUndoPoint('Edit UV')
 
     const editFaces = regionFacesForEdit
     const transformMesh =
@@ -1382,7 +1404,7 @@ export function UVEditorPanel() {
   }, [
     ensured,
     objectId,
-    pushHistory,
+    captureUndoPoint,
     buildSnapContext,
     regionFacesForEdit,
     prepareFaceTransformMesh,
@@ -1442,7 +1464,6 @@ export function UVEditorPanel() {
       const pivot = hasFaceSel
         ? getSelectionPivotUv(regionFacesForEdit)
         : uvBoundsCenter(uvBoundsFromIndices(getUvs(), uvEditorSelectedPoints))
-      pushHistory()
       if (hasFaceSel) prepareFaceTransformMesh(regionFacesForEdit)
       transformSelectedUvIslands({
         translate: [clickUv.u - pivot.u, clickUv.v - pivot.v],
@@ -1459,7 +1480,6 @@ export function UVEditorPanel() {
       regionFacesForEdit,
       getUvs,
       getSelectionPivotUv,
-      pushHistory,
       prepareFaceTransformMesh,
       transformSelectedUvIslands,
     ]
@@ -1491,6 +1511,7 @@ export function UVEditorPanel() {
     }
 
     if (e.button === 1 || (e.button === 0 && spacePan)) {
+      e.preventDefault()
       liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
       dragRef.current = {
         kind: 'pan',
@@ -1499,6 +1520,7 @@ export function UVEditorPanel() {
         startClientX: e.clientX,
         startClientY: e.clientY,
       }
+      setHoverCursor('grabbing')
       capturePointer = true
     } else if (e.button !== 0) {
       return
@@ -1538,7 +1560,7 @@ export function UVEditorPanel() {
     } else if (uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0) {
       const resize = pickResizeHandle(px.x, px.y, regionFacesForEdit)
       if (resize) {
-        pushHistory()
+        captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
         const startBounds = getSelectionBoundsUv(regionFacesForEdit)
@@ -1558,7 +1580,7 @@ export function UVEditorPanel() {
         }
         capturePointer = true
       } else if (pickRotateHandle(px.x, px.y)) {
-        pushHistory()
+        captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
         const pivotUv = getSelectionPivotUv(regionFacesForEdit)
@@ -1663,12 +1685,14 @@ export function UVEditorPanel() {
     if (!active || active.kind === 'pending') return
 
     if (active.kind === 'pan' && active.panX !== undefined && active.startClientX !== undefined) {
+      const dx = e.clientX - active.startClientX
+      const dy = e.clientY - (active.startClientY ?? 0)
       liveViewRef.current = {
-        panX: active.panX + (e.clientX - active.startClientX),
-        panY: (active.panY ?? 0) + (e.clientY - (active.startClientY ?? 0)),
+        panX: active.panX + dx,
+        panY: (active.panY ?? 0) + dy,
         zoom,
       }
-      scheduleRedraw()
+      applyPanPreview(dx, dy)
       return
     }
 
@@ -1800,6 +1824,13 @@ export function UVEditorPanel() {
     const kind = dragRef.current?.kind
     const wasPending = kind === 'pending'
     dragRef.current = null
+    if (kind === 'pan') {
+      commitLiveView()
+      scheduleRedraw()
+      setHoverCursor('crosshair')
+      updateHoverAt(e.clientX, e.clientY)
+      return
+    }
     commitLiveView()
     if (
       kind === 'handle' ||
@@ -1808,6 +1839,7 @@ export function UVEditorPanel() {
       kind === 'faceScale'
     ) {
       flushDraftUvs()
+      replaceHistoryHead('Edit UV')
       if (kind === 'faceRotate') {
         setIslandFields((f) => ({ ...f, rot: lastIslandRotRef.current }))
       }
@@ -1857,7 +1889,6 @@ export function UVEditorPanel() {
           const dv = e.key === 'ArrowUp' ? -step / texH : e.key === 'ArrowDown' ? step / texH : 0
           if (du || dv) {
             e.preventDefault()
-            pushHistory()
             transformSelectedUvIslands({ translate: [du, dv] })
           }
         }
@@ -1880,7 +1911,6 @@ export function UVEditorPanel() {
     texW,
     texH,
     uvEditorGridDivisions,
-    pushHistory,
     uvEditorMode,
     transformSelectedUvIslands,
     frameSelection,
@@ -1904,7 +1934,6 @@ export function UVEditorPanel() {
 
   const updatePointField = (axis: 'x' | 'y', value: number) => {
     if (!objectId || uvEditorSelectedPoints.length === 0) return
-    pushHistory()
     const uv = pixelToUv(
       axis === 'x' ? value : pointFields.x,
       axis === 'y' ? value : pointFields.y,
@@ -1912,7 +1941,7 @@ export function UVEditorPanel() {
       texH
     )
     if (uvEditorSelectedPoints.length === 1) {
-      setObjectUvPoints(objectId, [{ uvIndex: uvEditorSelectedPoints[0], u: uv.u, v: uv.v }], false)
+      setObjectUvPoints(objectId, [{ uvIndex: uvEditorSelectedPoints[0], u: uv.u, v: uv.v }], true)
     } else {
       const first = ensured?.uvs[uvEditorSelectedPoints[0]]
       if (!first) return
@@ -1975,6 +2004,36 @@ export function UVEditorPanel() {
         onDrop={onDrop}
       >
         <div className="uv-editor-toolbar">
+          {objectId && (
+            <label
+              className="uv-editor-texture-select"
+              title="Scene textures — pick an atlas shared by any number of objects"
+            >
+              <span className="uv-editor-texture-label">Texture</span>
+              <select
+                className="shape-kind-select side-select uv-texture-select"
+                value={activeTextureId ?? ''}
+                onChange={(e) => {
+                  const id = e.target.value
+                  if (id) assignObjectTextureDocument(objectId, id)
+                }}
+                disabled={sceneTextures.length === 0}
+              >
+                {sceneTextures.length === 0 ? (
+                  <option value="">No textures — import one</option>
+                ) : (
+                  <>
+                    {!activeTextureId && <option value="">Select texture…</option>}
+                    {sceneTextures.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
+          )}
           <div className="uv-editor-mode-group">
             <button
               type="button"
@@ -2177,11 +2236,15 @@ export function UVEditorPanel() {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={(e) => {
-            onPointerUp(e)
+            if (dragRef.current?.kind === 'pan') {
+              onPointerUp(e)
+              return
+            }
             hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
             setHoverCursor('crosshair')
             scheduleRedraw()
           }}
+          onAuxClick={(e) => e.preventDefault()}
           onWheel={onWheel}
         >
           <canvas ref={canvasRef} className="uv-editor-canvas" />
@@ -2267,7 +2330,6 @@ export function UVEditorPanel() {
                   if (uvEditorSelectedFaces.length === 0) return
                   const deltaDeg = islandFields.rot - lastIslandRotRef.current
                   if (Math.abs(deltaDeg) < 1e-6) return
-                  pushHistory()
                   transformSelectedUvIslands({
                     rotate: (deltaDeg * Math.PI) / 180,
                   })

@@ -192,6 +192,8 @@ export function SidePanel() {
     activateSelectTool,
     selectionMode,
     setSelectionMode,
+    selectAllInMode,
+    deselectAllInMode,
     strokeMode,
     setStrokeMode,
     drawInputMode,
@@ -292,6 +294,8 @@ export function SidePanel() {
       activateSelectTool: s.activateSelectTool,
       selectionMode: s.selectionMode,
       setSelectionMode: s.setSelectionMode,
+      selectAllInMode: s.selectAllInMode,
+      deselectAllInMode: s.deselectAllInMode,
       strokeMode: s.strokeMode,
       setStrokeMode: s.setStrokeMode,
       drawInputMode: s.drawInputMode,
@@ -441,6 +445,40 @@ export function SidePanel() {
   const hasDeletableSelection =
     selectionCount > 0 ||
     (selectionMode !== 'object' && selectionHasComponents(meshSelection))
+
+  const componentTargetId =
+    meshSelection?.objectId ?? selectedObjectId ?? selectionObjectIds[0] ?? null
+  const componentTarget = componentTargetId
+    ? objects.find((o) => o.id === componentTargetId)
+    : undefined
+
+  const canSelectAllInMode =
+    selectionMode === 'object'
+      ? objects.length > 0
+      : !!(componentTarget ?? objects.length > 0)
+
+  const canDeselectAllInMode =
+    selectionMode === 'object'
+      ? selectionCount > 0
+      : selectionHasComponents(meshSelection)
+
+  const selectAllTitle =
+    selectionMode === 'object'
+      ? 'Select all objects'
+      : selectionMode === 'vertex'
+        ? 'Select all vertices on the active object'
+        : selectionMode === 'edge'
+          ? 'Select all edges on the active object'
+          : 'Select all faces on the active object'
+
+  const deselectAllTitle =
+    selectionMode === 'object'
+      ? 'Deselect all objects'
+      : selectionMode === 'vertex'
+        ? 'Deselect all vertices'
+        : selectionMode === 'edge'
+          ? 'Deselect all edges'
+          : 'Deselect all faces'
 
   const activeLabel =
     activeTool === 'primitive-box' && activePrimitiveKind
@@ -623,9 +661,14 @@ export function SidePanel() {
                     Adjust depth for the selected doodle in real time.
                   </p>
                 )}
-                {activeExtrudeOn && !selectedExtrudableDoodle && (
+                {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
                   <p className="side-color-hint muted">
                     Drag up or right to extrude farther; left or down extrudes the opposite way.
+                  </p>
+                )}
+                {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'vector-pen' && (
+                  <p className="side-color-hint muted">
+                    Set extrude depth with the slider; drawing will not change it.
                   </p>
                 )}
               </>
@@ -720,6 +763,26 @@ export function SidePanel() {
                 title="Select faces (4)"
               >
                 Face
+              </button>
+            </SideBtnGroup>
+            <SideBtnGroup cols={2}>
+              <button
+                type="button"
+                className="side-btn"
+                onClick={selectAllInMode}
+                disabled={!canSelectAllInMode}
+                title={selectAllTitle}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="side-btn"
+                onClick={deselectAllInMode}
+                disabled={!canDeselectAllInMode}
+                title={deselectAllTitle}
+              >
+                Deselect all
               </button>
             </SideBtnGroup>
             <button
@@ -1191,10 +1254,10 @@ export function SidePanel() {
               Import / Export
             </button>
           </SideSection>
-        </div>
 
-        <div className="side-panel-footer">
-          <ThemePicker variant="side" />
+          <SideSection title="Theme">
+            <ThemePicker />
+          </SideSection>
         </div>
       </aside>
     </>

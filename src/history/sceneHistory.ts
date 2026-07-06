@@ -318,11 +318,15 @@ export class SceneHistoryStack {
     }
   }
 
-  /** Push a snapshot; skips if identical to the current head. Returns whether a new entry was added. */
-  push(snapshot: SceneSnapshot, label?: string): boolean {
+  /** Push a snapshot; skips if identical to the current head unless forced. Returns whether a new entry was added. */
+  push(
+    snapshot: SceneSnapshot,
+    label?: string,
+    options?: { force?: boolean }
+  ): boolean {
     const captured = captureSceneSnapshot(snapshot)
     const current = this.entries[this.index]?.snapshot
-    if (current && snapshotsEqual(current, captured)) return false
+    if (!options?.force && current && snapshotsEqual(current, captured)) return false
 
     const trimmed = this.entries.slice(0, this.index + 1)
     trimmed.push({ snapshot: captured, label })

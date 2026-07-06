@@ -1,5 +1,7 @@
 import { faceNormal, type Vec3 } from '../utils/math'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
+import { isSketchDoodleObject } from '../stroke/sketchSource'
+import { isVectorDoodleObject } from '../vector/vectorSource'
 import { planarProjectFaceUVs } from './uvEditing'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2, uv2 } from './uvTypes'
@@ -8,6 +10,11 @@ import { needsUvRepack } from './uvAuto'
 
 export type UvMappingMode = 'box' | 'perFace'
 export type SceneObjectWithUVs = SceneObject & { uvs: Uv2[]; faceUvIndices: number[][] }
+
+/** Sketch/pen extruded meshes — use directional Blockbench atlas instead of smart UV. */
+export function isDoodleLikeObject(obj: SceneObject): boolean {
+  return isSketchDoodleObject(obj) || isVectorDoodleObject(obj)
+}
 
 export function resolveUvMappingMode(obj: SceneObject): UvMappingMode {
   return obj.uvMappingMode ?? 'perFace'
@@ -43,7 +50,30 @@ export function autoUnwrapObject(obj: SceneObject): SceneObjectWithUVs {
 }
 
 export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
-  if (!obj.uvs?.length || obj.faceUvIndices?.length !== obj.faces.length || needsUvRepack(obj)) {
+  const doodle = isDoodleLikeObject(obj)
+  if (
+    doodle ||
+    !obj.uvs?.length ||
+    obj.faceUvIndices?.length !== obj.faces.length ||
+    needsUvRepack(obj)
+  ) {
+    const base = ensureUvTopology(obj)
+    if (doodle) {
+      const allFaces = base.faces.map((_, i) => i)
+      const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
+        base,
+        allFaces,
+        'blockbench',
+        { angleLimitDeg: AUTO_SEAM_ANGLE_DEG, margin: 0.04, repackAll: true, markPacked: true }
+      )
+      return {
+        ...base,
+        uvs,
+        faceUvIndices,
+        uvMappingMode: 'perFace',
+        uvAutoPacked: uvAutoPacked ?? true,
+      }
+    }
     return autoUnwrapObject(obj)
   }
   return obj as SceneObjectWithUVs
@@ -57,7 +87,7 @@ export function assignUvMappingForMode(obj: SceneObject, mode: UvMappingMode, pa
   const mapped = mode === 'box' ? assignBoxFaceUVs(obj) : assignPlanarUVs(obj)
   if (!packIslands || !mapped.uvs?.length || !mapped.faceUvIndices?.length) return mapped
   const allFaces = mapped.faces.map((_, i) => i)
-  const method = mode === 'box' ? 'blockbench' : 'auto'
+  const method = mode === 'box' || isDoodleLikeObject(mapped) ? 'blockbench' : 'auto'
   const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
     mapped as SceneObjectWithUVs,
     allFaces,

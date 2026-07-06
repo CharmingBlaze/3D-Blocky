@@ -43,10 +43,10 @@ export function MeshSelectionGizmo({
   const anchorRef = useRef<THREE.Object3D>(null)
   const draggingRef = useRef(false)
   const dragStateRef = useRef<DragState | null>(null)
-  const savedHistoryRef = useRef(false)
+  const changedRef = useRef(false)
   const glDomElement = useThree((s) => s.gl.domElement)
 
-  const pushHistory = useAppStore((s) => s.pushHistory)
+  const commitHistory = useAppStore((s) => s.commitHistory)
   const updateObject = useAppStore((s) => s.updateObject)
 
   const center = useMemo(
@@ -68,10 +68,7 @@ export function MeshSelectionGizmo({
     if (!anchor || object.topologyLocked) return
 
     draggingRef.current = true
-    if (!savedHistoryRef.current) {
-      pushHistory()
-      savedHistoryRef.current = true
-    }
+    changedRef.current = false
 
     const verts = getAffectedVertices(meshSelection, object)
     const basePositions: Record<number, Vec3> = {}
@@ -108,12 +105,16 @@ export function MeshSelectionGizmo({
     )
 
     updateObject(object.id, { positions })
+    changedRef.current = true
   }
 
   const endDrag = () => {
     draggingRef.current = false
     dragStateRef.current = null
-    savedHistoryRef.current = false
+    if (changedRef.current) {
+      commitHistory('Transform components')
+    }
+    changedRef.current = false
 
     const anchor = anchorRef.current
     if (!anchor) return

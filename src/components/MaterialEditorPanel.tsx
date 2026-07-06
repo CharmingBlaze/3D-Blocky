@@ -48,6 +48,7 @@ export function MaterialEditorPanel() {
     setMaterialEditorGradientHandle,
     setMaterialEditorGradientActiveStop,
     beginMaterialEditorGradientDrag,
+    commitMaterialEditorGradientDrag,
     setMaterialEditorGradientStop,
     previewMaterialEditorGradient,
     setMaterialEditorApplyToSelection,
@@ -89,6 +90,7 @@ export function MaterialEditorPanel() {
       setMaterialEditorGradientHandle: s.setMaterialEditorGradientHandle,
       setMaterialEditorGradientActiveStop: s.setMaterialEditorGradientActiveStop,
       beginMaterialEditorGradientDrag: s.beginMaterialEditorGradientDrag,
+      commitMaterialEditorGradientDrag: s.commitMaterialEditorGradientDrag,
       setMaterialEditorGradientStop: s.setMaterialEditorGradientStop,
       previewMaterialEditorGradient: s.previewMaterialEditorGradient,
       setMaterialEditorApplyToSelection: s.setMaterialEditorApplyToSelection,
@@ -316,6 +318,7 @@ export function MaterialEditorPanel() {
             onEndChange={(h) => setMaterialEditorGradientHandle(1, h)}
             onActiveStopChange={setMaterialEditorGradientActiveStop}
             onDragBegin={beginMaterialEditorGradientDrag}
+            onDragEnd={commitMaterialEditorGradientDrag}
           />
           <label className="mat-field-block">
             <span>Preset direction</span>

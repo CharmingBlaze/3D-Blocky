@@ -154,6 +154,22 @@ function resampleSpacing(points: Vec2[], brushDensity: number): number {
   return Math.max(1.1, Math.min(3.5, diagonal / 56, brushDensity * 0.28))
 }
 
+function dedupeConsecutivePoints(points: Vec2[], epsilon = 0.01): Vec2[] {
+  if (points.length === 0) return []
+  const out: Vec2[] = [points[0]!]
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i]!
+    const prev = out[out.length - 1]!
+    if (Math.hypot(p.x - prev.x, p.y - prev.y) > epsilon) out.push(p)
+  }
+  return out
+}
+
+export interface PrepareSketchStrokeOptions {
+  preserveDetail?: boolean
+  pathClosed?: boolean
+}
+
 /**
  * Light stroke prep — preserves the drawn path, only snaps closed loops and
  * resamples to even spacing (no RDP simplification that distorts shape).
@@ -161,9 +177,31 @@ function resampleSpacing(points: Vec2[], brushDensity: number): number {
 export function prepareSketchStroke(
   points: Vec2[],
   closeThreshold: number,
-  brushDensity: number
+  brushDensity: number,
+  options: PrepareSketchStrokeOptions = {}
 ): PreparedSketch | null {
   if (points.length < 2) return null
+
+  if (options.preserveDetail) {
+    let work = dedupeConsecutivePoints(points)
+    const threshold = closeThreshold * 2.5
+    let isClosed = options.pathClosed === true || classifyStroke(work, threshold) === 'closed'
+    if (isClosed && work.length >= 3) {
+      const first = work[0]!
+      const last = work[work.length - 1]!
+      if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.01) {
+        work = work.slice(0, -1)
+      }
+    }
+    if (work.length < 2) return null
+    const center = strokeCentroid(work)
+    return {
+      points: work,
+      relative: relativePoints(work, center),
+      center,
+      isClosed: isClosed && work.length >= 3,
+    }
+  }
 
   const snapped = snapSketchStrokeClosed(points, closeThreshold)
   const threshold = effectiveCloseThreshold(snapped, closeThreshold) * 2.5
@@ -221,11 +259,15 @@ function resolveExtrudeDepth(input: PolylineInput, brushDensity: number): number
 function buildClosedSoftBlob(
   relative: Vec2[],
   polyBudget: number,
-  extrudeDepth: number
+  extrudeDepth: number,
+  preserveDetail = false
 ): HalfEdgeMesh {
-  const maxBoundary = Math.max(8, Math.min(20, Math.floor(polyBudget / 4)))
-  const boundary = capBoundaryPoints(relative, maxBoundary)
-  const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (maxBoundary + 4))))
+  const maxBoundary = preserveDetail
+    ? relative.length
+    : Math.max(12, Math.min(relative.length, Math.floor(polyBudget / 3)))
+  const boundary =
+    relative.length <= maxBoundary ? relative : capBoundaryPoints(relative, maxBoundary)
+  const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (boundary.length + 4))))
   return generateSoftInflateDome(boundary, {
     depth: Math.max(4, extrudeDepth),
     rings,
@@ -321,7 +363,10 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
 
   if (points.length < 2 || view === 'perspective') return null
 
-  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity)
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    pathClosed: input.pathClosed,
+  })
   if (!prepared) return null
 
   const { relative, center, isClosed } = prepared
@@ -329,7 +374,7 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
   const kind: SketchDoodleKind = isClosed ? 'soft' : 'path'
 
   const mesh = isClosed
-    ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth)
+    ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth, !!input.preserveDetail)
     : buildOpenSoftTube(relative, brushDensity)
 
   if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
@@ -366,7 +411,10 @@ export function sharpSketchDoodleToObject(input: PolylineInput): SceneObject | n
 
   if (points.length < 2 || view === 'perspective') return null
 
-  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity)
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    pathClosed: input.pathClosed,
+  })
   if (!prepared) return null
 
   const { relative, center, isClosed } = prepared

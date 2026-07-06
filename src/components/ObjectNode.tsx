@@ -81,8 +81,8 @@ function ObjectNodeInner({
   const draggingRef = useRef(false)
   const activeTool = useAppStore((s) => s.activeTool)
   const updateObjectTransform = useAppStore((s) => s.updateObjectTransform)
-  const pushHistory = useAppStore((s) => s.pushHistory)
-  const savedRef = useRef(false)
+  const commitHistory = useAppStore((s) => s.commitHistory)
+  const changedRef = useRef(false)
   const glDomElement = useThree((s) => s.gl.domElement)
 
   const tr = ensureTransform(object)
@@ -148,17 +148,20 @@ function ObjectNodeInner({
           size={1.2}
           onMouseDown={() => {
             draggingRef.current = true
-            if (!savedRef.current) {
-              pushHistory()
-              savedRef.current = true
-            }
+            changedRef.current = false
           }}
           onMouseUp={() => {
             draggingRef.current = false
-            savedRef.current = false
+            if (changedRef.current) {
+              commitHistory('Transform')
+            }
+            changedRef.current = false
             syncFromGroup()
           }}
-          onObjectChange={syncFromGroup}
+          onObjectChange={() => {
+            changedRef.current = true
+            syncFromGroup()
+          }}
         />
       )}
     </>

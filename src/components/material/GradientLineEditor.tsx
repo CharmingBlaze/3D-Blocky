@@ -46,6 +46,7 @@ export interface GradientLineEditorProps {
   onEndChange: (handle: GradientHandle2D) => void
   onActiveStopChange: (index: 0 | 1) => void
   onDragBegin?: () => void
+  onDragEnd?: () => void
 }
 
 export function GradientLineEditor({
@@ -59,6 +60,7 @@ export function GradientLineEditor({
   onEndChange,
   onActiveStopChange,
   onDragBegin,
+  onDragEnd,
 }: GradientLineEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<0 | 1 | null>(null)
@@ -132,12 +134,13 @@ export function GradientLineEditor({
   const endDrag = useCallback((e: React.PointerEvent) => {
     if (dragRef.current === null) return
     dragRef.current = null
+    onDragEnd?.()
     try {
       rootRef.current?.releasePointerCapture(e.pointerId)
     } catch {
       /* already released */
     }
-  }, [])
+  }, [onDragEnd])
 
   const handles: Array<{ index: 0 | 1; handle: GradientHandle2D; color: Rgba4 }> = [
     { index: 0, handle: start, color: stops[0] ?? [1, 1, 1, 1] },

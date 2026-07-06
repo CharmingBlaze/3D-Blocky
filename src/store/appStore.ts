@@ -50,6 +50,7 @@ import {
   translateVertexPositions,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
+import { collectUniqueEdges } from '../mesh/meshTopology'
 import { collectFacesToDelete, deleteFacesFromObject } from '../mesh/meshDelete'
 import {
   expandFaceToPlanarRegion,
@@ -559,7 +560,9 @@ export interface AppState {
   currentStrokePreview: { x: number; y: number } | null
   isDrawing: boolean
 
-  pushHistory: (label?: string) => boolean
+  pushHistory: (label?: string, options?: { force?: boolean }) => boolean
+  commitHistory: (label?: string, options?: { force?: boolean }) => boolean
+  captureUndoPoint: (label?: string) => boolean
   replaceHistoryHead: (label?: string) => void
   pauseHistory: () => void
   resumeHistory: () => void
@@ -682,6 +685,8 @@ export interface AppState {
   ) => void
   setMeshHover: (hit: MeshPickHit | null) => void
   clearMeshSelection: () => void
+  selectAllInMode: () => void
+  deselectAllInMode: () => void
   deleteSelection: () => void
   beginMeshModal: (op: MeshModalOp, clientX: number, clientY: number) => void
   updateMeshModalFromPointer: (clientX: number, clientY: number) => void
@@ -770,6 +775,7 @@ export interface AppState {
   setUvEditorSticky: (on: boolean) => void
   setObjectUvMappingMode: (objectId: string, mode: UvMappingMode) => void
   loadObjectTexture: (objectId: string, file: File) => Promise<void>
+  assignObjectTextureDocument: (objectId: string, docId: string) => void
   setObjectUvPoint: (objectId: string, uvIndex: number, u: number, v: number, saveHistory?: boolean) => void
   setObjectUvPoints: (
     objectId: string,
@@ -807,6 +813,7 @@ export interface AppState {
   setMaterialEditorGradientHandle: (index: 0 | 1, handle: GradientHandle2D) => void
   setMaterialEditorGradientActiveStop: (index: 0 | 1) => void
   beginMaterialEditorGradientDrag: () => void
+  commitMaterialEditorGradientDrag: () => void
   setMaterialEditorGradientStop: (index: number, color: Rgba4) => void
   previewMaterialEditorGradient: () => void
   applyMaterialEditorGradient: () => void
@@ -1210,15 +1217,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentStrokePreview: null,
   isDrawing: false,
 
-  pushHistory: (label) => {
+  pushHistory: (label, options) => get().commitHistory(label, options),
+
+  commitHistory: (label, options) => {
     if (get().historyPaused > 0) return false
-    const added = sceneHistory.push(captureSceneSnapshot(snapshotFromState(get())), label)
+    const added = sceneHistory.push(
+      captureSceneSnapshot(snapshotFromState(get())),
+      label,
+      options
+    )
     if (added) {
       reconcileAppBlobUrls(get)
       set(syncHistoryFlags())
     }
     return added
   },
+
+  captureUndoPoint: (label) => get().commitHistory(label, { force: true }),
 
   replaceHistoryHead: (label) => {
     sceneHistory.replaceHead(captureSceneSnapshot(snapshotFromState(get())), label)
@@ -1249,7 +1264,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addObject: (obj, options) => {
-    if (!options?.skipHistory) get().pushHistory('Add object')
     const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget } = get()
     const budget = obj.polyBudget ?? polyBudget
     const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(obj), budget)
@@ -1262,6 +1276,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedObjectId: batch[0].id,
       selectionObjectIds: batch.map((b) => b.id),
     }))
+    if (!options?.skipHistory) get().commitHistory('Add object')
   },
 
   updateObject: (id, updates) => {
@@ -1272,7 +1287,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeObject: (id) => {
-    get().pushHistory('Delete object')
     set((s) => {
       const removed = new Set([id])
       const { objectTextures, pixelDocuments } = purgeTextureResourcesForObjects(
@@ -1291,6 +1305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     textureLoadGeneration.delete(id)
     reconcileAppBlobUrls(get)
+    get().commitHistory('Delete object')
   },
 
   selectObject: (id, options) => {
@@ -1421,7 +1436,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const obj = objects.find((o) => o.id === meshSelection!.objectId)
       if (!obj || obj.topologyLocked) return
 
-      get().pushHistory('Nudge selection')
       const verts = getAffectedVertices(meshSelection!, obj)
       const localDelta = worldDeltaToLocal(obj, delta)
       set((s) => ({
@@ -1441,12 +1455,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         }),
       }))
+      get().commitHistory('Nudge selection')
       return
     }
 
     if (selectionObjectIds.length === 0) return
 
-    get().pushHistory('Nudge selection')
     set((s) => ({
       objects: s.objects.map((o) => {
         if (!selectionObjectIds.includes(o.id)) return o
@@ -1464,6 +1478,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }),
     }))
+    get().commitHistory('Nudge selection')
   },
 
   setExtrudeMode: (on) =>
@@ -1792,7 +1807,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const lastAnchor = path.anchors[path.anchors.length - 1].position
 
     if (continuePathId) {
-      get().pushHistory('Connect pen path')
       set((s) => ({
         vectorPenDraft: null,
         objects: prev?.objectId
@@ -1812,6 +1826,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     commitVectorPath(path, { skipHistory: !!continuePathId })
+    if (continuePathId) get().commitHistory('Connect pen path')
 
     get().clearExtrudeDrag()
     set({
@@ -2447,8 +2462,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (polyDrawMode === 'quad' && polyDrawDraft.points.length < 4) return
     if (polyDrawMode === 'triangle' && polyDrawDraft.points.length < 3) return
 
-    get().pushHistory('Poly draw')
-
     const result = commitPolyDrawFace(polyDrawDraft.points, objects, {
       mode: polyDrawMode,
       color: activeColor,
@@ -2478,6 +2491,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             faceCount: result.newFaceCount,
           },
         })
+        get().commitHistory('Poly draw')
         return
       }
     }
@@ -2493,6 +2507,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         faceCount: result.newFaceCount,
       },
     })
+    get().commitHistory('Poly draw')
   },
 
   flipLastPolyDrawFace: () => {
@@ -2500,13 +2515,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!lastPolyDrawFace) return
     const obj = objects.find((o) => o.id === lastPolyDrawFace.objectId)
     if (!obj) return
-    get().pushHistory('Flip face')
     const flipped = flipFacesWinding(
       obj,
       lastPolyDrawFace.faceStartIndex,
       lastPolyDrawFace.faceCount
     )
     get().updateObject(obj.id, { faces: flipped.faces })
+    get().commitHistory('Flip face')
   },
 
   createFaceFromVertexSelection: () => {
@@ -2522,7 +2537,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = appendFaceFromVertexIndices(obj, verts, activeColor)
     if (!result) return
 
-    get().pushHistory('Create face')
     get().updateObject(obj.id, {
       positions: result.object.positions,
       faces: result.object.faces,
@@ -2542,6 +2556,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         faces: newFaces,
       },
     })
+    get().commitHistory('Create face')
   },
 
   mergeSelectedVertices: (indices) => {
@@ -2557,7 +2572,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = mergeVertices(obj, verts)
     if (!result) return
 
-    get().pushHistory('Merge vertices')
     get().updateObject(obj.id, {
       positions: result.object.positions,
       faces: result.object.faces,
@@ -2574,6 +2588,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       vertexMergeModifierHeld: false,
     })
+    get().commitHistory('Merge vertices')
   },
 
   setVertexMergeModifierHeld: (held) => set({ vertexMergeModifierHeld: held }),
@@ -2583,9 +2598,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!meshSelection || selectionMode === 'object') return
     const obj = objects.find((o) => o.id === meshSelection.objectId)
     if (!obj || obj.topologyLocked) return
-    get().pushHistory('Flip normals')
     const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
     get().updateObject(obj.id, { faces: flipped.faces })
+    get().commitHistory('Flip normals')
   },
 
   subdivideSelected: () => {
@@ -2594,7 +2609,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!objectId) return
     const obj = objects.find((o) => o.id === objectId)
     if (!obj || obj.topologyLocked) return
-    get().pushHistory('Subdivide')
     const subdivided = subdivideObject(obj, meshSelection, selectionMode)
     get().updateObject(obj.id, {
       positions: subdivided.positions,
@@ -2602,6 +2616,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       faceColors: subdivided.faceColors,
       faceGroups: subdivided.faceGroups,
     })
+    get().commitHistory('Subdivide')
   },
 
   toggleSubDSelected: () => {
@@ -2613,7 +2628,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? [selectedObjectId]
           : []
     if (ids.length === 0) return
-    get().pushHistory('Toggle SubD')
     set({
       objects: objects.map((o) => {
         if (!ids.includes(o.id) || o.topologyLocked) return o
@@ -2626,6 +2640,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }),
     })
+    get().commitHistory('Toggle SubD')
   },
 
   setSubDLevelsSelected: (levels) => {
@@ -2660,7 +2675,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? [selectedObjectId]
           : []
     if (ids.length === 0) return
-    get().pushHistory(delta > 0 ? 'SubD level up' : 'SubD level down')
     set({
       objects: objects.map((o) => {
         if (!ids.includes(o.id) || o.topologyLocked) return o
@@ -2673,6 +2687,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }),
     })
+    get().commitHistory(delta > 0 ? 'SubD level up' : 'SubD level down')
   },
 
   applySubDSelected: () => {
@@ -2684,7 +2699,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? [selectedObjectId]
           : []
     if (ids.length === 0) return
-    get().pushHistory('Apply SubD')
     set({
       objects: objects.map((o) => {
         if (!ids.includes(o.id) || o.topologyLocked) return o
@@ -2708,6 +2722,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       }),
     })
+    get().commitHistory('Apply SubD')
   },
 
   loopCutBegin: (objectId, seedEdge) => {
@@ -2743,7 +2758,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ loopCutDraft: null })
       return
     }
-    get().pushHistory('Loop cut')
     const cut = insertEdgeLoop(obj, loopCutDraft.loopEdges, loopCutDraft.t)
     get().updateObject(obj.id, {
       positions: cut.positions,
@@ -2751,6 +2765,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       faceColors: cut.faceColors,
     })
     set({ loopCutDraft: null })
+    get().commitHistory('Loop cut')
   },
 
   loopCutCancel: () => set({ loopCutDraft: null }),
@@ -2796,7 +2811,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
 
-    get().pushHistory('Knife cut')
     const localForward = worldDeltaToLocal(obj, viewForward)
     const cut = knifeCutObject(obj, localStart, localEnd, localForward)
     const committed = [
@@ -2818,6 +2832,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         view: knifeDraft.view,
       },
     })
+    get().commitHistory('Knife cut')
   },
 
   knifeCancel: () => set({ knifeDraft: null }),
@@ -2841,7 +2856,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   pasteClipboard: () => {
     const { clipboard } = get()
     if (!clipboard?.length) return
-    get().pushHistory('Paste')
     const offset = 12
     const pasted = clipboard.map((template, index) => {
       const clone = cloneSceneObject(template)
@@ -2865,6 +2879,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedObjectId: pasted[pasted.length - 1]?.id ?? null,
       selectionObjectIds: pasted.map((p) => p.id),
     }))
+    get().commitHistory('Paste')
   },
 
   setActiveView: (view) => set({ activeView: view }),
@@ -3229,6 +3244,71 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearMeshSelection: () => set({ meshSelection: null }),
 
+  selectAllInMode: () => {
+    const { selectionMode, objects, selectedObjectId, selectionObjectIds, meshSelection } = get()
+
+    if (selectionMode === 'object') {
+      if (objects.length === 0) return
+      get().setSelection(objects.map((o) => o.id))
+      return
+    }
+
+    const objectId =
+      meshSelection?.objectId ??
+      selectedObjectId ??
+      selectionObjectIds[0] ??
+      (objects.length > 0 ? objects[objects.length - 1]!.id : null)
+    if (!objectId) return
+
+    const obj = objects.find((o) => o.id === objectId)
+    if (!obj) return
+
+    if (!selectionObjectIds.includes(objectId)) {
+      get().selectObject(objectId)
+    }
+
+    if (selectionMode === 'vertex') {
+      set({
+        meshSelection: {
+          objectId,
+          vertices: obj.positions.map((_, i) => i),
+          edges: [],
+          faces: [],
+        },
+      })
+      return
+    }
+
+    if (selectionMode === 'edge') {
+      set({
+        meshSelection: {
+          objectId,
+          vertices: [],
+          edges: collectUniqueEdges(obj).map(([a, b]) => edgeKey(a, b)),
+          faces: [],
+        },
+      })
+      return
+    }
+
+    set({
+      meshSelection: {
+        objectId,
+        vertices: [],
+        edges: [],
+        faces: obj.faces.map((_, i) => i),
+      },
+    })
+  },
+
+  deselectAllInMode: () => {
+    if (get().selectionMode === 'object') {
+      get().clearSelection()
+    } else {
+      get().clearMeshSelection()
+    }
+  },
+
   deleteSelection: () => {
     const { selectionMode, selectionObjectIds, meshSelection, objects } = get()
 
@@ -3243,7 +3323,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const faceIndices = collectFacesToDelete(obj, meshSelection, selectionMode)
       if (faceIndices.size === 0) return
 
-      get().pushHistory('Delete faces')
       const updated = deleteFacesFromObject(obj, faceIndices)
 
       if (!updated) {
@@ -3273,12 +3352,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           meshSelection: null,
         }))
       }
+      get().commitHistory('Delete faces')
       return
     }
 
     if (selectionObjectIds.length === 0) return
 
-    get().pushHistory('Delete selection')
     const ids = new Set(selectionObjectIds)
     set((s) => {
       const { objectTextures, pixelDocuments } = purgeTextureResourcesForObjects(
@@ -3298,6 +3377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     })
     reconcileAppBlobUrls(get)
+    get().commitHistory('Delete selection')
   },
 
   applyMeshModalPreview: () => {
@@ -3329,7 +3409,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const obj = objects.find((o) => o.id === meshSelection.objectId)
     if (!obj || obj.topologyLocked) return
 
-    get().pushHistory('Mesh edit')
+    get().captureUndoPoint('Mesh edit')
     const pivotWorld = meshSelectionWorldCenter(obj, meshSelection)
 
     set({
@@ -3425,7 +3505,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (Object.keys(baseTransforms).length === 0) return
 
-    get().pushHistory('Transform')
+    get().captureUndoPoint('Transform')
     set({
       objectTransformModal: {
         op,
@@ -3540,10 +3620,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       .filter((o): o is SceneObject => o != null)
     if (targets.every((o) => o.smoothShading === smooth)) return
 
-    get().pushHistory(smooth ? 'Shade smooth' : 'Shade flat')
     set((s) => ({
       objects: s.objects.map((o) => (idSet.has(o.id) ? { ...o, smoothShading: smooth } : o)),
     }))
+    get().commitHistory(smooth ? 'Shade smooth' : 'Shade flat')
   },
 
   toggleSmoothShading: () => {
@@ -3616,7 +3696,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (!needsUpdate) return
 
-      get().pushHistory('Recolor')
       set({
         objects: paintColorOnObjects(
           objects,
@@ -3629,6 +3708,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           o.id === obj.id ? { ...o, color: rgba4ToNumber(rgbaWithAlpha) } : o
         ),
       })
+      get().commitHistory('Recolor')
       return
     }
 
@@ -3651,7 +3731,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     if (!needsUpdate) return
 
-    get().pushHistory('Recolor')
     set({
       objects: paintColorOnObjects(
         objects,
@@ -3662,6 +3741,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         rgba
       ).map((o) => (paintIds.includes(o.id) ? { ...o, color } : o)),
     })
+    get().commitHistory('Recolor')
   },
   setFacetExaggeration: (value) => set({ facetExaggeration: value }),
   setShowDensityHeatmap: (show) => set({ showDensityHeatmap: show }),
@@ -3744,7 +3824,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error('No meshes found in file')
     }
 
-    get().pushHistory('Import')
     const { polyBudget } = get()
     const cap = importVertexCap(polyBudget)
     const prepared = imported.map((obj) =>
@@ -3756,6 +3835,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectionObjectIds: prepared.map((o) => o.id),
       meshSelection: null,
     }))
+    get().commitHistory('Import')
     return prepared.length
   },
 
@@ -3769,7 +3849,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const aspect = loaded.width / Math.max(loaded.height, 1)
 
     if (mode === 'reference') {
-      get().pushHistory('Reference image')
       const id = generateId()
       set((s) => ({
         referenceImages: [
@@ -3790,11 +3869,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedBillboardImageId: null,
       }))
       reconcileAppBlobUrls(get)
+      get().commitHistory('Reference image')
       return
     }
 
     if (mode === 'billboard') {
-      get().pushHistory('Billboard image')
       const id = generateId()
       set((s) => ({
         billboardImages: [
@@ -3814,6 +3893,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedReferenceImageId: null,
       }))
       reconcileAppBlobUrls(get)
+      get().commitHistory('Billboard image')
       return
     }
 
@@ -3826,7 +3906,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         aspect
       )
       const prepared = prepareSceneObject(obj)
-      get().pushHistory('Image plane')
       set((s) => ({
         objectTextures: {
           ...s.objectTextures,
@@ -3842,6 +3921,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       get().addObject(prepared, { skipHistory: true, skipSymmetry: true })
       reconcileAppBlobUrls(get)
+      get().commitHistory('Image plane')
     }
   },
 
@@ -3867,19 +3947,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   commitReferenceImageEdit: () => {
     if (get().referenceImages.length === 0) return
-    get().pushHistory('Edit reference image')
+    get().commitHistory('Edit reference image')
   },
 
   removeReferenceImage: (id) => {
     const img = get().referenceImages.find((r) => r.id === id)
     if (!img) return
-    get().pushHistory('Remove reference image')
     set((s) => ({
       referenceImages: s.referenceImages.filter((r) => r.id !== id),
       selectedReferenceImageId:
         s.selectedReferenceImageId === id ? null : s.selectedReferenceImageId,
     }))
     reconcileAppBlobUrls(get)
+    get().commitHistory('Remove reference image')
   },
 
   selectBillboardImage: (id) =>
@@ -3904,19 +3984,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   commitBillboardImageEdit: () => {
     if (get().billboardImages.length === 0) return
-    get().pushHistory('Edit billboard')
+    get().commitHistory('Edit billboard')
   },
 
   removeBillboardImage: (id) => {
     const bb = get().billboardImages.find((b) => b.id === id)
     if (!bb) return
-    get().pushHistory('Remove billboard')
     set((s) => ({
       billboardImages: s.billboardImages.filter((b) => b.id !== id),
       selectedBillboardImageId:
         s.selectedBillboardImageId === id ? null : s.selectedBillboardImageId,
     }))
     reconcileAppBlobUrls(get)
+    get().commitHistory('Remove billboard')
   },
 
   deleteSelectedImageDrop: () => {
@@ -4058,7 +4138,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     if (!state.materialPaintHistoryPending) {
-      get().pushHistory('Paint material')
       set({ materialPaintHistoryPending: true })
     }
     set({
@@ -4086,7 +4165,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       return
     }
-    if (!state.materialPaintHistoryPending) get().pushHistory('Paint material')
     set({
       materialEditorColor: color,
       activeColor: rgbaToActiveColorNumber(color),
@@ -4100,6 +4178,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         color
       ),
     })
+    get().commitHistory('Paint material')
   },
 
   setMaterialEditorPaletteId: (id) => set({ materialEditorPaletteId: id }),
@@ -4187,7 +4266,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginMaterialEditorGradientDrag: () => {
     const ids = resolveTargetObjectIds(get().selectedObjectId, get().selectionObjectIds)
-    if (ids.length > 0) get().pushHistory('Gradient fill')
+    if (ids.length > 0) get().captureUndoPoint('Gradient fill')
+  },
+
+  commitMaterialEditorGradientDrag: () => {
+    get().replaceHistoryHead('Gradient fill')
   },
 
   setMaterialEditorGradientStop: (index, color) => {
@@ -4231,13 +4314,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   setMaterialEditorMode: (mode) => {
     const ids = resolveTargetObjectIds(get().selectedObjectId, get().selectionObjectIds)
     if (ids.length === 0) return
-    get().pushHistory('Material mode')
     const idSet = new Set(ids)
     set((s) => ({
       objects: s.objects.map((o) =>
         idSet.has(o.id) ? setObjectMaterialMode(o, mode, o.id) : o
       ),
     }))
+    get().commitHistory('Material mode')
     if (mode === 'vertexGradient') get().previewMaterialEditorGradient()
   },
 
@@ -4249,7 +4332,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ materialEditorColor: rgba })
       return
     }
-    get().pushHistory('Material opacity')
     const idSet = new Set(ids)
     set((s) => ({
       materialEditorColor: rgba,
@@ -4257,18 +4339,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         idSet.has(o.id) ? updateObjectMaterialSettings(o, { opacity }) : o
       ),
     }))
+    get().commitHistory('Material opacity')
   },
 
   setMaterialDoubleSided: (doubleSided) => {
     const ids = resolveTargetObjectIds(get().selectedObjectId, get().selectionObjectIds)
     if (ids.length === 0) return
-    get().pushHistory('Double-sided')
     const idSet = new Set(ids)
     set((s) => ({
       objects: s.objects.map((o) =>
         idSet.has(o.id) ? updateObjectMaterialSettings(o, { doubleSided }) : o
       ),
     }))
+    get().commitHistory('Double-sided')
   },
 
   togglePixelEditor: () => {
@@ -4393,13 +4476,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginPixelEdit: () => {
     if (!get().pixelEditHistoryPending) {
-      get().pushHistory('Pixel edit')
       set({ pixelEditHistoryPending: true })
     }
   },
 
-  commitPixelEdit: () =>
-    set({ pixelEditHistoryPending: false, pixelTextureRevision: get().pixelTextureRevision + 1 }),
+  commitPixelEdit: () => {
+    const pending = get().pixelEditHistoryPending
+    set({ pixelEditHistoryPending: false, pixelTextureRevision: get().pixelTextureRevision + 1 })
+    if (pending) get().commitHistory('Pixel edit')
+  },
 
   ensureTextureDocumentForObject: (objectId) => {
     const { objects, pixelDocuments } = get()
@@ -4455,7 +4540,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createNewPixelDocument: (width, height, linkObjectId) => {
-    get().pushHistory('New pixel document')
     const id = linkObjectId ?? generateId()
     const { docs, docId } = createBlankDocumentForObject(get().pixelDocuments, id, width, height)
     set((s) => ({
@@ -4483,12 +4567,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
       }
     }
+    get().commitHistory('New pixel document')
   },
 
   resizeOpenPixelDocument: (width, height) => {
     const { pixelEditorDocId, pixelDocuments } = get()
     if (!pixelEditorDocId || !pixelDocuments[pixelEditorDocId]) return
-    get().pushHistory('Resize pixel canvas')
     const doc = resizePixelDoc(pixelDocuments[pixelEditorDocId], width, height)
     const nextDocs = { ...pixelDocuments, [pixelEditorDocId]: doc }
     syncPixelDocumentGpu(nextDocs, pixelEditorDocId)
@@ -4504,11 +4588,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       pixelTextureRevision: s.pixelTextureRevision + 1,
     }))
+    get().commitHistory('Resize pixel canvas')
   },
 
   importPixelImage: async (file, mode) => {
     if (mode === 'new') {
-      get().pushHistory('Import pixel image')
       const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
       const doc = docs[docId]
       set((s) => ({
@@ -4521,14 +4605,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         pixelTextureRevision: s.pixelTextureRevision + 1,
       }))
       reconcileAppBlobUrls(get)
+      get().commitHistory('Import pixel image')
       return
     }
     const docId = get().pixelEditorDocId
     if (!docId) return
-    get().pushHistory('Import pixel layer')
     const docs = await importImageAsLayer(get().pixelDocuments, docId, file)
     set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
     reconcileAppBlobUrls(get)
+    get().commitHistory('Import pixel layer')
   },
 
   savePixelDocument: async () => {
@@ -4537,7 +4622,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!docId) return
     const doc = state.pixelDocuments[docId]
     if (!doc) return
-    get().pushHistory('Save pixel document')
     const linkedObject = state.objects.find(
       (obj) => resolveEffectiveMaterial(obj).textureId === docId || obj.id === docId
     )
@@ -4546,6 +4630,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       title: 'Save pixel texture project',
       filters: PIXEL_PROJECT_FILTERS,
     })
+    if (get().pixelEditHistoryPending) get().commitHistory('Pixel edit')
     set({ pixelEditHistoryPending: false })
   },
 
@@ -4573,7 +4658,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   importPixelDocumentProject: async (file) => {
     const text = await file.text()
     const imported = parsePixelDocumentFile(text)
-    get().pushHistory('Import pixel project')
     const docId = get().pixelEditorDocId ?? imported.id
     const doc = { ...imported, id: docId }
     set((s) => ({
@@ -4591,6 +4675,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelTextureRevision: s.pixelTextureRevision + 1,
     }))
     reconcileAppBlobUrls(get)
+    get().commitHistory('Import pixel project')
   },
 
   addPixelEditorLayer: () => {
@@ -4788,16 +4873,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setObjectUvMappingMode: (objectId, mode) => {
-    const { objects, updateObject, pushHistory } = get()
+    const { objects, updateObject } = get()
     const obj = objects.find((o) => o.id === objectId)
     if (!obj || resolveUvMappingMode(obj) === mode) return
-    pushHistory('UV mapping mode')
     const mapped = assignUvMappingForMode(obj, mode, mode === 'perFace')
     updateObject(objectId, {
       uvs: mapped.uvs,
       faceUvIndices: mapped.faceUvIndices,
       uvMappingMode: mode,
     })
+    get().commitHistory('UV mapping mode')
   },
 
   loadObjectTexture: async (objectId, file) => {
@@ -4817,7 +4902,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return
       }
 
-      const { objects, updateObject, pushHistory } = get()
+      const { objects, updateObject } = get()
       const obj = objects.find((o) => o.id === objectId)
       if (!obj) {
         URL.revokeObjectURL(url)
@@ -4825,9 +4910,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const withUvs = ensureObjectUVs(obj)
-      if (!obj.uvs?.length) pushHistory('Import texture')
+      const hadUvs = Boolean(obj.uvs?.length)
 
-      const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file, objectId)
+      const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
       updateObject(objectId, {
         ...setObjectMaterialMode(withUvs, 'texture', docId),
         uvs: withUvs.uvs,
@@ -4852,10 +4937,49 @@ export const useAppStore = create<AppState>((set, get) => ({
         pixelTextureRevision: s.pixelTextureRevision + 1,
       }))
       reconcileAppBlobUrls(get)
+      if (!hadUvs) get().commitHistory('Import texture')
     } catch {
       URL.revokeObjectURL(url)
       releaseTextureUrl(url)
     }
+  },
+
+  assignObjectTextureDocument: (objectId, docId) => {
+    const state = get()
+    const obj = state.objects.find((o) => o.id === objectId)
+    if (!obj) return
+    const doc = state.pixelDocuments[docId]
+    if (!doc) return
+
+    const mat = resolveEffectiveMaterial(obj)
+    if (mat.mode === 'texture' && (mat.textureId ?? obj.id) === docId) return
+
+    const withUvs = ensureObjectUVs(obj)
+    get().updateObject(objectId, {
+      ...setObjectMaterialMode(withUvs, 'texture', docId),
+      uvs: withUvs.uvs,
+      faceUvIndices: withUvs.faceUvIndices,
+    })
+
+    const meta = state.objectTextures[docId]
+    set((s) => ({
+      pixelEditorDocId: docId,
+      pixelTextureRevision: s.pixelTextureRevision + 1,
+      ...(meta
+        ? {}
+        : {
+            objectTextures: {
+              ...s.objectTextures,
+              [docId]: {
+                url: '',
+                name: doc.layers[0]?.name ?? 'Texture',
+                width: doc.width,
+                height: doc.height,
+              },
+            },
+          }),
+    }))
+    get().commitHistory('Assign texture')
   },
 
   getFaceUVs: (objectId, faceIndex) => {
@@ -4872,15 +4996,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setObjectUvPoints: (objectId, updates, saveHistory = false) => {
     if (updates.length === 0) return
-    const { objects, pushHistory } = get()
+    const { objects } = get()
     const obj = objects.find((o) => o.id === objectId)
     if (!obj) return
-    if (saveHistory) pushHistory('Edit UV')
     const base = obj.uvs?.length ? obj : ensureObjectUVs(obj)
     const updated = setUvPoints(base, updates)
     set((s) => ({
       objects: s.objects.map((o) => (o.id === objectId ? updated : o)),
     }))
+    if (saveHistory) get().commitHistory('Edit UV')
   },
 
   transformSelectedUvIslands: (op) => {
@@ -4890,12 +5014,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       meshSelection,
       uvEditorSelectedPoints,
       uvEditorSelectedFaces,
-      pushHistory,
     } = get()
     const objectId = selectedObjectId ?? meshSelection?.objectId
     if (!objectId) return
     const obj = objects.find((o) => o.id === objectId)
     if (!obj) return
+
+    if (op === 'autoUv') {
+      get().unwrapSelectedUvFaces('auto')
+      return
+    }
 
     let faceIndices: number[] = []
     if (uvEditorSelectedFaces.length > 0) {
@@ -4912,7 +5040,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         : collectUvIndicesForFaces(obj, faceIndices)
     if (uvIndices.length === 0) return
 
-    pushHistory('Transform UV')
     const ensured = ensureObjectUVs(obj)
     const uvs = ensured.uvs.map(cloneUv2)
 
@@ -4921,10 +5048,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     else if (op === 'rotateCW') rotateUVs90(uvs, uvIndices, true)
     else if (op === 'rotateCCW') rotateUVs90(uvs, uvIndices, false)
     else if (op === 'fit') fitUVsToUnitSquare(uvs, uvIndices)
-    else if (op === 'autoUv') {
-      get().unwrapSelectedUvFaces('auto')
-      return
-    } else if ('translate' in op) {
+    else if ('translate' in op) {
       translateUVs(uvs, uvIndices, op.translate[0], op.translate[1])
     } else if ('rotate' in op) {
       const pivot = uvBoundsCenter(uvBoundsFromIndices(uvs, uvIndices))
@@ -4954,6 +5078,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         o.id === objectId ? { ...ensureObjectUVs(o), uvs, faceUvIndices: ensured.faceUvIndices } : o
       ),
     }))
+    get().commitHistory('Transform UV')
   },
 
   unwrapSelectedUvFaces: (method) => {
@@ -4963,7 +5088,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       meshSelection,
       uvEditorSelectedFaces,
       uvEditorSmartUvAngle,
-      pushHistory,
     } = get()
     const objectId = selectedObjectId ?? meshSelection?.objectId
     if (!objectId) return
@@ -4979,7 +5103,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       faceIndices = obj.faces.map((_, i) => i)
     }
 
-    pushHistory('Unwrap UV')
     const ensured = ensureObjectUVs(obj)
     const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
       ensured as import('../uv/uvObject').SceneObjectWithUVs,
@@ -4998,6 +5121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           : o
       ),
     }))
+    get().commitHistory('Unwrap UV')
   },
 
   startStroke: (point, view) => {
@@ -5099,7 +5223,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     ) {
       const target = objects.find((o) => o.id === selectedObjectId) ?? objects[objects.length - 1]
       if (target) {
-        get().pushHistory('Boolean hole')
         const start = planeToWorld3D(currentStroke[0].x, currentStroke[0].y, view, defaultDepth)
         const end = planeToWorld3D(
           currentStroke[currentStroke.length - 1].x,
@@ -5112,6 +5235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           set((s) => ({
             objects: s.objects.map((o) => (o.id === target.id ? punched : o)),
           }))
+          get().commitHistory('Boolean hole')
         }
       }
       set({ currentStroke: [], isDrawing: false, currentStrokeView: null, currentStrokePreview: null })
@@ -5162,14 +5286,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   applySculptAt: (center, tool, options) => {
-    const { selectedObjectId, objects, brushRadius, brushStrength, pushHistory } = get()
+    const { selectedObjectId, objects, brushRadius, brushStrength } = get()
     const targetId = selectedObjectId ?? objects[objects.length - 1]?.id
     if (!targetId) return
 
     const obj = objects.find((o) => o.id === targetId)
     if (!obj || obj.topologyLocked) return
 
-    if (options?.saveHistory) pushHistory('Sculpt')
     const mesh = HalfEdgeMesh.fromObject(obj)
     applySculpt(mesh, {
       tool,
@@ -5194,23 +5317,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       objects: s.objects.map((o) => (o.id === targetId ? updated : o)),
     }))
+    if (options?.saveHistory) get().commitHistory('Sculpt')
   },
 
   simplifySelected: () => {
-    const { selectedObjectId, objects, polyBudget, pushHistory } = get()
+    const { selectedObjectId, objects, polyBudget } = get()
     const targetId = selectedObjectId ?? objects[objects.length - 1]?.id
     if (!targetId) return
 
     const obj = objects.find((o) => o.id === targetId)
     if (!obj || obj.topologyLocked) return
 
-    pushHistory('Simplify')
     const mesh = HalfEdgeMesh.fromObject(obj)
     const simplified = simplifyMesh(mesh, Math.floor(polyBudget * 0.75))
     const updated = simplified.toObject(obj.id, obj.name, obj)
     set((s) => ({
       objects: s.objects.map((o) => (o.id === targetId ? updated : o)),
     }))
+    get().commitHistory('Simplify')
   },
 }))
 

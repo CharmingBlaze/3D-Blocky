@@ -93,11 +93,11 @@ function BillboardMesh({ billboard, isSelected }: BillboardNodeProps) {
 export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
   const activeTool = useAppStore((s) => s.activeTool)
   const updateBillboardImage = useAppStore((s) => s.updateBillboardImage)
-  const pushHistory = useAppStore((s) => s.pushHistory)
+  const commitHistory = useAppStore((s) => s.commitHistory)
   const groupRef = useRef<THREE.Group>(null)
   const faceRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
-  const savedRef = useRef(false)
+  const changedRef = useRef(false)
   const glDomElement = useThree((s) => s.gl.domElement)
 
   const gizmoActive = isSelected && TRANSFORM_TOOLS.includes(activeTool)
@@ -157,14 +157,18 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
           size={1.2}
           onMouseDown={() => {
             draggingRef.current = true
-            if (!savedRef.current) {
-              pushHistory('Edit billboard')
-              savedRef.current = true
-            }
+            changedRef.current = false
           }}
           onMouseUp={() => {
             draggingRef.current = false
-            savedRef.current = false
+            if (changedRef.current) {
+              commitHistory('Edit billboard')
+            }
+            changedRef.current = false
+            syncFromGroup()
+          }}
+          onObjectChange={() => {
+            changedRef.current = true
             syncFromGroup()
           }}
         />

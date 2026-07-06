@@ -117,10 +117,12 @@ type DragPlaneState = {
 
 type ObjectDragState = DragPlaneState & {
   baseTransforms: Record<string, ObjectTransform>
+  moved: boolean
 }
 
 type ComponentDragState = DragPlaneState & {
   basePositions: Record<number, Vec3>
+  moved: boolean
 }
 
 function dragDeltaFromPointer(
@@ -324,7 +326,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
     applySculptAt,
     selectObject,
     setSelection,
-    pushHistory,
+    commitHistory,
     translateSelectionByDelta,
     applyMeshPick,
     applyMeshMarqueePick,
@@ -392,7 +394,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       applySculptAt: s.applySculptAt,
       selectObject: s.selectObject,
       setSelection: s.setSelection,
-      pushHistory: s.pushHistory,
+      commitHistory: s.commitHistory,
       translateSelectionByDelta: s.translateSelectionByDelta,
       applyMeshPick: s.applyMeshPick,
       applyMeshMarqueePick: s.applyMeshMarqueePick,
@@ -723,13 +725,14 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           basePositions,
           startWorld: camDrag.startWorld,
           dragPlane: camDrag.dragPlane,
+          moved: false,
         }
         return true
       }
 
       const pt = getPlanePoint(e)
       if (!pt) return false
-      componentDragRef.current = { view, basePositions, startPlane: pt }
+      componentDragRef.current = { view, basePositions, startPlane: pt, moved: false }
       return true
     },
     [view, getPlanePoint]
@@ -743,7 +746,6 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
     ): boolean => {
       if (obj.topologyLocked) return false
 
-      pushHistory()
       const verts = getAffectedVertices(meshSelection, obj)
       const basePositions: Record<number, Vec3> = {}
       for (const vi of verts) {
@@ -752,7 +754,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       const through = meshSelectionWorldCenter(obj, meshSelection)
       return beginComponentDrag(e, basePositions, through)
     },
-    [pushHistory, beginComponentDrag]
+    [beginComponentDrag]
   )
 
   const beginObjectDrag = useCallback(
@@ -779,13 +781,14 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           baseTransforms,
           startWorld: camDrag.startWorld,
           dragPlane: camDrag.dragPlane,
+          moved: false,
         }
         return true
       }
 
       const pt = getPlanePoint(e)
       if (!pt) return false
-      selectDragRef.current = { view, baseTransforms, startPlane: pt }
+      selectDragRef.current = { view, baseTransforms, startPlane: pt, moved: false }
       return true
     },
     [view, getPlanePoint]
@@ -1010,7 +1013,6 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         if (picked) {
           selectObject(picked, { additive: e.shiftKey })
           if (!e.shiftKey) {
-            pushHistory()
             const store = useAppStore.getState()
             const baseTransforms: Record<string, ObjectTransform> = {}
             for (const id of store.selectionObjectIds) {
@@ -1112,11 +1114,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
 
       if (activeTool === 'vector-pen' && view !== 'perspective') {
         vectorGestureViewRef.current = view
-        const hadPenDraft = useAppStore.getState().vectorPenDraft != null
         penPointerDown(pt, view)
-        if (useAppStore.getState().penExtrudeMode && !hadPenDraft) {
-          beginExtrudeDrag(e.clientX, e.clientY)
-        }
         return
       }
 
@@ -1179,9 +1177,9 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       resolvePolyDrawAt,
       polyDrawClick,
       polyDrawFinish,
-      pushHistory,
       beginObjectDrag,
       tryBeginMeshSelectionDrag,
+      commitHistory,
     ]
   )
 
@@ -1231,6 +1229,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         const drag = componentDragRef.current
         const delta = getComponentDragDelta(e, drag)
         if (delta) {
+          drag.moved = true
           translateMeshSelection(delta, drag.basePositions)
         }
         return
@@ -1240,6 +1239,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         const drag = selectDragRef.current
         const delta = getObjectDragDelta(e, drag)
         if (delta) {
+          drag.moved = true
           translateSelectionByDelta(delta, drag.baseTransforms)
         }
         return
@@ -1320,9 +1320,6 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         view !== 'perspective' &&
         store.vectorPenDraft?.view === view
       ) {
-        if (store.penExtrudeMode && store.extrudeDragAnchor) {
-          updateExtrudeFromPointer(e.clientX, e.clientY)
-        }
         const pt = getPlanePoint(e)
         if (pt) penPointerMove(pt)
         return
@@ -1526,6 +1523,12 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       }
 
       if (e.button === 0) {
+        if (selectDragRef.current?.moved) {
+          commitHistory('Move selection')
+        }
+        if (componentDragRef.current?.moved) {
+          commitHistory('Move components')
+        }
         selectDragRef.current = null
         componentDragRef.current = null
         vectorGestureViewRef.current = null
@@ -1552,6 +1555,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       applyMeshMarqueePick,
       clearMeshSelection,
       knifeCommit,
+      commitHistory,
     ]
   )
 
