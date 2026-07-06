@@ -1889,6 +1889,10 @@ export function UVEditorPanel() {
           e.preventDefault()
           frameSelection()
         }
+        if (e.code === 'KeyU' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+          e.preventDefault()
+          unwrapSelectedUvFaces(unwrapMethod)
+        }
         if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey) && objectId && uvEditorMode === 'faces') {
           e.preventDefault()
           selectUvFaces(objectId, allFaceIndices)
@@ -1928,6 +1932,8 @@ export function UVEditorPanel() {
     transformSelectedUvIslands,
     frameSelection,
     selectUvFaces,
+    unwrapSelectedUvFaces,
+    unwrapMethod,
   ])
 
   const onImport = async () => {

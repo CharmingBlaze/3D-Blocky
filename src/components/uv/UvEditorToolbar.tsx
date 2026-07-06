@@ -236,8 +236,8 @@ export function UvEditorToolbar({
             className="uv-btn uv-btn-block uv-btn-primary"
             onClick={() => onUnwrap(unwrapMethod)}
             title={
-              UV_UNWRAP_METHODS.find((m) => m.id === unwrapMethod)?.hint ??
-              'Unwrap selected faces (or all if none selected)'
+              (UV_UNWRAP_METHODS.find((m) => m.id === unwrapMethod)?.hint ??
+                'Unwrap selected faces (or all if none selected)') + ' (U)'
             }
           >
             Unwrap

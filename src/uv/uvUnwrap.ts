@@ -5,6 +5,7 @@ import {
   faceCorners3D,
   faceNormal3D,
   isDoodleLikeObject,
+  detachFacesUvTopology,
   type SceneObjectWithUVs,
 } from './uvObject'
 import {
@@ -13,7 +14,7 @@ import {
   BLOCKBENCH_SLOTS,
   type UvNormalBucket,
 } from './uvEditing'
-import { packCubeBucketsBlockbench, packFaceIslandsShelf, splitUvIslandsForPacking } from './uvPack'
+import { packCubeBucketsBlockbench, packFaceIslandsShelf, packPartialUnwrapIslands, splitUvIslandsForPacking } from './uvPack'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2 } from './uvTypes'
 
@@ -189,17 +190,26 @@ export function clusterFacesSmartUv(
 }
 
 /** Pick unwrap strategy from mesh shape — no manual seam marking required. */
-export function resolveAutoUnwrapMethod(obj: SceneObject): UvUnwrapMethod {
+export function resolveAutoUnwrapMethod(
+  obj: SceneObject,
+  faceIndices?: number[]
+): UvUnwrapMethod {
+  const indices =
+    faceIndices && faceIndices.length > 0
+      ? faceIndices.filter((fi) => fi >= 0 && fi < obj.faces.length)
+      : obj.faces.map((_, i) => i)
+
+  if (indices.length === 0) return 'smart'
   if (obj.uvMappingMode === 'box' || isDoodleLikeObject(obj)) return 'blockbench'
 
   const buckets = new Map<string, number>()
-  for (let fi = 0; fi < obj.faces.length; fi++) {
+  for (const fi of indices) {
     const b = classifyFaceNormalBucket(faceNormal3D(obj, fi))
     buckets.set(b, (buckets.get(b) ?? 0) + 1)
   }
 
   const bucketCount = buckets.size
-  const faceCount = obj.faces.length
+  const faceCount = indices.length
   const largestBucket = Math.max(...buckets.values(), 0)
   const bucketBalance = largestBucket / Math.max(faceCount, 1)
 
@@ -410,23 +420,27 @@ export function unwrapSelectedFaces(
   options: UnwrapOptions = {}
 ): { uvs: Uv2[]; faceUvIndices: number[][]; uvAutoPacked?: boolean } {
   const margin = options.margin ?? 0.02
-  const uvs = obj.uvs.map(cloneUv2)
-  const faceUvIndices = obj.faceUvIndices.map((f) => [...f])
-  const work: SceneObjectWithUVs = { ...obj, faceUvIndices }
   const allFaceCount = obj.faces.length
   const faces = faceIndices.filter((fi) => fi >= 0 && fi < allFaceCount)
-  if (faces.length === 0) return { uvs, faceUvIndices }
+  if (faces.length === 0) {
+    return {
+      uvs: obj.uvs.map(cloneUv2),
+      faceUvIndices: obj.faceUvIndices.map((f) => [...f]),
+    }
+  }
 
-  let resolved: UvUnwrapMethod = method === 'auto' ? resolveAutoUnwrapMethod(work) : method
   const fullMesh = faces.length >= allFaceCount
+  let resolved: UvUnwrapMethod =
+    method === 'auto' ? resolveAutoUnwrapMethod(obj, fullMesh ? undefined : faces) : method
   const angleLimit =
     method === 'auto'
       ? AUTO_SEAM_ANGLE_DEG
       : options.angleLimitDeg ?? (resolved === 'smart' ? AUTO_SEAM_ANGLE_DEG : 89)
 
-  if (method === 'auto' || fullMesh) {
-    resolved = method === 'auto' ? resolved : resolved
-    const allFaces = work.faces.map((_, i) => i)
+  if (fullMesh) {
+    const uvs = obj.uvs.map(cloneUv2)
+    const faceUvIndices = obj.faceUvIndices.map((f) => [...f])
+    const work: SceneObjectWithUVs = { ...obj, faceUvIndices }
     repackEntireMesh(
       work,
       uvs,
@@ -434,51 +448,58 @@ export function unwrapSelectedFaces(
       resolved,
       angleLimit,
       margin,
-      new Set(allFaces),
+      new Set(faces),
       true
     )
     return {
       uvs,
       faceUvIndices,
-      uvAutoPacked: options.markPacked ?? (method === 'auto' || fullMesh),
+      uvAutoPacked: options.markPacked ?? true,
     }
   }
 
-  const touched = new Set(faces)
+  const detached = detachFacesUvTopology(obj, faces)
+  const uvs = detached.uvs.map(cloneUv2)
+  const faceUvIndices = detached.faceUvIndices.map((f) => [...f])
+  const work: SceneObjectWithUVs = { ...obj, uvs, faceUvIndices }
+
+  let selectionIslands: number[][] = []
 
   switch (resolved) {
     case 'smart': {
-      const islands = clusterFacesSmartUv(work, faces, angleLimit)
-      for (const island of islands) {
+      selectionIslands = clusterFacesSmartUv(work, faces, angleLimit)
+      for (const island of selectionIslands) {
         projectIslandPlanar(work, uvs, island)
         weldIslandUvTopology(faceUvIndices, uvs, work, island)
       }
       break
     }
     case 'regions': {
-      const islands = clusterFacesPlanarRegions(work, faces)
-      for (const island of islands) {
+      selectionIslands = clusterFacesPlanarRegions(work, faces)
+      for (const island of selectionIslands) {
         projectIslandPlanar(work, uvs, island)
         weldIslandUvTopology(faceUvIndices, uvs, work, island)
       }
       break
     }
     case 'planar': {
+      selectionIslands = faces.map((fi) => [fi])
       for (const fi of faces) projectFacePlanar(work, uvs, fi)
       break
     }
     case 'box':
     case 'blockbench': {
       const buckets = clusterFacesByNormalBucket(work, faces)
-      for (const [, bucketFaces] of buckets) {
+      selectionIslands = [...buckets.values()]
+      for (const bucketFaces of selectionIslands) {
         projectIslandPlanar(work, uvs, bucketFaces)
         weldIslandUvTopology(faceUvIndices, uvs, work, bucketFaces)
       }
       break
     }
     case 'lightmap': {
-      const islands = clusterFacesSmartUv(work, faces, Math.min(angleLimit, 45))
-      for (const island of islands) {
+      selectionIslands = clusterFacesSmartUv(work, faces, Math.min(angleLimit, 45))
+      for (const island of selectionIslands) {
         projectIslandPlanar(work, uvs, island)
         weldIslandUvTopology(faceUvIndices, uvs, work, island)
       }
@@ -486,20 +507,11 @@ export function unwrapSelectedFaces(
     }
   }
 
-  if (options.repackAll !== false) {
-    repackEntireMesh(
-      work,
-      uvs,
-      faceUvIndices,
-      resolved,
-      angleLimit,
-      margin,
-      touched,
-      !obj.uvAutoPacked
-    )
+  if (options.repackAll !== false && selectionIslands.length > 0) {
+    packPartialUnwrapIslands(uvs, faceUvIndices, allFaceCount, faces, selectionIslands, margin)
   }
 
-  return { uvs, faceUvIndices, uvAutoPacked: options.markPacked }
+  return { uvs, faceUvIndices, uvAutoPacked: options.markPacked ?? false }
 }
 
 /** Full-mesh auto unwrap with implicit seams. */

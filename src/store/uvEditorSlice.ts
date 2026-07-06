@@ -478,6 +478,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         meshSelection,
         uvEditorSelectedFaces,
         uvEditorSmartUvAngle,
+        uvEditorSticky,
       } = store()
       const objectId = selectedObjectId ?? meshSelection?.objectId
       if (!objectId) return
@@ -493,6 +494,11 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         faceIndices = obj.faces.map((_, i) => i)
       }
 
+      if (faceIndices.length > 0 && uvEditorSticky) {
+        faceIndices = expandFacesToPlanarRegions(obj, faceIndices)
+      }
+
+      const fullMesh = faceIndices.length >= obj.faces.length
       const ensured = ensureObjectUVs(obj)
       const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
         ensured as import('../uv/uvObject').SceneObjectWithUVs,
@@ -501,7 +507,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         {
           angleLimitDeg: uvEditorSmartUvAngle,
           repackAll: true,
-          markPacked: method === 'auto' || faceIndices.length >= obj.faces.length,
+          markPacked: fullMesh,
         }
       )
       setPartial((s) => {
@@ -509,9 +515,13 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         return {
           objects: st.objects.map((o) =>
             o.id === objectId
-              ? { ...o, uvs, faceUvIndices, uvAutoPacked: uvAutoPacked ?? true }
+              ? { ...o, uvs, faceUvIndices, uvAutoPacked: uvAutoPacked ?? fullMesh }
               : o
           ),
+          uvEditorSelectedFaces: faceIndices,
+          uvEditorSelectedPoints: [],
+          uvEditorViewAll: false,
+          uvEditorMode: 'faces',
         }
       })
       store().commitHistory('Unwrap UV')

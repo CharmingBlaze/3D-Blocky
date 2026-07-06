@@ -260,6 +260,15 @@ export default function App() {
         useAppStore.getState().setActiveTool('knife')
         return
       }
+      if (e.code === 'KeyU' && !ctrlOrMeta && !e.altKey && !e.repeat) {
+        const state = useAppStore.getState()
+        if (state.uvEditorOpen || state.meshModal || state.objectTransformModal) return
+        const objectId = state.selectedObjectId ?? state.meshSelection?.objectId
+        if (!objectId) return
+        e.preventDefault()
+        state.unwrapSelectedUvFaces('auto')
+        return
+      }
       if (ctrlOrMeta && e.code === 'Digit2') {
         e.preventDefault()
         if (e.shiftKey) {

@@ -1,4 +1,4 @@
-import { fitUVsToUnitSquare, translateUVs, uvBoundsFromIndices } from './uvEditing'
+import { fitUVsToUnitSquare, translateUVs, uvBoundsFromIndices, uvBoundsCenter, scaleUVsFromCenter, type UvBounds } from './uvEditing'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2 } from './uvTypes'
 
@@ -140,6 +140,75 @@ function collectIndices(faceUvIndices: number[][], faceList: number[]): number[]
     for (const ui of faceUvIndices[fi] ?? []) set.add(ui)
   }
   return [...set]
+}
+
+function boundsOverlap(a: UvBounds, b: UvBounds, padding: number): boolean {
+  return !(
+    a.maxU + padding < b.minU ||
+    b.maxU + padding < a.minU ||
+    a.maxV + padding < b.minV ||
+    b.maxV + padding < a.minV
+  )
+}
+
+/** Pack newly unwrapped islands without moving existing UV layout on other faces. */
+export function packPartialUnwrapIslands(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  faceCount: number,
+  selectedFaces: number[],
+  islands: number[][],
+  margin = 0.02
+): void {
+  if (islands.length === 0 || selectedFaces.length === 0) return
+
+  splitUvIslandsForPacking(uvs, faceUvIndices, islands)
+  packFaceIslandsShelf(uvs, faceUvIndices, islands, margin)
+
+  const selectedUi = collectIndices(faceUvIndices, selectedFaces)
+  if (selectedUi.length === 0) return
+
+  const selectedSet = new Set(selectedFaces)
+  const untouchedFaces = [...Array(faceCount).keys()].filter((fi) => !selectedSet.has(fi))
+  if (untouchedFaces.length === 0) return
+
+  const untouchedUi = collectIndices(faceUvIndices, untouchedFaces)
+  const existingBounds = uvBoundsFromIndices(uvs, untouchedUi)
+  let selBounds = uvBoundsFromIndices(uvs, selectedUi)
+  const selW = selBounds.maxU - selBounds.minU
+  const selH = selBounds.maxV - selBounds.minV
+
+  const candidates = [
+    { u: margin, v: margin },
+    { u: existingBounds.maxU + margin, v: margin },
+    { u: margin, v: existingBounds.maxV + margin },
+    { u: existingBounds.maxU + margin, v: existingBounds.maxV + margin },
+    { u: Math.max(margin, 1 - selW - margin), v: margin },
+    { u: margin, v: Math.max(margin, 1 - selH - margin) },
+  ]
+
+  for (const anchor of candidates) {
+    const trial: UvBounds = {
+      minU: anchor.u,
+      minV: anchor.v,
+      maxU: anchor.u + selW,
+      maxV: anchor.v + selH,
+    }
+    if (trial.minU < -0.01 || trial.minV < -0.01 || trial.maxU > 1.01 || trial.maxV > 1.01) continue
+    if (!boundsOverlap(trial, existingBounds, margin)) {
+      translateUVs(uvs, selectedUi, anchor.u - selBounds.minU, anchor.v - selBounds.minV)
+      return
+    }
+  }
+
+  const maxDim = Math.max(selW, selH, 1e-8)
+  const scale = maxDim > 0.35 ? 0.35 / maxDim : 1
+  if (scale < 1) {
+    const pivot = uvBoundsCenter(selBounds)
+    scaleUVsFromCenter(uvs, selectedUi, scale, scale, pivot)
+    selBounds = uvBoundsFromIndices(uvs, selectedUi)
+  }
+  translateUVs(uvs, selectedUi, margin - selBounds.minU, margin - selBounds.minV)
 }
 
 /** Place up to six axis-direction islands into Blockbench cross slots. */
