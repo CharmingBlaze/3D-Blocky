@@ -1365,7 +1365,7 @@ export const DEFAULT_THEME_ID: ThemeId = 'nes'
 const themeById = new Map(THEMES.map((t) => [t.id, t]))
 
 export function getTheme(id: ThemeId): AppTheme {
-  return themeById.get(id) ?? THEMES[0]!
+  return themeById.get(id) ?? themeById.get(DEFAULT_THEME_ID)!
 }
 
 export function isThemeId(value: string): value is ThemeId {

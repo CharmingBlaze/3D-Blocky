@@ -1,12 +1,12 @@
 import { useAppStore } from '../store/appStore'
-import { THEMES, type ThemeGroup, type ThemeId } from '../theme/themes'
+import { THEMES, getTheme, type ThemeGroup, type ThemeId } from '../theme/themes'
 
 const THEME_GROUPS: ThemeGroup[] = ['Classic', 'Game Systems']
 
 export function ThemePicker() {
   const themeId = useAppStore((s) => s.themeId)
   const setThemeId = useAppStore((s) => s.setThemeId)
-  const theme = THEMES.find((t) => t.id === themeId) ?? THEMES[0]!
+  const theme = getTheme(themeId)
 
   return (
     <div className="side-theme-picker">

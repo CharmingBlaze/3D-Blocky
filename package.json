@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "validate:primitives": "tsx scripts/validate-primitives.ts",
     "app:dev": "wails dev",
-    "app:build": "wails build"
+    "app:icon": "python scripts/generate-appicon.py",
+    "app:build": "npm run app:icon && wails build"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.0",
