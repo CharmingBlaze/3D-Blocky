@@ -65,6 +65,12 @@ import {
   modalValueFromWheel,
   type MeshModalOpKind,
 } from '../mesh/meshOps'
+import {
+  allVertexIndices,
+  applySelectionPlaneTransform,
+  type SelectionPlaneTransformOp,
+  viewScreenAxes,
+} from '../mesh/selectionPlaneTransform'
 import type { MeshPickHit } from '../select/meshPick'
 import {
   type NudgeDirection,
@@ -574,6 +580,8 @@ export interface AppState {
   removeObject: (id: string) => void
   selectObject: (id: string | null, options?: { additive?: boolean }) => void
   setSelection: (ids: string[]) => void
+  /** Union object ids into the current selection (never toggles off). */
+  addToObjectSelection: (ids: string[]) => void
   clearSelection: () => void
   updateObjectTransform: (id: string, transform: ObjectTransform) => void
   translateSelectionByDelta: (
@@ -649,6 +657,7 @@ export interface AppState {
   mergeSelectedVertices: (indices?: number[]) => void
   setVertexMergeModifierHeld: (held: boolean) => void
   flipSelectedNormals: () => void
+  transformSelectionInViewPlane: (op: SelectionPlaneTransformOp) => void
   subdivideSelected: () => void
   toggleSubDSelected: () => void
   setSubDLevelsSelected: (levels: number) => void
@@ -873,9 +882,13 @@ export interface AppState {
     y1: number
   ) => void
   bucketFillPixel: (x: number, y: number, global: boolean) => void
+  bucketFillPixelAt: (docId: string, x: number, y: number, global: boolean) => void
   samplePixelColor: (x: number, y: number) => Rgba4 | null
+  samplePixelColorAt: (docId: string, x: number, y: number) => Rgba4 | null
   paintOnModelPixel: (docId: string, x: number, y: number) => void
   paintOnModelStroke: (docId: string, points: { x: number; y: number }[]) => void
+  paintOnModelEyedropper: (docId: string, x: number, y: number) => void
+  paintOnModelBucket: (docId: string, x: number, y: number, global: boolean) => void
   ensureTextureDocumentForObject: (objectId: string) => string | null
 
   startStroke: (point: { x: number; y: number }, view: ViewType) => void
@@ -1267,9 +1280,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget } = get()
     const budget = obj.polyBudget ?? polyBudget
     const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(obj), budget)
-    const batch = [prepared]
+    const withUvs = ensureObjectUVs(prepared)
+    const batch = [withUvs]
     if (symmetryEnabled && !options?.skipSymmetry) {
-      batch.push(mirrorSceneObject(prepared, symmetryAxis, symmetryPlane))
+      batch.push(ensureObjectUVs(mirrorSceneObject(withUvs, symmetryAxis, symmetryPlane)))
     }
     set((s) => ({
       objects: [...s.objects, ...batch],
@@ -1372,6 +1386,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedObjectId: primaryId,
       ...(color !== undefined ? { activeColor: color } : {}),
       ...extrudeSync,
+    })
+  },
+
+  addToObjectSelection: (ids) => {
+    if (ids.length === 0) return
+    set((s) => {
+      const next = [...new Set([...s.selectionObjectIds, ...ids])]
+      const primaryId = next.length ? next[next.length - 1]! : null
+      const nextColor = colorFromSelection(s.objects, primaryId)
+      return {
+        selectionObjectIds: next,
+        selectedObjectId: primaryId,
+        selectedReferenceImageId: null,
+        selectedBillboardImageId: null,
+        ...(nextColor !== undefined ? { activeColor: nextColor } : {}),
+      }
     })
   },
 
@@ -2473,12 +2503,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const isNewObject = result.removedIds.length === 0 && !objects.some((o) => o.id === result.primaryId)
-    let nextObjects = result.objects
+    let nextObjects = result.objects.map((o) =>
+      o.id === result.primaryId ? ensureObjectUVs(o) : o
+    )
 
     if (symmetryEnabled && isNewObject) {
       const primary = nextObjects.find((o) => o.id === result.primaryId)
       if (primary) {
-        const mirrored = mirrorSceneObject(primary, symmetryAxis, symmetryPlane)
+        const mirrored = ensureObjectUVs(mirrorSceneObject(primary, symmetryAxis, symmetryPlane))
         nextObjects = [...nextObjects, mirrored]
         set({
           objects: nextObjects,
@@ -2537,11 +2569,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = appendFaceFromVertexIndices(obj, verts, activeColor)
     if (!result) return
 
-    get().updateObject(obj.id, {
+    const updated = {
+      ...obj,
       positions: result.object.positions,
       faces: result.object.faces,
       faceColors: result.object.faceColors,
       faceGroups: result.object.faceGroups,
+    }
+    const withUvs = ensureObjectUVs(updated)
+    get().updateObject(obj.id, {
+      positions: withUvs.positions,
+      faces: withUvs.faces,
+      faceColors: withUvs.faceColors,
+      faceGroups: withUvs.faceGroups,
+      uvs: withUvs.uvs,
+      faceUvIndices: withUvs.faceUvIndices,
     })
 
     const newFaces = Array.from(
@@ -2601,6 +2643,55 @@ export const useAppStore = create<AppState>((set, get) => ({
     const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
     get().updateObject(obj.id, { faces: flipped.faces })
     get().commitHistory('Flip normals')
+  },
+
+  transformSelectionInViewPlane: (op) => {
+    const {
+      activeView,
+      viewMoveBasis,
+      meshSelection,
+      objects,
+      selectionObjectIds,
+      selectedObjectId,
+    } = get()
+
+    const axes = viewScreenAxes(activeView, viewMoveBasis)
+    if (!axes) return
+
+    const historyLabel =
+      op === 'flipH'
+        ? 'Flip horizontal'
+        : op === 'flipV'
+          ? 'Flip vertical'
+          : 'Rotate 90°'
+
+    if (selectionHasComponents(meshSelection)) {
+      const obj = objects.find((o) => o.id === meshSelection!.objectId)
+      if (!obj || obj.topologyLocked) return
+      const verts = getAffectedVertices(meshSelection!, obj)
+      const updated = applySelectionPlaneTransform(obj, verts, op, axes, meshSelection)
+      get().updateObject(obj.id, { positions: updated.positions, faces: updated.faces })
+      get().commitHistory(historyLabel)
+      return
+    }
+
+    const ids =
+      selectionObjectIds.length > 0
+        ? selectionObjectIds
+        : selectedObjectId
+          ? [selectedObjectId]
+          : []
+    if (ids.length === 0) return
+
+    set((s) => ({
+      objects: s.objects.map((o) => {
+        if (!ids.includes(o.id) || o.topologyLocked) return o
+        const verts = allVertexIndices(o)
+        const updated = applySelectionPlaneTransform(o, verts, op, axes)
+        return { ...o, positions: updated.positions, faces: updated.faces }
+      }),
+    }))
+    get().commitHistory(historyLabel)
   },
 
   subdivideSelected: () => {
@@ -2759,10 +2850,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     const cut = insertEdgeLoop(obj, loopCutDraft.loopEdges, loopCutDraft.t)
-    get().updateObject(obj.id, {
+    const updated = {
+      ...obj,
       positions: cut.positions,
       faces: cut.faces,
       faceColors: cut.faceColors,
+    }
+    const withUvs = ensureObjectUVs(updated)
+    get().updateObject(obj.id, {
+      positions: withUvs.positions,
+      faces: withUvs.faces,
+      faceColors: withUvs.faceColors,
+      uvs: withUvs.uvs,
+      faceUvIndices: withUvs.faceUvIndices,
     })
     set({ loopCutDraft: null })
     get().commitHistory('Loop cut')
@@ -2817,11 +2917,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(knifeDraft.committed ?? []),
       { start: { ...knifeDraft.start }, end: { ...knifeDraft.end } },
     ]
-    get().updateObject(obj.id, {
+    const updated = {
+      ...obj,
       positions: cut.positions,
       faces: cut.faces,
       faceColors: cut.faceColors,
       faceGroups: cut.faceGroups,
+    }
+    const withUvs = ensureObjectUVs(updated)
+    get().updateObject(obj.id, {
+      positions: withUvs.positions,
+      faces: withUvs.faces,
+      faceColors: withUvs.faceColors,
+      faceGroups: withUvs.faceGroups,
+      uvs: withUvs.uvs,
+      faceUvIndices: withUvs.faceUvIndices,
     })
     set({
       knifeDraft: {
@@ -3457,6 +3567,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   confirmMeshModal: () => {
+    const { meshModal, objects } = get()
+    if (meshModal) {
+      const obj = objects.find((o) => o.id === meshModal.objectId)
+      if (obj) {
+        get().updateObject(meshModal.objectId, ensureObjectUVs(obj))
+      }
+    }
     get().replaceHistoryHead('Mesh edit')
     set({ meshModal: null })
   },
@@ -4316,9 +4433,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (ids.length === 0) return
     const idSet = new Set(ids)
     set((s) => ({
-      objects: s.objects.map((o) =>
-        idSet.has(o.id) ? setObjectMaterialMode(o, mode, o.id) : o
-      ),
+      objects: s.objects.map((o) => {
+        if (!idSet.has(o.id)) return o
+        const next = setObjectMaterialMode(o, mode, o.id)
+        if (mode === 'texture') {
+          return ensureObjectUVs(next)
+        }
+        return next
+      }),
     }))
     get().commitHistory('Material mode')
     if (mode === 'vertexGradient') get().previewMaterialEditorGradient()
@@ -4792,19 +4914,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   bucketFillPixel: (x, y, global) => {
+    const { pixelEditorDocId } = get()
+    if (!pixelEditorDocId) return
+    get().beginPixelEdit()
+    get().bucketFillPixelAt(pixelEditorDocId, x, y, global)
+  },
+
+  bucketFillPixelAt: (docId, x, y, global) => {
     const {
-      pixelEditorDocId,
       pixelDocuments,
       pixelEditorColor,
       pixelEditorFillTolerance,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
     } = get()
-    if (!pixelEditorDocId) return
-    get().beginPixelEdit()
+    if (!pixelDocuments[docId]) return
     const docs = bucketFillDocument(
       pixelDocuments,
-      pixelEditorDocId,
+      docId,
       x,
       y,
       pixelEditorColor,
@@ -4817,9 +4944,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   samplePixelColor: (x, y) => {
-    const { pixelEditorDocId, pixelDocuments } = get()
+    const { pixelEditorDocId } = get()
     if (!pixelEditorDocId) return null
-    return sampleColorFromDocument(pixelDocuments, pixelEditorDocId, x, y)
+    return get().samplePixelColorAt(pixelEditorDocId, x, y)
+  },
+
+  samplePixelColorAt: (docId, x, y) => {
+    const { pixelDocuments } = get()
+    return sampleColorFromDocument(pixelDocuments, docId, x, y)
+  },
+
+  paintOnModelEyedropper: (docId, x, y) => {
+    const color = get().samplePixelColorAt(docId, x, y)
+    if (color) get().commitPixelEditorColor(color)
+  },
+
+  paintOnModelBucket: (docId, x, y, global) => {
+    get().beginPixelEdit()
+    get().bucketFillPixelAt(docId, x, y, global)
+    get().commitPixelEdit()
   },
 
   paintOnModelPixel: (docId, x, y) => {

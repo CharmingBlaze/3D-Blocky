@@ -40,8 +40,10 @@ export interface PixelSelection {
 }
 
 export const PIXEL_SIZE_PRESETS = [
-  { label: '16×16', width: 16, height: 16 },
-  { label: '32×32', width: 32, height: 32 },
   { label: '64×64', width: 64, height: 64 },
   { label: '128×128', width: 128, height: 128 },
+  { label: '256×256', width: 256, height: 256 },
+  { label: '512×512', width: 512, height: 512 },
+  { label: '16×16', width: 16, height: 16 },
+  { label: '32×32', width: 32, height: 32 },
 ] as const

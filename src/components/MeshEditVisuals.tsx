@@ -48,31 +48,31 @@ const VERTEX_PIXEL_SIZE = {
 
 function vertexColors(theme: ReturnType<typeof useTheme>) {
   return {
-    idleFill: theme.text,
-    idleBorder: theme.textMuted,
-    hoverFill: theme.meshHover,
-    hoverBorder: theme.accentOrange,
-    selectedFill: theme.meshSelected,
-    selectedBorder: theme.text,
+    idleFill: theme.vertexIdle,
+    idleBorder: theme.vertexIdleBorder,
+    hoverFill: theme.vertexHover,
+    hoverBorder: theme.vertexHoverBorder,
+    selectedFill: theme.vertexSelected,
+    selectedBorder: theme.vertexSelectedBorder,
   }
 }
 
 function edgeColors(theme: ReturnType<typeof useTheme>) {
   return {
-    idle: theme.textMuted,
-    hover: theme.accentGreen,
-    selected: theme.accent,
+    idle: theme.edgeIdle,
+    hover: theme.edgeHover,
+    selected: theme.edgeSelected,
   }
 }
 
 function faceColors(theme: ReturnType<typeof useTheme>) {
   return {
-    idleFill: theme.text,
-    idleWire: theme.textMuted,
-    hoverFill: theme.meshHover,
-    hoverWire: theme.accentOrange,
-    selectedFill: theme.accentOrange,
-    selectedWire: theme.text,
+    idleFill: theme.faceIdleFill,
+    idleWire: theme.faceIdleWire,
+    hoverFill: theme.faceHoverFill,
+    hoverWire: theme.faceHoverWire,
+    selectedFill: theme.faceSelectedFill,
+    selectedWire: theme.faceSelectedWire,
   }
 }
 
@@ -114,7 +114,6 @@ function VertexHandle({
       : state === 'hover'
         ? VERTEX.hoverBorder
         : VERTEX.idleBorder
-  const fillOpacity = state === 'idle' ? 0.82 : 0.96
 
   useFrame(() => {
     const root = rootRef.current
@@ -145,10 +144,8 @@ function VertexHandle({
         <mesh geometry={UNIT_VERTEX_CUBE}>
           <meshBasicMaterial
             color={fill}
-            transparent
-            opacity={fillOpacity}
             depthTest={depthTest}
-            depthWrite={false}
+            depthWrite={depthTest}
             polygonOffset={depthTest}
             polygonOffsetFactor={-4}
             polygonOffsetUnits={-4}
@@ -158,10 +155,8 @@ function VertexHandle({
         <lineSegments geometry={UNIT_VERTEX_CUBE_EDGES} renderOrder={OVERLAY_RENDER + 3}>
           <lineBasicMaterial
             color={border}
-            transparent
-            opacity={0.98}
             depthTest={depthTest}
-            depthWrite={false}
+            depthWrite={depthTest}
             polygonOffset={depthTest}
             polygonOffsetFactor={-4}
             polygonOffsetUnits={-4}

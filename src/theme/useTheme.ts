@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useAppStore } from '../store/appStore'
+import { darkenHex } from './colorUtils'
 import { getTheme, hexToNumber, type ThemeCssVars } from './themes'
 
 export interface ThemeColors {
@@ -22,6 +23,29 @@ export interface ThemeColors {
   meshOutlineSecondary: string
   meshSelected: string
   meshHover: string
+  /** Edit/draw vertex handles — derived from theme mesh/accent colors, slightly darkened. */
+  vertexIdle: string
+  vertexIdleBorder: string
+  vertexHover: string
+  vertexHoverBorder: string
+  vertexSelected: string
+  vertexSelectedBorder: string
+  vertexDraft: string
+  vertexDraftHover: string
+  /** Object selection outline — primary / multi-select secondary. */
+  objectSelectOutline: string
+  objectSelectOutlineSecondary: string
+  /** Edge selection overlay (idle / hover / selected). */
+  edgeIdle: string
+  edgeHover: string
+  edgeSelected: string
+  /** Face selection overlay fill and boundary wire. */
+  faceIdleFill: string
+  faceIdleWire: string
+  faceHoverFill: string
+  faceHoverWire: string
+  faceSelectedFill: string
+  faceSelectedWire: string
   symmetryPlane: string
   gridCell: string
   gridSection: string
@@ -58,6 +82,25 @@ export function useTheme(): ThemeColors {
       meshOutlineSecondary: css['--mesh-outline-secondary'],
       meshSelected: css['--mesh-selected'],
       meshHover: css['--mesh-hover'],
+      vertexIdle: darkenHex(css['--mesh-outline-secondary'], 0.22),
+      vertexIdleBorder: darkenHex(css['--mesh-outline'], 0.32),
+      vertexHover: darkenHex(css['--mesh-hover'], 0.24),
+      vertexHoverBorder: darkenHex(css['--accent-orange'], 0.22),
+      vertexSelected: darkenHex(css['--mesh-selected'], 0.2),
+      vertexSelectedBorder: darkenHex(css['--accent'], 0.36),
+      vertexDraft: darkenHex(css['--accent'], 0.24),
+      vertexDraftHover: darkenHex(css['--mesh-hover'], 0.28),
+      objectSelectOutline: darkenHex(css['--mesh-outline'], 0.2),
+      objectSelectOutlineSecondary: darkenHex(css['--mesh-outline-secondary'], 0.24),
+      edgeIdle: darkenHex(css['--mesh-outline-secondary'], 0.28),
+      edgeHover: darkenHex(css['--accent-green'], 0.22),
+      edgeSelected: darkenHex(css['--accent'], 0.24),
+      faceIdleFill: darkenHex(css['--mesh-outline-secondary'], 0.38),
+      faceIdleWire: darkenHex(css['--mesh-outline'], 0.3),
+      faceHoverFill: darkenHex(css['--mesh-hover'], 0.26),
+      faceHoverWire: darkenHex(css['--accent-orange'], 0.22),
+      faceSelectedFill: darkenHex(css['--accent-orange'], 0.16),
+      faceSelectedWire: darkenHex(css['--accent'], 0.34),
       symmetryPlane: css['--symmetry-plane'],
       gridCell: css['--grid-cell'],
       gridSection: css['--grid-section'],

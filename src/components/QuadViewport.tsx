@@ -33,7 +33,7 @@ import {
   planeToWorld3D,
 } from '../utils/screenToWorld'
 import { pickObjectAt, objectsInScreenRect } from '../select/objectPick'
-import { meshComponentsInScreenRect, pickMeshComponent, pickKnifeHit, type MeshPickHit } from '../select/meshPick'
+import { meshComponentsInScreenRect, pickMeshComponent, pickKnifeHit, resolveMarqueeMeshObjectId, type MeshPickHit } from '../select/meshPick'
 import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
 import {
   estimateTexelScreenSize,
@@ -72,11 +72,10 @@ function isComponentSelectionMode(mode: SelectionMode): boolean {
   return mode === 'vertex' || mode === 'edge' || mode === 'face'
 }
 
-function isObjectSelectInteraction(mode: SelectionMode, tool: ActiveTool): boolean {
-  return mode === 'object' && tool === 'select-object'
-}
-
-function isComponentSelectInteraction(mode: SelectionMode, tool: ActiveTool): boolean {
+function isBoxSelectInteraction(mode: SelectionMode, tool: ActiveTool): boolean {
+  if (mode === 'object') {
+    return tool === 'select-object' || TRANSFORM_GIZMO_TOOLS.includes(tool)
+  }
   return (
     isComponentSelectionMode(mode) &&
     (MESH_SELECT_TOOLS.includes(tool) || tool === 'move')
@@ -276,6 +275,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
   const cameraRef = useRef<THREE.Camera | null>(null)
   const lastSculptRef = useRef(0)
   const marqueeStartRef = useRef<{ x: number; y: number; additive: boolean } | null>(null)
+  const boxSelectPendingRef = useRef<{ x: number; y: number; additive: boolean } | null>(null)
   const pixelPaintRef = useRef<{
     docId: string
     objectId: string
@@ -326,6 +326,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
     applySculptAt,
     selectObject,
     setSelection,
+    addToObjectSelection,
     commitHistory,
     translateSelectionByDelta,
     applyMeshPick,
@@ -394,6 +395,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       applySculptAt: s.applySculptAt,
       selectObject: s.selectObject,
       setSelection: s.setSelection,
+      addToObjectSelection: s.addToObjectSelection,
       commitHistory: s.commitHistory,
       translateSelectionByDelta: s.translateSelectionByDelta,
       applyMeshPick: s.applyMeshPick,
@@ -839,8 +841,20 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
             e.currentTarget.setPointerCapture(e.pointerId)
             e.preventDefault()
             e.stopPropagation()
-            store.beginPixelEdit()
             const px = uvToPixelCoords(hit.uv, doc.width, doc.height)
+            const pixelTool = store.pixelEditorTool
+
+            if (pixelTool === 'eyedropper') {
+              store.paintOnModelEyedropper(docId, px.x, px.y)
+              return
+            }
+            if (pixelTool === 'bucket') {
+              store.paintOnModelBucket(docId, px.x, px.y, e.altKey)
+              return
+            }
+            if (pixelTool !== 'pencil' && pixelTool !== 'eraser') return
+
+            store.beginPixelEdit()
             store.paintOnModelPixel(docId, px.x, px.y)
             pixelPaintRef.current = {
               docId,
@@ -859,8 +873,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         !e.altKey &&
         rect &&
         camera &&
-        (isObjectSelectInteraction(selectionMode, activeTool) ||
-          isComponentSelectInteraction(selectionMode, activeTool))
+        isBoxSelectInteraction(selectionMode, activeTool)
       ) {
         e.currentTarget.setPointerCapture(e.pointerId)
         marqueeStartRef.current = {
@@ -973,7 +986,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
                 e.currentTarget.setPointerCapture(e.pointerId)
               }
             }
-          } else if (!e.shiftKey) {
+          } else {
             const sel = store.meshSelection
             const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera)
             const obj =
@@ -982,6 +995,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
                 : null
 
             if (
+              !e.shiftKey &&
               MESH_SELECT_TOOLS.includes(activeTool) &&
               sel &&
               obj &&
@@ -992,8 +1006,12 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
               return
             }
 
-            clearMeshSelection()
-            if (pickedObjectId) selectObject(pickedObjectId)
+            boxSelectPendingRef.current = {
+              x: e.clientX,
+              y: e.clientY,
+              additive: e.shiftKey,
+            }
+            e.currentTarget.setPointerCapture(e.pointerId)
           }
           return
         }
@@ -1025,10 +1043,10 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           return
         }
 
-        if (!e.shiftKey) {
-          selectObject(null)
-          selectBillboardImage(null)
-          selectReferenceImage(null)
+        boxSelectPendingRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          additive: e.shiftKey,
         }
         return
       }
@@ -1197,6 +1215,9 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           const doc = store.pixelDocuments[paint.docId]
           const obj = objects.find((o) => o.id === paint.objectId)
           if (doc && obj) {
+            const pixelTool = store.pixelEditorTool
+            if (pixelTool !== 'pencil' && pixelTool !== 'eraser') return
+
             const anchor = pickMeshSurfaceUv(paint.lastX, paint.lastY, rect, camera, objects, paint.objectId)
             const step = anchor
               ? estimateTexelScreenSize(anchor, obj, camera, rect, doc.width, doc.height)
@@ -1225,7 +1246,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         return
       }
 
-      if (componentDragRef.current && (e.buttons & 1) === 1 && !marqueeStartRef.current) {
+      if (componentDragRef.current && (e.buttons & 1) === 1 && !marqueeStartRef.current && !boxSelectPendingRef.current) {
         const drag = componentDragRef.current
         const delta = getComponentDragDelta(e, drag)
         if (delta) {
@@ -1235,12 +1256,33 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         return
       }
 
-      if (selectDragRef.current && selectionMode === 'object' && (e.buttons & 1) === 1 && !marqueeStartRef.current) {
+      if (selectDragRef.current && selectionMode === 'object' && (e.buttons & 1) === 1 && !marqueeStartRef.current && !boxSelectPendingRef.current) {
         const drag = selectDragRef.current
         const delta = getObjectDragDelta(e, drag)
         if (delta) {
           drag.moved = true
           translateSelectionByDelta(delta, drag.baseTransforms)
+        }
+        return
+      }
+
+      if (boxSelectPendingRef.current && (e.buttons & 1) === 1 && !marqueeStartRef.current) {
+        const pending = boxSelectPendingRef.current
+        const dx = Math.abs(e.clientX - pending.x)
+        const dy = Math.abs(e.clientY - pending.y)
+        if (dx > 4 || dy > 4) {
+          boxSelectPendingRef.current = null
+          marqueeStartRef.current = {
+            x: pending.x,
+            y: pending.y,
+            additive: pending.additive,
+          }
+          setMarqueeRect({
+            x0: pending.x,
+            y0: pending.y,
+            x1: e.clientX,
+            y1: e.clientY,
+          })
         }
         return
       }
@@ -1424,14 +1466,27 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
         if (dx > 4 || dy > 4) {
           if (selectionMode === 'object') {
             const ids = objectsInScreenRect(objects, screenRect, camera, rect)
-            setSelection(
-              additive ? [...new Set([...selectionObjectIds, ...ids])] : ids
-            )
+            if (additive) addToObjectSelection(ids)
+            else setSelection(ids)
           } else if (isComponentSelectionMode(selectionMode)) {
-            const targetId =
-              selectedObjectId ??
-              pickObjectAt(start.x, start.y, rect, camera) ??
-              (selectionObjectIds.length === 1 ? selectionObjectIds[0] : null)
+            const storeAtMarquee = useAppStore.getState()
+            const targetId = resolveMarqueeMeshObjectId(
+              objects,
+              selectionMode,
+              screenRect,
+              camera,
+              rect,
+              {
+                meshSelectionObjectId: storeAtMarquee.meshSelection?.objectId,
+                selectedObjectId: storeAtMarquee.selectedObjectId,
+                selectionObjectIds: storeAtMarquee.selectionObjectIds,
+                startX: start.x,
+                startY: start.y,
+                endX: e.clientX,
+                endY: e.clientY,
+              },
+              !viewportXRay
+            )
 
             if (targetId) {
               const obj = objects.find((o) => o.id === targetId)
@@ -1450,8 +1505,12 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           }
         } else if (selectionMode === 'object') {
           const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
-          if (picked) selectObject(picked, { additive })
-          else if (!additive) selectObject(null)
+          if (picked) {
+            if (additive) addToObjectSelection([picked])
+            else selectObject(picked)
+          } else if (!additive) {
+            selectObject(null)
+          }
         } else if (isComponentSelectionMode(selectionMode)) {
           const hit = pickMeshComponent(
             selectionMode,
@@ -1477,6 +1536,23 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
 
         marqueeStartRef.current = null
         setMarqueeRect(null)
+        return
+      }
+
+      if (boxSelectPendingRef.current) {
+        const pending = boxSelectPendingRef.current
+        boxSelectPendingRef.current = null
+        if (!pending.additive) {
+          if (selectionMode === 'object') {
+            selectObject(null)
+            selectBillboardImage(null)
+            selectReferenceImage(null)
+          } else if (isComponentSelectionMode(selectionMode) && rect && camera) {
+            clearMeshSelection()
+            const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera)
+            if (pickedObjectId) selectObject(pickedObjectId)
+          }
+        }
         return
       }
 
@@ -1551,11 +1627,13 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       selectionMode,
       selectObject,
       setSelection,
+      addToObjectSelection,
       applyMeshPick,
       applyMeshMarqueePick,
       clearMeshSelection,
       knifeCommit,
       commitHistory,
+      viewportXRay,
     ]
   )
 

@@ -17,6 +17,7 @@ import {
   viewSpaceZ,
 } from '../mesh/vertexOverlay'
 import { buildEdgeToFacesMap, buildVertexToFacesMap } from '../mesh/overlayVisibility'
+import { objectsInScreenRect, pickObjectAt } from './objectPick'
 
 export interface MeshPickHit {
   objectId: string
@@ -472,4 +473,69 @@ export function meshComponentsInScreenRect(
   }
 
   return { vertices, edges, faces }
+}
+
+/** Resolve which mesh receives a component box-select (marquee). */
+export function resolveMarqueeMeshObjectId(
+  objects: SceneObject[],
+  mode: SelectionMode,
+  screenRect: ScreenRect,
+  camera: THREE.Camera,
+  viewportRect: DOMRect,
+  hints: {
+    meshSelectionObjectId?: string | null
+    selectedObjectId?: string | null
+    selectionObjectIds?: string[]
+    startX: number
+    startY: number
+    endX: number
+    endY: number
+  },
+  cullBackVertices = false
+): string | null {
+  const {
+    meshSelectionObjectId,
+    selectedObjectId,
+    selectionObjectIds = [],
+    startX,
+    startY,
+    endX,
+    endY,
+  } = hints
+
+  if (meshSelectionObjectId) return meshSelectionObjectId
+  if (selectedObjectId) return selectedObjectId
+  if (selectionObjectIds.length === 1) return selectionObjectIds[0]!
+
+  const pickStart = pickObjectAt(startX, startY, viewportRect, camera)
+  if (pickStart) return pickStart
+  const pickEnd = pickObjectAt(endX, endY, viewportRect, camera)
+  if (pickEnd) return pickEnd
+
+  const objectIds = objectsInScreenRect(objects, screenRect, camera, viewportRect)
+  let bestId: string | null = null
+  let bestCount = 0
+  for (const id of objectIds) {
+    const obj = objects.find((o) => o.id === id)
+    if (!obj) continue
+    const components = meshComponentsInScreenRect(
+      mode,
+      obj,
+      screenRect,
+      camera,
+      viewportRect,
+      cullBackVertices
+    )
+    const count =
+      mode === 'vertex'
+        ? components.vertices.length
+        : mode === 'edge'
+          ? components.edges.length
+          : components.faces.length
+    if (count > bestCount) {
+      bestCount = count
+      bestId = id
+    }
+  }
+  return bestId
 }

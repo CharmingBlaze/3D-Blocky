@@ -299,7 +299,7 @@ export function generateLowPolyPyramid(a: Vec2, b: Vec2, color: number): HalfEdg
   return mesh
 }
 
-/** Cone — triangle silhouette: apex at drag apex (z = 0), circular base at +Z */
+/** Cone — triangle silhouette in the drag plane, round base in the depth plane (like CAD cone). */
 export function generateLowPolyCone(
   a: Vec2,
   b: Vec2,
@@ -307,21 +307,19 @@ export function generateLowPolyCone(
   color: number
 ): HalfEdgeMesh {
   const [, , apex2d] = dragTriangle(a, b)
-  const { cu, rx, h, maxV } = dragBounds(a, b)
-  const depth = Math.max(h, 1)
+  const { cu, rx, minV } = dragBounds(a, b)
   const segs = Math.max(6, segments)
   const mesh = new HalfEdgeMesh()
 
   const apex = addVertex(mesh, apex2d.x, apex2d.y, 0)
-  const baseCenterV = maxV - rx
   const baseRing: number[] = []
   for (let i = 0; i < segs; i++) {
     const t = (i / segs) * Math.PI * 2
     baseRing.push(
-      addVertex(mesh, cu + Math.cos(t) * rx, baseCenterV + Math.sin(t) * rx, depth)
+      addVertex(mesh, cu + Math.cos(t) * rx, minV, Math.sin(t) * rx)
     )
   }
-  const baseCenter = addVertex(mesh, cu, baseCenterV, depth)
+  const baseCenter = addVertex(mesh, cu, minV, 0)
 
   for (let i = 0; i < segs; i++) {
     const j = (i + 1) % segs

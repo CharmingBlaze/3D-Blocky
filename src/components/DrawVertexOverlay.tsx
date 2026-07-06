@@ -17,11 +17,11 @@ const POLY_DRAW_DRAFT_SIZE = 0.42
 const POLY_DRAW_CURSOR_PREVIEW_SIZE = 0.34
 
 export function DrawVertexOverlay() {
-  const { accent, meshOutlineSecondary, meshHover, accentOrange } = useTheme()
-  const vertexColor = meshOutlineSecondary
-  const vertexHoverColor = accentOrange
-  const draftVertexColor = accent
-  const draftHoverColor = meshHover
+  const { vertexIdle, vertexHoverBorder, vertexDraft, vertexDraftHover } = useTheme()
+  const vertexColor = vertexIdle
+  const vertexHoverColor = vertexHoverBorder
+  const draftVertexColor = vertexDraft
+  const draftHoverColor = vertexDraftHover
   const {
     activeTool,
     objects,
@@ -101,9 +101,8 @@ export function DrawVertexOverlay() {
             <sphereGeometry args={[hovered ? hoverSize : size, 10, 10]} />
             <meshBasicMaterial
               color={hovered ? vertexHoverColor : vertexColor}
-              transparent
-              opacity={hovered ? 0.98 : isPolyDraw ? 0.92 : 0.45}
-              depthTest={false}
+              depthTest
+              depthWrite
             />
           </mesh>
         )
@@ -121,9 +120,8 @@ export function DrawVertexOverlay() {
             <sphereGeometry args={[size, 10, 10]} />
             <meshBasicMaterial
               color={hovered ? draftHoverColor : draftVertexColor}
-              transparent
-              opacity={0.98}
-              depthTest={false}
+              depthTest
+              depthWrite
             />
           </mesh>
         )
@@ -135,7 +133,7 @@ export function DrawVertexOverlay() {
           renderOrder={22}
         >
           <sphereGeometry args={[POLY_DRAW_CURSOR_PREVIEW_SIZE, 10, 10]} />
-          <meshBasicMaterial color={draftVertexColor} transparent opacity={0.72} depthTest={false} />
+          <meshBasicMaterial color={draftVertexColor} depthTest depthWrite />
         </mesh>
       )}
     </group>

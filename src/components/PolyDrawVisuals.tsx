@@ -18,8 +18,8 @@ function pointMarker(world: { x: number; y: number; z: number }, color: string, 
 }
 
 export function PolyDrawVisuals() {
-  const { accent, meshOutlineSecondary } = useTheme()
-  const placedColor = meshOutlineSecondary
+  const { accent, vertexIdle } = useTheme()
+  const placedColor = vertexIdle
   const edgeColor = accent
   const fillColor = hexToNumber(accent)
   const { polyDrawDraft, activeTool } = useAppStore(

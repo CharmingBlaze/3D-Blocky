@@ -20,6 +20,7 @@ import { SidePanelFileMenu } from './SidePanelFileMenu'
 import { SidePanelPrimitivesMenu, PRIMITIVE_KINDS } from './SidePanelPrimitivesMenu'
 import { SidePanelVectorShapesMenu } from './SidePanelVectorShapesMenu'
 import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
+import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
@@ -250,6 +251,8 @@ export function SidePanel() {
     selectionObjectIds,
     meshSelection,
     objects,
+    activeView,
+    viewMoveBasis,
     sidePanelWidth,
     setSidePanelWidth,
     canUndo,
@@ -270,6 +273,7 @@ export function SidePanel() {
     polyDrawSnapAllScene,
     setPolyDrawSnapAllScene,
     flipSelectedNormals,
+    transformSelectionInViewPlane,
     subdivideSelected,
     toggleSubDSelected,
     setSubDLevelsSelected,
@@ -352,6 +356,8 @@ export function SidePanel() {
       selectionObjectIds: s.selectionObjectIds,
       meshSelection: s.meshSelection,
       objects: s.objects,
+      activeView: s.activeView,
+      viewMoveBasis: s.viewMoveBasis,
       sidePanelWidth: s.sidePanelWidth,
       setSidePanelWidth: s.setSidePanelWidth,
       canUndo: s.canUndo,
@@ -372,6 +378,7 @@ export function SidePanel() {
       polyDrawSnapAllScene: s.polyDrawSnapAllScene,
       setPolyDrawSnapAllScene: s.setPolyDrawSnapAllScene,
       flipSelectedNormals: s.flipSelectedNormals,
+      transformSelectionInViewPlane: s.transformSelectionInViewPlane,
       subdivideSelected: s.subdivideSelected,
       toggleSubDSelected: s.toggleSubDSelected,
       setSubDLevelsSelected: s.setSubDLevelsSelected,
@@ -461,6 +468,24 @@ export function SidePanel() {
     selectionMode === 'object'
       ? selectionCount > 0
       : selectionHasComponents(meshSelection)
+
+  const canPlaneTransform = (() => {
+    if (activeView === 'perspective' && !viewMoveBasis) return false
+    if (selectionHasComponents(meshSelection)) {
+      const obj = objects.find((o) => o.id === meshSelection!.objectId)
+      return !!obj && !obj.topologyLocked
+    }
+    const ids =
+      selectionObjectIds.length > 0
+        ? selectionObjectIds
+        : selectedObjectId
+          ? [selectedObjectId]
+          : []
+    return ids.some((id) => {
+      const obj = objects.find((o) => o.id === id)
+      return obj && !obj.topologyLocked
+    })
+  })()
 
   const selectAllTitle =
     selectionMode === 'object'
@@ -838,6 +863,35 @@ export function SidePanel() {
                 Select
               </button>
             </SideBtnGroup>
+            <SideBtnGroup cols={3}>
+              <button
+                type="button"
+                className="side-btn"
+                disabled={!canPlaneTransform}
+                onClick={() => transformSelectionInViewPlane('flipH')}
+                title="Flip selection horizontally in the active viewport"
+              >
+                Flip H
+              </button>
+              <button
+                type="button"
+                className="side-btn"
+                disabled={!canPlaneTransform}
+                onClick={() => transformSelectionInViewPlane('flipV')}
+                title="Flip selection vertically in the active viewport"
+              >
+                Flip V
+              </button>
+              <button
+                type="button"
+                className="side-btn"
+                disabled={!canPlaneTransform}
+                onClick={() => transformSelectionInViewPlane('rotate90')}
+                title="Rotate selection 90° clockwise in the active viewport"
+              >
+                Rot 90°
+              </button>
+            </SideBtnGroup>
             <button
               className={`side-btn side-btn-wide ${uvEditorOpen ? 'active' : ''}`}
               onClick={toggleUvEditor}
@@ -881,8 +935,11 @@ export function SidePanel() {
             >
               <option value="">Pixel Editor…</option>
               <option value="open">Open editor</option>
-              <option value="new-64x64">New 64×64 document</option>
-              <option value="new-128x128">New 128×128 document</option>
+              {PIXEL_SIZE_PRESETS.map((p) => (
+                <option key={p.label} value={`new-${p.width}x${p.height}`}>
+                  New {p.label} document
+                </option>
+              ))}
               <option value="paint" disabled={selectionCount === 0 && !selectedObjectId}>
                 Paint on selected model
               </option>

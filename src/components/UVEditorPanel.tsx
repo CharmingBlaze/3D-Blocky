@@ -280,6 +280,7 @@ export function UVEditorPanel() {
     cursor: string
   }>({ face: null, point: null, cursor: 'crosshair' })
   const [hoverCursor, setHoverCursor] = useState('crosshair')
+  const [uvEditorDisplayMode, setUvEditorDisplayMode] = useState<'polys' | 'tris' | 'regions'>('regions')
 
   const {
     uvEditorOpen,
@@ -439,9 +440,10 @@ export function UVEditorPanel() {
 
   const regionFacesForEdit = useMemo(() => {
     if (!obj || uvEditorSelectedFaces.length === 0) return []
-    if (uvEditorSticky) return expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
+    const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
+    if (shouldExpand) return expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
     return [...uvEditorSelectedFaces]
-  }, [obj, uvEditorSelectedFaces, uvEditorSticky])
+  }, [obj, uvEditorSelectedFaces, uvEditorSticky, uvEditorDisplayMode])
 
   const selectedFaceSet = useMemo(
     () => new Set(regionFacesForEdit),
@@ -471,13 +473,16 @@ export function UVEditorPanel() {
   const resolveFacePick = useCallback(
     (faceIndex: number, current: number[], additive: boolean): number[] => {
       if (!obj) return current
-      if (!uvEditorSticky) {
+      const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
+      if (!shouldExpand) {
         if (!additive) return [faceIndex]
         return current.includes(faceIndex)
           ? current.filter((fi) => fi !== faceIndex)
           : [...current, faceIndex]
       }
-      const region = expandFaceToPlanarRegion(obj, faceIndex)
+      const region = faceGroupMap
+        ? (faceGroupMap.groups.find((g) => g.faceIndices.includes(faceIndex))?.faceIndices ?? expandFaceToPlanarRegion(obj, faceIndex))
+        : expandFaceToPlanarRegion(obj, faceIndex)
       if (!additive) return region
       const allSelected = region.length > 0 && region.every((fi) => current.includes(fi))
       if (allSelected) {
@@ -486,7 +491,7 @@ export function UVEditorPanel() {
       }
       return [...new Set([...current, ...region])]
     },
-    [obj, uvEditorSticky]
+    [obj, uvEditorSticky, uvEditorDisplayMode, faceGroupMap]
   )
 
   const getFacePixels = useCallback(
@@ -898,77 +903,134 @@ export function UVEditorPanel() {
       hoverFace !== null && faceGroupMap ? (faceGroupMap.faceToGroup[hoverFace] ?? null) : null
     const hasFaceSelection = uvEditorMode === 'faces' && selectedFaceSet.size > 0
 
-    if (uvEditorMode === 'faces' && ensured) {
-      if (isolatedFaceView) {
-        drawRegionFill(
-          ctx,
-          ensured,
-          uvs,
-          visibleFaceIndices,
-          theme.css['--accent-soft'],
-          texW,
-          texH
-        )
-        drawRegionBoundary(
-          ctx,
-          ensured,
-          uvs,
-          visibleFaceIndices,
-          theme.accent,
-          2.25 / viewZoom,
-          texW,
-          texH
-        )
-      } else if (faceGroupMap) {
-        for (const group of faceGroupMap.groups) {
-          const state = resolveUvRegionState(group, selectedFaceSet, hoverGroupId)
-          const dimmed = hasFaceSelection && state === 'idle'
+    if (ensured) {
+      if (uvEditorDisplayMode === 'regions' && faceGroupMap) {
+        if (isolatedFaceView) {
+          drawRegionFill(
+            ctx,
+            ensured,
+            uvs,
+            visibleFaceIndices,
+            'rgba(110, 203, 245, 0.12)',
+            texW,
+            texH
+          )
+          drawRegionBoundary(
+            ctx,
+            ensured,
+            uvs,
+            visibleFaceIndices,
+            theme.accent,
+            2.25 / viewZoom,
+            texW,
+            texH
+          )
+        } else {
+          for (const group of faceGroupMap.groups) {
+            const state = resolveUvRegionState(group, selectedFaceSet, hoverGroupId)
+            const dimmed = hasFaceSelection && state === 'idle'
 
-          let fill = 'rgba(255,255,255,0.04)'
-          let stroke = 'rgba(255,255,255,0.22)'
-          let strokeW = 1.25 / viewZoom
-          if (state === 'selected') {
-            fill = theme.css['--accent-soft']
+            let fill = 'rgba(255,255,255,0.02)'
+            let stroke = 'rgba(255,255,255,0.18)'
+            let strokeW = 1 / viewZoom
+            if (state === 'selected') {
+              fill = 'rgba(110, 203, 245, 0.12)'
+              stroke = theme.accent
+              strokeW = 2.25 / viewZoom
+            } else if (state === 'hover') {
+              fill = 'rgba(255, 178, 102, 0.15)'
+              stroke = theme.meshHover
+              strokeW = 2 / viewZoom
+            } else if (dimmed) {
+              fill = 'rgba(0,0,0,0.1)'
+              stroke = 'rgba(255,255,255,0.05)'
+            }
+
+            drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
+
+            ctx.beginPath()
+            for (const fi of group.faceIndices) {
+              const pts = getFacePixels(fi)
+              if (pts.length < 3) continue
+              ctx.moveTo(pts[0].x, pts[0].y)
+              for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+              ctx.closePath()
+            }
+            ctx.strokeStyle = state === 'selected' ? 'rgba(110, 203, 245, 0.35)' : 'rgba(255, 255, 255, 0.08)'
+            ctx.lineWidth = 1 / viewZoom
+            ctx.stroke()
+
+            drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
+          }
+        }
+      } else if (uvEditorDisplayMode === 'tris') {
+        for (const fi of visibleFaceIndices) {
+          const pts = getFacePixels(fi)
+          if (pts.length < 3) continue
+
+          const isSelected = selectedFaceSet.has(fi)
+          const isHovered = hoverFace === fi
+          const dimmed = hasFaceSelection && !isSelected
+
+          let fill = 'rgba(255,255,255,0.02)'
+          let stroke = 'rgba(255,255,255,0.15)'
+          if (isSelected) {
+            fill = 'rgba(110, 203, 245, 0.12)'
             stroke = theme.accent
-            strokeW = 2.25 / viewZoom
-          } else if (state === 'hover') {
-            fill = theme.css['--accent-orange-soft']
+          } else if (isHovered) {
+            fill = 'rgba(255, 178, 102, 0.15)'
             stroke = theme.meshHover
-            strokeW = 2 / viewZoom
           } else if (dimmed) {
-            fill = 'rgba(0,0,0,0.06)'
-            stroke = 'rgba(255,255,255,0.07)'
+            fill = 'rgba(0,0,0,0.1)'
+            stroke = 'rgba(255,255,255,0.05)'
           }
 
-          drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
-          drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
+          ctx.beginPath()
+          for (let i = 1; i <= pts.length - 2; i++) {
+            ctx.moveTo(pts[0].x, pts[0].y)
+            ctx.lineTo(pts[i].x, pts[i].y)
+            ctx.lineTo(pts[i + 1].x, pts[i + 1].y)
+            ctx.closePath()
+          }
+          ctx.fillStyle = fill
+          ctx.fill()
+          ctx.strokeStyle = stroke
+          ctx.lineWidth = (isSelected || isHovered ? 1.5 : 1) / viewZoom
+          ctx.stroke()
         }
       } else {
         for (const fi of visibleFaceIndices) {
           const pts = getFacePixels(fi)
           if (pts.length < 3) continue
+
+          const isSelected = selectedFaceSet.has(fi)
+          const isHovered = hoverFace === fi
+          const dimmed = hasFaceSelection && !isSelected
+
+          let fill = 'rgba(255,255,255,0.02)'
+          let stroke = 'rgba(255,255,255,0.18)'
+          if (isSelected) {
+            fill = 'rgba(110, 203, 245, 0.12)'
+            stroke = theme.accent
+          } else if (isHovered) {
+            fill = 'rgba(255, 178, 102, 0.15)'
+            stroke = theme.meshHover
+          } else if (dimmed) {
+            fill = 'rgba(0,0,0,0.1)'
+            stroke = 'rgba(255,255,255,0.05)'
+          }
+
           ctx.beginPath()
           ctx.moveTo(pts[0].x, pts[0].y)
           for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
           ctx.closePath()
-          ctx.fillStyle = 'rgba(255,255,255,0.03)'
+
+          ctx.fillStyle = fill
           ctx.fill()
-          ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+          ctx.strokeStyle = stroke
+          ctx.lineWidth = (isSelected || isHovered ? 1.5 : 1) / viewZoom
           ctx.stroke()
         }
-      }
-    } else {
-      for (const fi of visibleFaceIndices) {
-        const pts = getFacePixels(fi)
-        if (pts.length < 3) continue
-        ctx.beginPath()
-        ctx.moveTo(pts[0].x, pts[0].y)
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
-        ctx.closePath()
-        ctx.fillStyle = 'rgba(255,255,255,0.03)'
-        ctx.fill()
-        ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-        ctx.stroke()
       }
     }
 
@@ -983,12 +1045,37 @@ export function UVEditorPanel() {
         const { x, y } = uvToPixel(uv, texW, texH)
         const selected = uvEditorSelectedPoints.includes(ui)
         const hovered = hoverPoint === ui
-        const hs = (hovered ? HANDLE_SIZE + 2 : HANDLE_SIZE) / viewZoom
-        ctx.fillStyle = selected ? theme.accent : hovered ? theme.meshHover : theme.text
-        ctx.strokeStyle = selected || hovered ? theme.text : theme.accent
-        ctx.lineWidth = 1 / viewZoom
-        ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs)
-        ctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs)
+
+        const r = (hovered ? 5.5 : 4) / viewZoom
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+
+        if (selected) {
+          ctx.shadowColor = theme.accent
+          ctx.shadowBlur = 6
+          ctx.fillStyle = theme.accent
+          ctx.strokeStyle = '#ffffff'
+          ctx.lineWidth = 2 / viewZoom
+        } else if (hovered) {
+          ctx.fillStyle = theme.meshHover
+          ctx.strokeStyle = theme.accent
+          ctx.lineWidth = 1.5 / viewZoom
+        } else {
+          ctx.fillStyle = theme.uvCanvasBg || '#1e1e24'
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'
+          ctx.lineWidth = 1.25 / viewZoom
+        }
+
+        ctx.fill()
+        ctx.stroke()
+        ctx.shadowBlur = 0
+
+        if (!selected && !hovered) {
+          ctx.beginPath()
+          ctx.arc(x, y, 1.25 / viewZoom, 0, Math.PI * 2)
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+          ctx.fill()
+        }
       }
     }
 
@@ -998,15 +1085,17 @@ export function UVEditorPanel() {
       const pivotPx = uvToPixel(getSelectionPivotUv(regionFacesForEdit), texW, texH)
 
       if (box) {
-        ctx.setLineDash([5 / viewZoom, 4 / viewZoom])
+        ctx.fillStyle = 'rgba(110, 203, 245, 0.04)'
+        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+
         ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.55
-        ctx.lineWidth = 1 / viewZoom
+        ctx.setLineDash([5 / viewZoom, 4 / viewZoom])
+        ctx.lineWidth = 1.25 / viewZoom
         ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 1
         ctx.setLineDash([])
 
         const hs = RESIZE_HANDLE_SIZE / viewZoom
+        const r = hs / 2
         const handles = [
           { x: box.minX, y: box.minY },
           { x: box.cx, y: box.minY },
@@ -1018,22 +1107,14 @@ export function UVEditorPanel() {
           { x: box.minX, y: box.cy },
         ]
         for (const h of handles) {
-          ctx.fillStyle = theme.text
+          ctx.beginPath()
+          ctx.arc(h.x, h.y, r, 0, Math.PI * 2)
+          ctx.fillStyle = '#ffffff'
           ctx.strokeStyle = theme.accent
-          ctx.lineWidth = 1 / viewZoom
-          ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
-          ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+          ctx.lineWidth = 1.5 / viewZoom
+          ctx.fill()
+          ctx.stroke()
         }
-
-        ctx.setLineDash([3 / viewZoom, 3 / viewZoom])
-        ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.25
-        ctx.fillStyle = theme.css['--accent-soft']
-        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 0.55
-        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 1
-        ctx.setLineDash([])
       }
 
       if (handle) {
@@ -1041,7 +1122,7 @@ export function UVEditorPanel() {
         ctx.moveTo(pivotPx.x, pivotPx.y)
         ctx.lineTo(handle.x, handle.y)
         ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.7
+        ctx.globalAlpha = 0.55
         ctx.lineWidth = 1 / viewZoom
         ctx.stroke()
         ctx.globalAlpha = 1
@@ -1051,23 +1132,29 @@ export function UVEditorPanel() {
         ctx.arc(handle.x, handle.y, hr, 0, Math.PI * 2)
         ctx.fillStyle = theme.accent
         ctx.fill()
-        ctx.strokeStyle = theme.text
-        ctx.lineWidth = 1.25 / viewZoom
+        ctx.strokeStyle = '#ffffff'
+        ctx.lineWidth = 1.5 / viewZoom
         ctx.stroke()
 
         ctx.beginPath()
-        ctx.arc(handle.x, handle.y, hr * 0.55, 0.25 * Math.PI, 1.45 * Math.PI)
-        ctx.strokeStyle = theme.uvCanvasBg
-        ctx.lineWidth = 1.25 / viewZoom
-        ctx.stroke()
+        ctx.arc(handle.x, handle.y, hr * 0.45, 0, Math.PI * 2)
+        ctx.fillStyle = '#ffffff'
+        ctx.fill()
       }
     }
 
     if (dragRef.current?.kind === 'marquee' && dragRef.current.marquee) {
       const m = dragRef.current.marquee
+      const w = m.x1 - m.x0
+      const h = m.y1 - m.y0
+      
+      ctx.fillStyle = 'rgba(110, 203, 245, 0.06)'
+      ctx.fillRect(m.x0, m.y0, w, h)
+
       ctx.strokeStyle = theme.accent
       ctx.setLineDash([4 / viewZoom, 4 / viewZoom])
-      ctx.strokeRect(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0)
+      ctx.lineWidth = 1.25 / viewZoom
+      ctx.strokeRect(m.x0, m.y0, w, h)
       ctx.setLineDash([])
     }
 
@@ -1122,6 +1209,7 @@ export function UVEditorPanel() {
     getUvs,
     theme,
     clearPanPreview,
+    uvEditorDisplayMode,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -1209,7 +1297,8 @@ export function UVEditorPanel() {
   useEffect(() => {
     if (!uvEditorOpen || !objectId || !ensured || !obj) return
     if (meshSelection?.objectId === objectId && meshSelection.faces.length > 0) {
-      const expanded = uvEditorSticky
+      const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
+      const expanded = shouldExpand
         ? expandFacesToPlanarRegions(obj, meshSelection.faces)
         : [...meshSelection.faces]
       setUvEditorSelectedFaces(expanded)
@@ -1218,7 +1307,7 @@ export function UVEditorPanel() {
       setUvEditorSelectedFaces([])
       setUvEditorSelectedPoints([])
     }
-  }, [uvEditorOpen, objectId, ensured, obj, meshSelection?.objectId, meshSelection?.faces, uvEditorSticky, setUvEditorSelectedFaces, setUvEditorSelectedPoints])
+  }, [uvEditorOpen, objectId, ensured, obj, meshSelection?.objectId, meshSelection?.faces, uvEditorSticky, uvEditorDisplayMode, setUvEditorSelectedFaces, setUvEditorSelectedPoints])
 
   useEffect(() => {
     if (!uvEditorOpen || !uvEditorAutoFit || uvEditorMode !== 'faces' || !obj) {
@@ -1237,7 +1326,8 @@ export function UVEditorPanel() {
       return
     }
     lastAutoFitFacesRef.current = [...uvEditorSelectedFaces]
-    const expanded = uvEditorSticky
+    const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
+    const expanded = shouldExpand
       ? expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
       : uvEditorSelectedFaces
     const id = window.requestAnimationFrame(() => ensureSelectionVisible(expanded))
@@ -1249,6 +1339,7 @@ export function UVEditorPanel() {
     uvEditorMode,
     obj,
     uvEditorSticky,
+    uvEditorDisplayMode,
     ensureSelectionVisible,
   ])
 
@@ -1524,15 +1615,6 @@ export function UVEditorPanel() {
       capturePointer = true
     } else if (e.button !== 0) {
       return
-    } else if (e.ctrlKey) {
-      dragRef.current = {
-        kind: 'marquee',
-        startX: px.x,
-        startY: px.y,
-        marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
-        additive: e.shiftKey,
-      }
-      capturePointer = true
     } else if (uvEditorMode === 'points') {
       const handle = pickHandle(px.x, px.y)
       if (handle !== null) {
@@ -1554,11 +1636,23 @@ export function UVEditorPanel() {
           e.clientY
         )
         capturePointer = true
-      } else if (!e.shiftKey) {
-        clearAllUvSelection()
+      } else {
+        if (!e.shiftKey) {
+          clearAllUvSelection()
+        }
+        dragRef.current = {
+          kind: 'marquee',
+          startX: px.x,
+          startY: px.y,
+          marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
+          additive: e.shiftKey,
+        }
+        capturePointer = true
       }
-    } else if (uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0) {
-      const resize = pickResizeHandle(px.x, px.y, regionFacesForEdit)
+    } else if (uvEditorMode === 'faces') {
+      const resize = uvEditorSelectedFaces.length > 0 ? pickResizeHandle(px.x, px.y, regionFacesForEdit) : null
+      const rotate = uvEditorSelectedFaces.length > 0 ? pickRotateHandle(px.x, px.y) : false
+
       if (resize) {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
@@ -1579,7 +1673,7 @@ export function UVEditorPanel() {
           startY: px.y,
         }
         capturePointer = true
-      } else if (pickRotateHandle(px.x, px.y)) {
+      } else if (rotate) {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
@@ -1601,40 +1695,43 @@ export function UVEditorPanel() {
         setIslandFields((f) => ({ ...f, rot: 0 }))
         lastIslandRotRef.current = 0
         capturePointer = true
-      } else if (isInSelectionBBox(px.x, px.y, regionFacesForEdit)) {
-        const uvIndices = collectFaceUvIndices(regionFacesForEdit)
-        beginPendingUvDrag(
-          'faceDrag',
-          uvIndices,
-          uvIndices.map((i) => ({ ...ensured.uvs[i] })),
-          px.x,
-          px.y,
-          e.clientX,
-          e.clientY
-        )
-        capturePointer = true
-      }
-    }
+      } else {
+        const clickedFace = pickFace(px.x, px.y)
+        if (clickedFace !== null) {
+          const isAlreadySelected = uvEditorSelectedFaces.includes(clickedFace)
+          const nextFaces = isAlreadySelected
+            ? uvEditorSelectedFaces
+            : resolveFacePick(clickedFace, uvEditorSelectedFaces, e.shiftKey)
 
-    if (!capturePointer && uvEditorMode === 'faces') {
-      const face = pickFace(px.x, px.y)
-      if (face !== null) {
-        const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
-        selectUvFaces(objectId, nextFaces)
-        const uvIndices = collectFaceUvIndices(nextFaces)
-        beginPendingUvDrag(
-          'faceDrag',
-          uvIndices,
-          uvIndices.map((i) => ({ ...ensured.uvs[i] })),
-          px.x,
-          px.y,
-          e.clientX,
-          e.clientY
-        )
-        capturePointer = true
-      } else if (!e.shiftKey) {
-        clearAllUvSelection()
-        selectUvFaces(objectId, [])
+          if (!isAlreadySelected) {
+            selectUvFaces(objectId, nextFaces)
+          }
+
+          const uvIndices = collectFaceUvIndices(nextFaces)
+          beginPendingUvDrag(
+            'faceDrag',
+            uvIndices,
+            uvIndices.map((i) => ({ ...ensured.uvs[i] })),
+            px.x,
+            px.y,
+            e.clientX,
+            e.clientY
+          )
+          capturePointer = true
+        } else {
+          if (!e.shiftKey) {
+            clearAllUvSelection()
+            selectUvFaces(objectId, [])
+          }
+          dragRef.current = {
+            kind: 'marquee',
+            startX: px.x,
+            startY: px.y,
+            marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
+            additive: e.shiftKey,
+          }
+          capturePointer = true
+        }
       }
     }
 
@@ -2185,6 +2282,16 @@ export function UVEditorPanel() {
             <option value="grid">Grid</option>
             <option value="vertex">Vertices</option>
             <option value="island">Islands</option>
+          </select>
+          <select
+            className="shape-kind-select side-select uv-display-select"
+            value={uvEditorDisplayMode}
+            onChange={(e) => setUvEditorDisplayMode(e.target.value as any)}
+            title="UV Display mode: Quads/Polys, Triangles, or coplanar Regions"
+          >
+            <option value="polys">Quads/Polys</option>
+            <option value="tris">Triangles</option>
+            <option value="regions">Regions</option>
           </select>
           <label className="uv-editor-toggle" title="3×3 tiled texture preview">
             <input

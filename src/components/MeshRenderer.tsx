@@ -162,7 +162,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   showDensityHeatmap,
   displayMode,
 }: MeshRendererProps) {
-  const { meshOutline, meshOutlineSecondary, textMuted, css, accentOrange } = useTheme()
+  const { meshOutline, meshOutlineSecondary, objectSelectOutline, objectSelectOutlineSecondary, accentOrange } = useTheme()
   const meshRef = useRef<THREE.Mesh>(null)
   const geometryRef = useRef<THREE.BufferGeometry | null>(null)
   const materialSettings = useMemo(() => ensureObjectMaterial(object).material!, [object])
@@ -285,18 +285,13 @@ export const MeshRenderer = memo(function MeshRenderer({
   const emissive = useMemo(() => new THREE.Color(0x000000), [])
   const emissiveIntensity = 0
 
-  const edgeColor =
-    displayMode === 'model'
-      ? textMuted
-      : displayMode === 'outline'
-        ? css['--viewport-bg-deep']
-        : css['--border']
+  const edgeColor = displayMode === 'model' ? meshOutlineSecondary : meshOutline
   const edgeThreshold = !flatShading
     ? 50
     : displayMode === 'model'
       ? 15
       : 12
-  const wireColor = new THREE.Color(object.color).multiplyScalar(0.35)
+  const wireColor = meshOutline
 
   const topologyEdgeGeometry = useMemo(() => {
     if (!config.showEdgeOutline || !flatShading) return null
@@ -348,7 +343,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         )}
         {objectSelectionOutline && (
           <Outlines
-            color={isPrimary ? meshOutline : meshOutlineSecondary}
+            color={isPrimary ? objectSelectOutline : objectSelectOutlineSecondary}
             thickness={isPrimary ? 0.022 : 0.018}
             screenspace
             transparent

@@ -227,6 +227,24 @@ export function PixelEditorPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpacePan(e.type === 'keydown')
+      if (e.type !== 'keydown' || e.repeat) return
+      if (!store.open) return
+      const target = e.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return
+      }
+      const key = e.key.toLowerCase()
+      if (key === 'p') store.setTool('pencil')
+      else if (key === 'e') store.setTool('eraser')
+      else if (key === 'i') store.setTool('eyedropper')
+      else if (key === 'b') store.setTool('bucket')
+      else if (key === 'l') store.setTool('line')
+      else if (key === 'r') store.setTool('rectangle')
+      else if (key === 'o') store.setTool('ellipse')
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKey)
@@ -234,7 +252,7 @@ export function PixelEditorPanel() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [])
+  }, [store])
 
   const finishStroke = useCallback(() => {
     strokeRef.current = []
@@ -279,10 +297,8 @@ export function PixelEditorPanel() {
       return
     }
     if (store.tool === 'bucket') {
-      store.beginEdit()
-      editingRef.current = true
       store.bucketFill(p.x, p.y, e.altKey)
-      finishStroke()
+      store.commitEdit()
       return
     }
     if (store.tool === 'rectSelect') {
@@ -402,13 +418,13 @@ export function PixelEditorPanel() {
       if (file) await store.importProject(file)
       return
     }
-    if (action === 'resize') {
+    if (action === 'resize' || action === 'custom') {
       if (doc) store.resizeDoc(customW, customH)
       else store.createNew(customW, customH, objectId ?? undefined)
       return
     }
     if (action.startsWith('preset-')) {
-      const preset = PIXEL_SIZE_PRESETS.find((p) => p.label === action.slice(7))
+      const preset = PIXEL_SIZE_PRESETS.find((p) => p.label === action.replace(/^preset-/, ''))
       if (!preset) return
       setCustomW(preset.width)
       setCustomH(preset.height)
@@ -591,10 +607,10 @@ export function PixelEditorPanel() {
                 <optgroup label="Canvas size">
                   {PIXEL_SIZE_PRESETS.map((p) => (
                     <option key={p.label} value={`preset-${p.label}`}>
-                      {p.label}
+                      New {p.label}
                     </option>
                   ))}
-                  <option value="resize">Custom ({customW}×{customH})</option>
+                  <option value="custom">Custom ({customW}×{customH})</option>
                 </optgroup>
               </select>
               <label className="px-field">
@@ -613,6 +629,11 @@ export function PixelEditorPanel() {
             </div>
             {!canPaintOnModel && store.paintOnModel && (
               <p className="side-color-hint warn">Switch material to Texture mode and unwrap UVs to paint on the model.</p>
+            )}
+            {canPaintOnModel && store.paintOnModel && (
+              <p className="side-color-hint muted">
+                Paint on Model: pencil/eraser drag · eyedropper pick · bucket fill (Alt = global)
+              </p>
             )}
             <div
               ref={viewportRef}
@@ -633,7 +654,7 @@ export function PixelEditorPanel() {
               )}
             </div>
             <p className="side-color-hint muted">
-              Scroll zoom · Space+drag pan · Shift constrains shapes · Alt+click bucket = global fill
+              Scroll zoom · Space+drag pan · Shift constrains shapes · Alt+click bucket = global fill · I eyedropper · B bucket
             </p>
           </div>
 

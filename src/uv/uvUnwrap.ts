@@ -10,9 +10,10 @@ import {
 import {
   planarProjectFaceUVs,
   classifyFaceNormalBucket,
-  packFaceUvIslandsBlockbench,
+  BLOCKBENCH_SLOTS,
+  type UvNormalBucket,
 } from './uvEditing'
-import { packFaceIslandsShelf } from './uvPack'
+import { packCubeBucketsBlockbench, packFaceIslandsShelf, splitUvIslandsForPacking } from './uvPack'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2 } from './uvTypes'
 
@@ -220,13 +221,20 @@ function repackEntireMesh(
   const allFaces = work.faces.map((_, i) => i)
 
   if (layout === 'blockbench' || layout === 'box') {
-    for (const fi of allFaces) {
-      if (projectUntouched || touchedFaces.has(fi)) {
-        projectFacePlanar(work, uvs, fi)
+    const buckets = clusterFacesByNormalBucket(work, allFaces)
+    for (const [, bucketFaces] of buckets) {
+      const touch = projectUntouched || bucketFaces.some((fi) => touchedFaces.has(fi))
+      if (touch) {
+        projectIslandPlanar(work, uvs, bucketFaces)
+        weldIslandUvTopology(faceUvIndices, uvs, work, bucketFaces)
       }
     }
-    const normals = work.faces.map((_, fi) => faceNormal3D(work, fi))
-    packFaceUvIslandsBlockbench(uvs, faceUvIndices, normals, margin)
+    splitUvIslandsForPacking(
+      uvs,
+      faceUvIndices,
+      [...buckets.values()].map((faces) => faces)
+    )
+    packBlockbenchSubset(uvs, faceUvIndices, work, allFaces, margin)
     return
   }
 
@@ -368,6 +376,32 @@ function packIslandList(
   packFaceIslandsShelf(uvs, faceUvIndices, islands, margin)
 }
 
+function clusterFacesByNormalBucket(obj: SceneObject, faceIndices: number[]): Map<UvNormalBucket, number[]> {
+  const buckets = new Map<UvNormalBucket, number[]>()
+  for (const fi of faceIndices) {
+    const bucket = classifyFaceNormalBucket(faceNormal3D(obj, fi))
+    const list = buckets.get(bucket) ?? []
+    list.push(fi)
+    buckets.set(bucket, list)
+  }
+  return buckets
+}
+
+function packBlockbenchSubset(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  obj: SceneObject,
+  faceIndices: number[],
+  margin = 0.04
+): void {
+  const buckets = clusterFacesByNormalBucket(obj, faceIndices)
+  const bucketIslands = [...buckets.entries()].map(([bucket, faces]) => {
+    const slot = BLOCKBENCH_SLOTS[bucket]
+    return { bucketCol: slot.col, bucketRow: slot.row, faces }
+  })
+  packCubeBucketsBlockbench(uvs, faceUvIndices, bucketIslands, margin)
+}
+
 /** Unwrap only the given faces; other face UVs are preserved. Returns new UV arrays. */
 export function unwrapSelectedFaces(
   obj: SceneObjectWithUVs,
@@ -435,7 +469,11 @@ export function unwrapSelectedFaces(
     }
     case 'box':
     case 'blockbench': {
-      for (const fi of faces) projectFacePlanar(work, uvs, fi)
+      const buckets = clusterFacesByNormalBucket(work, faces)
+      for (const [, bucketFaces] of buckets) {
+        projectIslandPlanar(work, uvs, bucketFaces)
+        weldIslandUvTopology(faceUvIndices, uvs, work, bucketFaces)
+      }
       break
     }
     case 'lightmap': {

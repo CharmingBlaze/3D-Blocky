@@ -49,9 +49,9 @@ export function capsuleExtrusionDepth(w: number, h: number): number {
 export function dragTriangle(a: Vec2, b: Vec2): [Vec2, Vec2, Vec2] {
   const { minU, maxU, minV, maxV, cu } = dragBounds(a, b)
   return [
-    { x: minU, y: maxV },
-    { x: maxU, y: maxV },
-    { x: cu, y: minV },
+    { x: minU, y: minV },
+    { x: maxU, y: minV },
+    { x: cu, y: maxV },
   ]
 }
 
