@@ -19,7 +19,8 @@ import { ThemePicker } from './ThemeBar'
 import { SidePanelFileMenu } from './SidePanelFileMenu'
 import { SidePanelPrimitivesMenu, PRIMITIVE_KINDS } from './SidePanelPrimitivesMenu'
 import { SidePanelVectorShapesMenu } from './SidePanelVectorShapesMenu'
-import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
+import { activeExtrudeMode, activeLatheMode, activeLatheCaps } from '../stroke/drawExtrudeMode'
+import { getLatheViewHint } from '../stroke/latheProfile'
 import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
@@ -203,7 +204,13 @@ export function SidePanel() {
     setAutoConnectPaths,
     sketchExtrudeMode,
     penExtrudeMode,
+    sketchLatheMode,
+    penLatheMode,
+    sketchLatheCaps,
+    penLatheCaps,
     toggleExtrudeMode,
+    toggleLatheMode,
+    setLatheCaps,
     extrudeAmount,
     setExtrudeAmount,
     commitExtrudeDepth,
@@ -308,7 +315,13 @@ export function SidePanel() {
       setAutoConnectPaths: s.setAutoConnectPaths,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
+      sketchLatheMode: s.sketchLatheMode,
+      penLatheMode: s.penLatheMode,
+      sketchLatheCaps: s.sketchLatheCaps,
+      penLatheCaps: s.penLatheCaps,
       toggleExtrudeMode: s.toggleExtrudeMode,
+      toggleLatheMode: s.toggleLatheMode,
+      setLatheCaps: s.setLatheCaps,
       extrudeAmount: s.extrudeAmount,
       setExtrudeAmount: s.setExtrudeAmount,
       commitExtrudeDepth: s.commitExtrudeDepth,
@@ -412,6 +425,24 @@ export function SidePanel() {
     activeTool === 'vector-pen'
 
   const activeExtrudeOn = activeExtrudeMode({ drawInputMode, sketchExtrudeMode, penExtrudeMode })
+  const activeLatheOn = activeLatheMode({
+    drawInputMode,
+    sketchExtrudeMode,
+    penExtrudeMode,
+    sketchLatheMode,
+    penLatheMode,
+    sketchLatheCaps,
+    penLatheCaps,
+  })
+  const activeLatheCapsOn = activeLatheCaps({
+    drawInputMode,
+    sketchExtrudeMode,
+    penExtrudeMode,
+    sketchLatheMode,
+    penLatheMode,
+    sketchLatheCaps,
+    penLatheCaps,
+  })
 
   const selectedSketchDoodle =
     selectedObj?.sketchSource?.isClosed ? selectedObj.sketchSource : null
@@ -650,7 +681,7 @@ export function SidePanel() {
               {STROKE_MODES.map((m) => (
                 <button
                   key={m.id}
-                  className={`side-btn ${strokeMode === m.id && !activeExtrudeOn ? 'active' : ''}`}
+                  className={`side-btn ${strokeMode === m.id && !activeExtrudeOn && !activeLatheOn ? 'active' : ''}`}
                   onClick={() => setStrokeMode(m.id)}
                   title={m.hint}
                 >
@@ -658,17 +689,45 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
-            <button
-              className={`side-btn side-btn-wide ${activeExtrudeOn ? 'active' : ''}`}
-              onClick={toggleExtrudeMode}
-              title={
-                drawInputMode === 'vector-pen'
-                  ? 'Extrude vector pen strokes into 3D capsule doodles'
-                  : 'Extrude sketch strokes into 3D capsule doodles'
-              }
-            >
-              Extrude
-            </button>
+            <SideBtnGroup cols={2}>
+              <button
+                type="button"
+                className={`side-btn ${activeExtrudeOn ? 'active' : ''}`}
+                onClick={toggleExtrudeMode}
+                title={
+                  drawInputMode === 'vector-pen'
+                    ? 'Extrude vector pen strokes into 3D capsule doodles'
+                    : 'Extrude sketch strokes into 3D capsule doodles'
+                }
+              >
+                Extrude
+              </button>
+              <button
+                type="button"
+                className={`side-btn ${activeLatheOn ? 'active' : ''}`}
+                onClick={toggleLatheMode}
+                title={
+                  drawInputMode === 'vector-pen'
+                    ? 'Revolve vector pen profile — shape follows the orthographic view you draw in'
+                    : 'Revolve sketch profile — shape follows the orthographic view you draw in'
+                }
+              >
+                Lathe
+              </button>
+            </SideBtnGroup>
+            {activeLatheOn && (
+              <>
+                <label className="side-checkbox" title="Add flat caps at the top and bottom of the lathe">
+                  <input
+                    type="checkbox"
+                    checked={activeLatheCapsOn}
+                    onChange={(e) => setLatheCaps(e.target.checked)}
+                  />
+                  <span>Top &amp; bottom caps</span>
+                </label>
+                <p className="side-color-hint muted">{getLatheViewHint(activeView)}</p>
+              </>
+            )}
             {(showExtrudeDepth) && (
               <>
                 <SideSlider

@@ -191,6 +191,8 @@ type VectorStore = VectorToolsLayoutState & {
   defaultDepth: number
   facetExaggeration: number
   penExtrudeMode: boolean
+  penLatheMode: boolean
+  penLatheCaps: boolean
   extrudeAmount: number
   activeColor: number
   activeTool: string
@@ -546,6 +548,8 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         defaultDepth,
         facetExaggeration,
         penExtrudeMode,
+        penLatheMode,
+        penLatheCaps,
         extrudeAmount,
       } = store()
 
@@ -559,7 +563,9 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         defaultDepth,
         color: path.color,
         stylize: facetExaggeration,
-        extrudeMode: penExtrudeMode,
+        extrudeMode: penLatheMode ? false : penExtrudeMode,
+        latheMode: penLatheMode,
+        latheCaps: penLatheCaps,
         extrudeAmount,
       })
 

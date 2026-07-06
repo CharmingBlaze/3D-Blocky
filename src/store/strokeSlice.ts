@@ -33,6 +33,10 @@ export interface StrokeLayoutState {
   lastStrokeEndpoint: { view: ViewType; position: { x: number; y: number } } | null
   sketchExtrudeMode: boolean
   penExtrudeMode: boolean
+  sketchLatheMode: boolean
+  penLatheMode: boolean
+  sketchLatheCaps: boolean
+  penLatheCaps: boolean
   extrudeAmount: number
   extrudeDragAnchor: ExtrudeDragAnchor | null
   currentStroke: { x: number; y: number }[]
@@ -44,6 +48,10 @@ export interface StrokeLayoutState {
 export interface StrokeLayoutActions {
   setExtrudeMode: (on: boolean) => void
   toggleExtrudeMode: () => void
+  setLatheMode: (on: boolean) => void
+  toggleLatheMode: () => void
+  setLatheCaps: (on: boolean) => void
+  toggleLatheCaps: () => void
   setExtrudeAmount: (amount: number) => void
   commitExtrudeDepth: () => void
   beginExtrudeDrag: (clientX: number, clientY: number) => void
@@ -68,6 +76,10 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   lastStrokeEndpoint: null,
   sketchExtrudeMode: false,
   penExtrudeMode: false,
+  sketchLatheMode: false,
+  penLatheMode: false,
+  sketchLatheCaps: false,
+  penLatheCaps: false,
   extrudeAmount: 16,
   extrudeDragAnchor: null,
   currentStroke: [],
@@ -121,15 +133,49 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     setExtrudeMode: (on) =>
       set((s) =>
         s.drawInputMode === 'vector-pen'
-          ? ({ penExtrudeMode: on } as Partial<T>)
-          : ({ sketchExtrudeMode: on } as Partial<T>)
+          ? ({ penExtrudeMode: on, penLatheMode: on ? false : s.penLatheMode } as Partial<T>)
+          : ({ sketchExtrudeMode: on, sketchLatheMode: on ? false : s.sketchLatheMode } as Partial<T>)
       ),
 
     toggleExtrudeMode: () =>
+      set((s) => {
+        if (s.drawInputMode === 'vector-pen') {
+          const next = !s.penExtrudeMode
+          return { penExtrudeMode: next, penLatheMode: next ? false : s.penLatheMode } as Partial<T>
+        }
+        const next = !s.sketchExtrudeMode
+        return { sketchExtrudeMode: next, sketchLatheMode: next ? false : s.sketchLatheMode } as Partial<T>
+      }),
+
+    setLatheMode: (on) =>
       set((s) =>
         s.drawInputMode === 'vector-pen'
-          ? ({ penExtrudeMode: !s.penExtrudeMode } as Partial<T>)
-          : ({ sketchExtrudeMode: !s.sketchExtrudeMode } as Partial<T>)
+          ? ({ penLatheMode: on, penExtrudeMode: on ? false : s.penExtrudeMode } as Partial<T>)
+          : ({ sketchLatheMode: on, sketchExtrudeMode: on ? false : s.sketchExtrudeMode } as Partial<T>)
+      ),
+
+    toggleLatheMode: () =>
+      set((s) => {
+        if (s.drawInputMode === 'vector-pen') {
+          const next = !s.penLatheMode
+          return { penLatheMode: next, penExtrudeMode: next ? false : s.penExtrudeMode } as Partial<T>
+        }
+        const next = !s.sketchLatheMode
+        return { sketchLatheMode: next, sketchExtrudeMode: next ? false : s.sketchExtrudeMode } as Partial<T>
+      }),
+
+    setLatheCaps: (on) =>
+      set((s) =>
+        s.drawInputMode === 'vector-pen'
+          ? ({ penLatheCaps: on } as Partial<T>)
+          : ({ sketchLatheCaps: on } as Partial<T>)
+      ),
+
+    toggleLatheCaps: () =>
+      set((s) =>
+        s.drawInputMode === 'vector-pen'
+          ? ({ penLatheCaps: !s.penLatheCaps } as Partial<T>)
+          : ({ sketchLatheCaps: !s.sketchLatheCaps } as Partial<T>)
       ),
 
     setExtrudeAmount: (amount) => {
@@ -268,6 +314,8 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         objects,
         facetExaggeration,
         sketchExtrudeMode,
+        sketchLatheMode,
+        sketchLatheCaps,
         extrudeAmount,
       } = store()
 
@@ -294,7 +342,9 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         defaultDepth,
         color: activeColor,
         stylize: facetExaggeration,
-        extrudeMode: sketchExtrudeMode,
+        extrudeMode: sketchLatheMode ? false : sketchExtrudeMode,
+        latheMode: sketchLatheMode,
+        latheCaps: sketchLatheCaps,
         extrudeAmount,
       }
 

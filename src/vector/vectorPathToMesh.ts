@@ -6,8 +6,10 @@ import { flattenVectorPath } from './bezier'
 import type { VectorPath } from './types'
 import {
   VECTOR_PEN_FLATTEN_ERROR,
+  VECTOR_PEN_LATHE_FLATTEN_ERROR,
   VECTOR_PEN_POLY_BUDGET,
 } from './vectorPenLimits'
+import { LATHE_POLY_BUDGET } from '../stroke/latheProfile'
 
 export { VECTOR_PEN_POLY_BUDGET } from './vectorPenLimits'
 
@@ -22,11 +24,16 @@ export interface VectorPathMeshOptions {
   color: number
   stylize?: number
   extrudeMode?: boolean
+  latheMode?: boolean
+  latheCaps?: boolean
   extrudeAmount?: number
 }
 
-function meshPointsFromPath(path: VectorPath): { x: number; y: number }[] {
-  const points = flattenVectorPath(path, VECTOR_PEN_FLATTEN_ERROR)
+function meshPointsFromPath(path: VectorPath, latheMode = false): { x: number; y: number }[] {
+  const points = flattenVectorPath(
+    path,
+    latheMode ? VECTOR_PEN_LATHE_FLATTEN_ERROR : VECTOR_PEN_FLATTEN_ERROR
+  )
   if (points.length < 2) return points
   if (!path.closed) return points
 
@@ -41,8 +48,10 @@ function meshPointsFromPath(path: VectorPath): { x: number; y: number }[] {
 export function vectorPathMeshName(
   strokeMode: StrokeMode,
   extrudeMode: boolean,
+  latheMode: boolean,
   closed: boolean
 ): string {
+  if (latheMode) return 'Lathe'
   if (extrudeMode) return closed ? 'Doodle' : 'Capsule'
   if (strokeMode === 'blob') return 'Blob'
   if (strokeMode === 'centerline') return 'Path'
@@ -54,15 +63,20 @@ export function vectorPathToMesh(
   path: VectorPath,
   options: VectorPathMeshOptions
 ): SceneObject | null {
-  const points = meshPointsFromPath(path)
+  const points = meshPointsFromPath(path, !!options.latheMode)
   if (points.length < 2) return null
 
-  const name = vectorPathMeshName(options.strokeMode, !!options.extrudeMode, path.closed)
+  const name = vectorPathMeshName(
+    options.strokeMode,
+    !!options.extrudeMode,
+    !!options.latheMode,
+    path.closed
+  )
 
   const base: PolylineInput = {
     points,
     view: path.view,
-    polyBudget: VECTOR_PEN_POLY_BUDGET,
+    polyBudget: options.latheMode ? LATHE_POLY_BUDGET : VECTOR_PEN_POLY_BUDGET,
     brushDensity: options.brushDensity,
     strokeMode: options.strokeMode,
     rdpTolerance: options.rdpTolerance,
@@ -71,10 +85,21 @@ export function vectorPathToMesh(
     color: path.color,
     stylize: options.stylize,
     extrudeMode: options.extrudeMode,
+    latheMode: options.latheMode,
+    latheCaps: options.latheCaps,
     extrudeAmount: options.extrudeAmount,
     name,
     pathClosed: path.closed,
     preserveDetail: true,
+  }
+
+  if (options.latheMode) {
+    return polylineToMesh({
+      ...base,
+      strokeMode: 'outline',
+      extrudeMode: false,
+      latheMode: true,
+    })
   }
 
   if (options.extrudeMode) {

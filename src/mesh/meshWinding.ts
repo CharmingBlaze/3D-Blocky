@@ -1,7 +1,9 @@
 import type { OrthoViewType } from '../primitives/viewAxes'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
 import { viewTowardCamera } from '../stroke/worldProjection'
-import { faceNormal } from '../utils/math'
+import { latheRevolutionAxis } from '../stroke/latheProfile'
+import type { ViewType } from '../scene/viewTypes'
+import { faceNormal, type Vec3 } from '../utils/math'
 import {
   computeFaceNormal,
   faceCentroid,
@@ -68,6 +70,50 @@ export function reorientFacesOutward(
 export function ensurePositiveVolume(mesh: HalfEdgeMesh): HalfEdgeMesh {
   if (meshSignedVolume(mesh) < 0) flipMeshFaces(mesh)
   return mesh
+}
+
+/** Orient lathe mesh faces outward after view projection (open or capped). */
+export function orientLatheMeshOutward(
+  mesh: HalfEdgeMesh,
+  view: ViewType,
+  axisH: number,
+  depth: number
+): HalfEdgeMesh {
+  if (mesh.faces.length === 0) return mesh
+
+  const { origin, direction } = latheRevolutionAxis(view, axisH, depth)
+  let tMin = Infinity
+  let tMax = -Infinity
+  for (const p of mesh.positions) {
+    const t =
+      (p.x - origin.x) * direction.x +
+      (p.y - origin.y) * direction.y +
+      (p.z - origin.z) * direction.z
+    if (t < tMin) tMin = t
+    if (t > tMax) tMax = t
+  }
+  const tMid = (tMin + tMax) * 0.5
+  const ref = {
+    x: origin.x + direction.x * tMid,
+    y: origin.y + direction.y * tMid,
+    z: origin.z + direction.z * tMid,
+  }
+  return reorientFacesOutward(mesh, ref)
+}
+
+/** True when every face normal points away from `refPoint`. */
+export function meshFacesPointAwayFrom(mesh: HalfEdgeMesh, refPoint: Vec3): boolean {
+  for (const face of mesh.faces) {
+    if (face.length !== 3) continue
+    const tri = face as TriangleFace
+    const n = computeFaceNormal(mesh.positions, tri)
+    const c = faceCentroid(mesh.positions, tri)
+    const dx = c.x - refPoint.x
+    const dy = c.y - refPoint.y
+    const dz = c.z - refPoint.z
+    if (n.x * dx + n.y * dy + n.z * dz < -1e-4) return false
+  }
+  return true
 }
 
 /** Ensure closed meshes have outward-facing normals (positive signed volume). */

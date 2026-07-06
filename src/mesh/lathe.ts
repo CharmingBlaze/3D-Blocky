@@ -7,6 +7,37 @@ export interface LatheOptions {
   minAngleDeg?: number
   axis?: 'y' | 'x'
   depth?: number
+  /** Use profile vertices exactly as rings (no curvature resampling). */
+  preserveProfile?: boolean
+  /** Seal the bottom end with a flat cap (profile minimum height). */
+  capBottom?: boolean
+  /** Seal the top end with a flat cap (profile maximum height). */
+  capTop?: boolean
+}
+
+function addRingCap(
+  mesh: HalfEdgeMesh,
+  ring: number[],
+  height: number,
+  axis: 'y' | 'x',
+  normalSign: 1 | -1
+): void {
+  if (ring.length < 3) return
+  const ci = mesh.positions.length
+  if (axis === 'y') {
+    mesh.positions.push({ x: 0, y: height, z: 0 })
+  } else {
+    mesh.positions.push({ x: height, y: 0, z: 0 })
+  }
+  for (let i = 0; i < ring.length; i++) {
+    const next = (i + 1) % ring.length
+    if (normalSign < 0) {
+      mesh.faces.push([ci, ring[next]!, ring[i]!])
+    } else {
+      mesh.faces.push([ci, ring[i]!, ring[next]!])
+    }
+    mesh.faceColors.push(0x6ecbf5)
+  }
 }
 
 /** Generate a lathe solid from a 2D profile (radius, height) */
@@ -14,8 +45,18 @@ export function generateLathe(
   profile: Vec2[],
   options: LatheOptions
 ): HalfEdgeMesh {
-  const { radialSegments, minAngleDeg = 15, axis = 'y', depth = 0 } = options
-  const sampled = curvatureSampleProfile(profile, minAngleDeg, radialSegments + 2)
+  const {
+    radialSegments,
+    minAngleDeg = 15,
+    axis = 'y',
+    depth = 0,
+    preserveProfile = false,
+    capBottom = false,
+    capTop = false,
+  } = options
+  const sampled = preserveProfile
+    ? profile.filter((p, i, arr) => i === 0 || Math.hypot(p.x - arr[i - 1]!.x, p.y - arr[i - 1]!.y) > 1e-6)
+    : curvatureSampleProfile(profile, minAngleDeg, radialSegments + 2)
 
   const mesh = new HalfEdgeMesh()
   const segments = Math.max(3, radialSegments)
@@ -90,10 +131,21 @@ export function generateLathe(
         const b = ringA[next]
         const c = ringB[si]
         const d = ringB[next]
-        mesh.faces.push([a, b, d])
-        mesh.faces.push([a, d, c])
+        mesh.faces.push([a, c, b])
+        mesh.faces.push([c, d, b])
         mesh.faceColors.push(0x6ecbf5, 0x6ecbf5)
       }
+    }
+  }
+
+  if (capBottom && ringVerts[0]!.length > 1) {
+    addRingCap(mesh, ringVerts[0]!, sampled[0]!.y + depth, axis, -1)
+  }
+  if (capTop && ringVerts.length > 0) {
+    const last = ringVerts.length - 1
+    const lastRing = ringVerts[last]!
+    if (lastRing.length > 1) {
+      addRingCap(mesh, lastRing, sampled[last]!.y + depth, axis, 1)
     }
   }
 

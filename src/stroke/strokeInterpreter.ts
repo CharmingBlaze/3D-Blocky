@@ -12,6 +12,12 @@ import {
 } from '../vector/vectorPenLimits'
 
 import { detectRadialSymmetry } from './strokeClassifier'
+import {
+  LATHE_MAX_PROFILE_RINGS,
+  LATHE_MIN_ANGLE_DEG,
+  LATHE_RADIAL_SEGMENTS,
+  latheAxisHFromPoints,
+} from './latheProfile'
 
 export type StrokeIntent =
   | 'bead'
@@ -23,6 +29,7 @@ export type StrokeIntent =
   | 'path-tube'
   | 'path-capsule'
   | 'capsule-pillow'
+  | 'profile-lathe'
   | 'hole-line'
 
 export interface StrokeInterpretation {
@@ -36,6 +43,8 @@ export interface StrokeInterpretation {
   pathLength: number
   totalTurn: number
   name: string
+  /** Plane X of lathe revolution axis (matches leftmost drawn point). */
+  latheAxisH?: number
 }
 
 function pathLength(points: Vec2[]): number {
@@ -78,6 +87,7 @@ export function estimateLobeCount(points: Vec2[]): number {
 export interface InterpretStrokeOptions {
   preserveDetail?: boolean
   pathClosed?: boolean
+  latheMode?: boolean
 }
 
 export function interpretStroke(
@@ -109,6 +119,16 @@ export function interpretStroke(
     centroid,
     pathLength: len,
     totalTurn: turn,
+  }
+
+  // Lathe — open profile revolved around the active ortho view's screen-vertical axis.
+  if (options.latheMode && points.length >= 2) {
+    return {
+      ...base,
+      intent: 'profile-lathe',
+      name: 'Lathe',
+      latheAxisH: latheAxisHFromPoints(points),
+    }
   }
 
   // Extrude — closed outline becomes a capsule pillow; open stroke sweeps along the path.
@@ -316,6 +336,17 @@ export function allocateTessellation(
           : Math.max(16, Math.min(Math.floor(budget * 0.85), 64)),
         extrudeDepth: Math.max(4, cappedDensity * 1.1),
         minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : Math.max(8, minAngleDeg - 4),
+      }
+    }
+    case 'profile-lathe': {
+      const profileRings = Math.min(LATHE_MAX_PROFILE_RINGS, Math.max(2, profilePoints.length))
+      return {
+        radialSegments: LATHE_RADIAL_SEGMENTS,
+        profileRings,
+        pathSamples: 0,
+        boundaryVerts: 0,
+        extrudeDepth: 0,
+        minAngleDeg: LATHE_MIN_ANGLE_DEG,
       }
     }
     case 'hole-line':

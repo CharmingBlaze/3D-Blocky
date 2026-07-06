@@ -5,6 +5,14 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 export type StrokeInput = PolylineInput
 
 export function strokeToMesh(input: StrokeInput): SceneObject | null {
+  if (input.latheMode) {
+    return polylineToMesh({
+      ...input,
+      latheMode: true,
+      extrudeMode: false,
+      name: input.name ?? 'Lathe',
+    })
+  }
   if (input.extrudeMode) {
     const strokeMode =
       input.strokeMode === 'centerline'

@@ -24,11 +24,12 @@ import {
   interpretStroke,
   type StrokeIntent,
 } from './strokeInterpreter'
-import { extractLatheProfile, classifyStroke } from './strokeClassifier'
+import { classifyStroke, extractLatheProfile } from './strokeClassifier'
+import { isLatheViewSupported, strokeToLatheProfile } from './latheProfile'
 import { detectLobes } from './lobeDetection'
 import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
 import { orientTubeFacesOutward } from '../mesh/extrusion'
-import { ensureClosedMeshOutward } from '../mesh/meshWinding'
+import { ensureClosedMeshOutward, orientLatheMeshOutward } from '../mesh/meshWinding'
 import type { ViewType, StrokeMode } from '../store/appStore'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import { blobStrokeToObject } from '../blob/strokeToBlob'
@@ -45,6 +46,8 @@ export interface PolylineInput {
   color: number
   stylize?: number
   extrudeMode?: boolean
+  latheMode?: boolean
+  latheCaps?: boolean
   /** Thickness of flat silhouette extrusion along the view axis. */
   extrudeAmount?: number
   name?: string
@@ -85,9 +88,15 @@ function finalizeMesh(
   intent: StrokeIntent,
   customName?: string,
   tubePathPlane?: Vec2[],
-  preserveDetail = false
+  preserveDetail = false,
+  latheObject = false
 ): SceneObject {
-  offsetMeshInPlane(mesh, interpretation.centroid.x, interpretation.centroid.y)
+  const planeOffsetX =
+    intent === 'profile-lathe' && interpretation.latheAxisH != null
+      ? interpretation.latheAxisH
+      : interpretation.centroid.x
+  const planeOffsetY = intent === 'profile-lathe' ? 0 : interpretation.centroid.y
+  offsetMeshInPlane(mesh, planeOffsetX, planeOffsetY)
   projectMeshToView(mesh, view, depth)
   applyColor(mesh, color)
 
@@ -101,6 +110,8 @@ function finalizeMesh(
       planePathToWorld(tubePathPlane, view, depth),
       interpretation.isClosed
     )
+  } else if (intent === 'profile-lathe' && interpretation.latheAxisH != null) {
+    orientLatheMeshOutward(mesh, view, interpretation.latheAxisH, depth)
   } else {
     ensureClosedMeshOutward(mesh)
   }
@@ -120,15 +131,16 @@ function finalizeMesh(
       result = simplifyMesh(result, polyBudget)
       applyColor(result, color)
     }
-  } else if (!preserveDetail && result.vertexCount() > polyBudget) {
+  } else if (!preserveDetail && !latheObject && result.vertexCount() > polyBudget) {
     result = simplifyMesh(result, polyBudget)
     applyColor(result, color)
   }
 
   return result.toObject(generateId(), customName ?? interpretation.name, {
-    polyBudget: preserveDetail ? result.vertexCount() : polyBudget,
+    polyBudget: latheObject ? result.vertexCount() : preserveDetail ? result.vertexCount() : polyBudget,
     color,
-    polyBudgetMode: preserveDetail ? 'adaptive' : 'strict',
+    polyBudgetMode: latheObject || preserveDetail ? 'adaptive' : 'strict',
+    smoothShading: latheObject ? false : undefined,
     transform: {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },
@@ -145,7 +157,8 @@ function generateForIntent(
   color: number,
   brushDensity: number,
   stylize: number,
-  polyBudget: number
+  polyBudget: number,
+  latheCaps = false
 ): HalfEdgeMesh | null {
   const relative = centroidRelative(points, interpretation.centroid.x, interpretation.centroid.y)
 
@@ -310,6 +323,19 @@ function generateForIntent(
       })
     }
 
+    case 'profile-lathe': {
+      const lathe = strokeToLatheProfile(points)
+      if (!lathe || lathe.profile.length < 2) return null
+      return generateLathe(lathe.profile, {
+        radialSegments: tess.radialSegments,
+        preserveProfile: true,
+        capBottom: latheCaps,
+        capTop: latheCaps,
+        depth: 0,
+        axis: 'y',
+      })
+    }
+
     case 'hole-line':
       return null
   }
@@ -328,6 +354,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     color,
     stylize = 0,
     extrudeMode = false,
+    latheMode = false,
+    latheCaps = false,
     extrudeAmount,
     name,
     pathClosed,
@@ -335,15 +363,16 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
   } = input
 
   if (points.length < 2 || view === 'perspective') return null
+  if (latheMode && !isLatheViewSupported(view)) return null
 
-  if (strokeMode === 'blob' && !extrudeMode) {
+  if (strokeMode === 'blob' && !extrudeMode && !latheMode) {
     return blobStrokeToObject(input)
   }
 
   let closedPoints: Vec2[]
-  if (preserveDetail) {
+  if (preserveDetail || latheMode) {
     closedPoints = dedupeConsecutivePoints(points)
-    if (pathClosed && closedPoints.length >= 3) {
+    if (!latheMode && pathClosed && closedPoints.length >= 3) {
       const first = closedPoints[0]!
       const last = closedPoints[closedPoints.length - 1]!
       if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.01) {
@@ -382,7 +411,7 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     effectiveCloseThreshold,
     strokeMode,
     extrudeMode,
-    { preserveDetail, pathClosed }
+    { preserveDetail, pathClosed, latheMode }
   )
 
   if (interpretation.intent === 'hole-line') return null
@@ -424,7 +453,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     color,
     brushDensity,
     stylize,
-    polyBudget
+    polyBudget,
+    latheCaps
   )
   if (!mesh || mesh.vertexCount() === 0) return null
 
@@ -440,7 +470,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     interpretation.intent === 'path-tube' || interpretation.intent === 'path-capsule'
       ? closedPoints
       : undefined,
-    preserveDetail
+    preserveDetail,
+    interpretation.intent === 'profile-lathe'
   )
 }
 
