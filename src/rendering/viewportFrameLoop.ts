@@ -1,11 +1,12 @@
-type InteractionListener = (active: boolean) => void
+import { useSyncExternalStore } from 'react'
+
+type InteractionListener = () => void
 
 let interactionRefCount = 0
 const listeners = new Set<InteractionListener>()
 
 function notifyInteraction(): void {
-  const active = interactionRefCount > 0
-  for (const listener of listeners) listener(active)
+  for (const listener of listeners) listener()
 }
 
 /** Boost all visible viewports to continuous rendering during drag/orbit/gizmo use. */
@@ -24,8 +25,16 @@ export function isViewportInteractionActive(): boolean {
   return interactionRefCount > 0
 }
 
-export function subscribeViewportInteraction(listener: InteractionListener): () => void {
-  listeners.add(listener)
-  listener(interactionRefCount > 0)
-  return () => listeners.delete(listener)
+export function subscribeViewportInteraction(onStoreChange: InteractionListener): () => void {
+  listeners.add(onStoreChange)
+  return () => listeners.delete(onStoreChange)
+}
+
+/** Synchronous interaction flag — avoids one-frame demand lag after pointer down. */
+export function useViewportInteractionActive(): boolean {
+  return useSyncExternalStore(
+    subscribeViewportInteraction,
+    isViewportInteractionActive,
+    () => false
+  )
 }
