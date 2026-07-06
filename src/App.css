@@ -1944,11 +1944,39 @@
 
 .uv-editor-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background-color: var(--bg-alt);
   border-bottom: 1px solid var(--border);
+}
+
+.uv-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.uv-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.uv-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-right: 4px;
+  user-select: none;
 }
 
 .uv-editor-texture-select {
