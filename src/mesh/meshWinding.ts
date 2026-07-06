@@ -27,11 +27,8 @@ export function meshSignedVolume(mesh: HalfEdgeMesh): number {
 }
 
 export function flipMeshFaces(mesh: HalfEdgeMesh): void {
-  for (let fi = 0; fi < mesh.faces.length; fi++) {
-    mesh.faces[fi]!.reverse()
-    if (mesh.faceUvIndices[fi]) {
-      mesh.faceUvIndices[fi]!.reverse()
-    }
+  for (const face of mesh.faces) {
+    face.reverse()
   }
   mesh.buildHalfEdges()
 }
@@ -47,8 +44,7 @@ export function reorientFacesOutward(
   if (mesh.faces.length === 0) return mesh
 
   const center = refPoint ?? meshCentroid(mesh.positions)
-  for (let fi = 0; fi < mesh.faces.length; fi++) {
-    const face = mesh.faces[fi]!
+  for (const face of mesh.faces) {
     if (face.length !== 3) continue
     const tri = face as TriangleFace
     const n = computeFaceNormal(mesh.positions, tri)
@@ -62,13 +58,6 @@ export function reorientFacesOutward(
       face[0] = flipped[0]
       face[1] = flipped[1]
       face[2] = flipped[2]
-      if (mesh.faceUvIndices[fi] && mesh.faceUvIndices[fi]!.length === 3) {
-        const uvIdx = mesh.faceUvIndices[fi]!
-        const uFlipped = [uvIdx[0], uvIdx[2], uvIdx[1]]
-        uvIdx[0] = uFlipped[0]!
-        uvIdx[1] = uFlipped[1]!
-        uvIdx[2] = uFlipped[2]!
-      }
     }
   }
   mesh.buildHalfEdges()

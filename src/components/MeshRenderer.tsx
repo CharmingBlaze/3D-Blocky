@@ -164,7 +164,6 @@ export const MeshRenderer = memo(function MeshRenderer({
 }: MeshRendererProps) {
   const { meshOutline, meshOutlineSecondary, objectSelectOutline, objectSelectOutlineSecondary, accentOrange } = useTheme()
   const meshRef = useRef<THREE.Mesh>(null)
-  const geometryRef = useRef<THREE.BufferGeometry | null>(null)
   const materialSettings = useMemo(() => ensureObjectMaterial(object).material!, [object])
   const texId = useMemo(
     () => (materialSettings.mode === 'texture' ? materialSettings.textureId ?? object.id : null),
@@ -173,7 +172,6 @@ export const MeshRenderer = memo(function MeshRenderer({
   const textureMeta = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
   const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
   const textureUrl = textureMeta?.url ?? null
-  const updateObject = useAppStore((s) => s.updateObject)
   const config = VIEWPORT_DISPLAY_CONFIG[displayMode]
   const flatShading = resolveFlatShading(
     object.subdEnabled ? true : object.smoothShading,
@@ -204,11 +202,11 @@ export const MeshRenderer = memo(function MeshRenderer({
   useEffect(() => {
     if (!textureUrl || object.uvs?.length) return
     const withUvs = ensureObjectUVs(object)
-    updateObject(object.id, {
+    useAppStore.getState().updateObject(object.id, {
       uvs: withUvs.uvs,
       faceUvIndices: withUvs.faceUvIndices,
     })
-  }, [object.id, object.uvs?.length, textureUrl, object, updateObject])
+  }, [object.id, object.uvs?.length, textureUrl, object])
 
   const cageGeometry = useMemo(() => {
     if (!object.subdEnabled || !object.subdLevels || object.subdLevels <= 0) return null
@@ -231,9 +229,8 @@ export const MeshRenderer = memo(function MeshRenderer({
       flatShading,
       facetExaggeration,
       showDensityHeatmap,
-      useTexture && !usePixelTexture
+      useTexture
     )
-    geometryRef.current = geo
     return geo
   }, [
     renderObject.positions,
@@ -254,33 +251,6 @@ export const MeshRenderer = memo(function MeshRenderer({
   ])
 
   useEffect(() => () => geometry.dispose(), [geometry])
-
-  useEffect(() => {
-    const geo = geometryRef.current
-    if (!geo) return
-    const data = HalfEdgeMesh.fromObject(renderObject).toMeshData(flatShading, facetExaggeration)
-    const posAttr = geo.getAttribute('position') as THREE.BufferAttribute | undefined
-    if (posAttr && posAttr.array.length === data.positions.length) {
-      posAttr.copyArray(data.positions)
-      posAttr.needsUpdate = true
-      if (flatShading) setFlatNormalsFromIndices(geo)
-      else geo.computeVertexNormals()
-    }
-  }, [renderObject.positions, flatShading, facetExaggeration])
-
-  useEffect(() => {
-    const geo = geometryRef.current
-    if (!geo || !renderObject.uvs?.length) return
-    const data = HalfEdgeMesh.fromObject(renderObject).toMeshData(flatShading, facetExaggeration)
-    if (!data.uvs?.length) return
-    const uvAttr = geo.getAttribute('uv') as THREE.BufferAttribute | undefined
-    if (uvAttr && uvAttr.array.length === data.uvs.length) {
-      uvAttr.copyArray(data.uvs)
-      uvAttr.needsUpdate = true
-    } else if (!uvAttr) {
-      geo.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2))
-    }
-  }, [renderObject.uvs, renderObject.faceUvIndices, flatShading, facetExaggeration])
 
   const emissive = useMemo(() => new THREE.Color(0x000000), [])
   const emissiveIntensity = 0
@@ -305,7 +275,7 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   useEffect(() => () => topologyEdgeGeometry?.dispose(), [topologyEdgeGeometry])
 
-  const useVertexColors = !useTexture || usePixelTexture
+  const useVertexColors = !useTexture
 
   return (
     <group>
@@ -321,8 +291,8 @@ export const MeshRenderer = memo(function MeshRenderer({
           map={texture}
           useVertexColors={useVertexColors}
           useTexture={useTexture}
-          textureAlpha={Boolean(useTexture && !usePixelTexture && textureUrl && !pixelDoc)}
-          pixelTextureBlend={usePixelTexture}
+          textureAlpha={useTexture}
+          pixelTextureBlend={false}
         />
         {config.showEdgeOutline && topologyEdgeGeometry && (
           <lineSegments geometry={topologyEdgeGeometry} renderOrder={2}>

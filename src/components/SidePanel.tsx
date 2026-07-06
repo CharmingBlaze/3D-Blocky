@@ -949,9 +949,9 @@ export function SidePanel() {
               <button
                 className="side-btn side-btn-wide active"
                 onClick={togglePixelEditor}
-                title="Restore Pixel Editor"
+                title="Show Pixel Editor canvas"
               >
-                Restore Pixel Editor ▾
+                Show canvas ▾
               </button>
             )}
           </SideSection>

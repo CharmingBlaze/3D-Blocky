@@ -2,7 +2,8 @@ import * as THREE from 'three'
 
 /**
  * Blend texture RGB over vertex/face color by texel alpha — opaque surface, WYSIWYG paint preview.
- * Inlined from Three r173 `map_fragment` (mapTexelToLinear was removed); only the combine line differs.
+ * Note: Three.js r173+ removed `#include <map_fragment>`; prefer standard map + no vertex colors on
+ * textured meshes (see MeshRenderer) instead of this patch.
  */
 export function patchPixelTextureBlendShader(shader: THREE.WebGLProgramParametersWithUniforms): void {
   if (!shader.fragmentShader.includes('#include <map_fragment>')) return

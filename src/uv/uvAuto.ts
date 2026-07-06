@@ -5,7 +5,6 @@ import { uvBoundsFromIndices } from './uvEditing'
 
 /** Heuristic: many faces share the same full-texture 0–1 bounds → unpaked overlap. */
 export function needsUvRepack(obj: SceneObject): boolean {
-  if (obj.uvMappingMode === 'box') return false
   if (obj.uvAutoPacked) return false
   if (!obj.uvs?.length || !obj.faceUvIndices?.length) return true
   if (obj.faces.length <= 1) return false

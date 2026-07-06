@@ -9,17 +9,19 @@ import { useTheme } from '../theme/useTheme'
 
 export function LoopCutVisuals() {
   const { accentOrange, meshHover } = useTheme()
-  const { loopCutDraft, activeTool, objects } = useAppStore(
+  const { loopCutDraft, activeTool, loopCutObject } = useAppStore(
     useShallow((s) => ({
       loopCutDraft: s.loopCutDraft,
       activeTool: s.activeTool,
-      objects: s.objects,
+      loopCutObject: s.loopCutDraft
+        ? (s.objects.find((o) => o.id === s.loopCutDraft!.objectId) ?? null)
+        : null,
     }))
   )
 
   const preview = useMemo(() => {
     if (!loopCutDraft || activeTool !== 'loop-cut') return null
-    const obj = objects.find((o) => o.id === loopCutDraft.objectId)
+    const obj = loopCutObject
     if (!obj) return null
 
     const localPts = loopCutPreviewPositions(obj, loopCutDraft.loopEdges, loopCutDraft.t)
@@ -29,7 +31,7 @@ export function LoopCutVisuals() {
     const seedWorld = seed.map((vi) => worldPointFromObject(obj, obj.positions[vi]))
 
     return { worldPts, seedWorld }
-  }, [loopCutDraft, activeTool, objects])
+  }, [loopCutDraft, activeTool, loopCutObject])
 
   if (!preview) return null
 

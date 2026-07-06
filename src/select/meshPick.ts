@@ -31,26 +31,34 @@ const _ray = new THREE.Raycaster()
 const _v0 = new THREE.Vector3()
 const _v1 = new THREE.Vector3()
 const _v2 = new THREE.Vector3()
-const _hit = new THREE.Vector3()
 const _world = new THREE.Vector3()
+const _hitLocal = new THREE.Vector3()
+const _matrix = new THREE.Matrix4()
+const _invMatrix = new THREE.Matrix4()
+const _rotMatrix = new THREE.Matrix4()
+const _scaleMatrix = new THREE.Matrix4()
+const _pivotMatrix = new THREE.Matrix4()
+const _euler = new THREE.Euler()
+const _rayLocal = new THREE.Ray()
+const _bestPointLocal = new THREE.Vector3()
 
 export interface MeshPickOptions {
   /** When true, ignore back-facing verts/edges (matches overlay when X-ray is off). */
   cullBackVertices?: boolean
 }
 
-function getObjectLocalMatrix(obj: SceneObject): THREE.Matrix4 {
+function getObjectLocalMatrix(obj: SceneObject, target: THREE.Matrix4): THREE.Matrix4 {
   const pivot = getObjectPivot(obj)
   const tr = ensureTransform(obj)
-  return new THREE.Matrix4()
+  _euler.set(tr.rotation.x, tr.rotation.y, tr.rotation.z, 'XYZ')
+  _rotMatrix.makeRotationFromEuler(_euler)
+  _scaleMatrix.makeScale(tr.scale.x, tr.scale.y, tr.scale.z)
+  _pivotMatrix.makeTranslation(-pivot.x, -pivot.y, -pivot.z)
+  return target
     .makeTranslation(tr.position.x, tr.position.y, tr.position.z)
-    .multiply(
-      new THREE.Matrix4().makeRotationFromEuler(
-        new THREE.Euler(tr.rotation.x, tr.rotation.y, tr.rotation.z, 'XYZ')
-      )
-    )
-    .multiply(new THREE.Matrix4().makeScale(tr.scale.x, tr.scale.y, tr.scale.z))
-    .multiply(new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z))
+    .multiply(_rotMatrix)
+    .multiply(_scaleMatrix)
+    .multiply(_pivotMatrix)
 }
 
 interface FaceHit {
@@ -61,9 +69,10 @@ interface FaceHit {
 }
 
 function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
-  const matrix = getObjectLocalMatrix(obj)
-  const inv = matrix.clone().invert()
-  const rayLocal = rayWorld.clone().applyMatrix4(inv)
+  getObjectLocalMatrix(obj, _matrix)
+  _invMatrix.copy(_matrix).invert()
+  _rayLocal.origin.copy(rayWorld.origin).applyMatrix4(_invMatrix)
+  _rayLocal.direction.copy(rayWorld.direction).transformDirection(_invMatrix)
 
   let bestT = Infinity
   let bestFace = -1
@@ -81,20 +90,25 @@ function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
       _v1.set(b.x, b.y, b.z)
       _v2.set(c.x, c.y, c.z)
 
-      const hit = rayLocal.intersectTriangle(_v0, _v1, _v2, false, _hit)
+      const hit = _rayLocal.intersectTriangle(_v0, _v1, _v2, false, _hitLocal)
       if (!hit) continue
 
-      const t = rayLocal.origin.distanceTo(hit)
+      const t = _rayLocal.origin.distanceTo(hit)
       if (t < bestT) {
         bestT = t
         bestFace = fi
-        bestPoint = hit.clone()
+        bestPoint = _bestPointLocal.copy(hit)
       }
     }
   }
 
   if (bestFace < 0 || !bestPoint) return null
-  return { objectId: obj.id, faceIndex: bestFace, t: bestT, pointLocal: bestPoint }
+  return {
+    objectId: obj.id,
+    faceIndex: bestFace,
+    t: bestT,
+    pointLocal: _bestPointLocal.clone(),
+  }
 }
 
 function rayFromPointer(

@@ -132,6 +132,13 @@ function FillPreview({
     return geo
   }, [anchors, view, depth, closed])
 
+  useEffect(
+    () => () => {
+      geometry?.dispose()
+    },
+    [geometry]
+  )
+
   if (!geometry) return null
 
   return (

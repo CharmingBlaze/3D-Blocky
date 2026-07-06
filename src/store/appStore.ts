@@ -784,7 +784,7 @@ export interface AppState {
   setUvEditorSticky: (on: boolean) => void
   setObjectUvMappingMode: (objectId: string, mode: UvMappingMode) => void
   loadObjectTexture: (objectId: string, file: File) => Promise<void>
-  assignObjectTextureDocument: (objectId: string, docId: string) => void
+  assignObjectTextureDocument: (objectId: string, docId: string, options?: { skipHistory?: boolean }) => void
   setObjectUvPoint: (objectId: string, uvIndex: number, u: number, v: number, saveHistory?: boolean) => void
   setObjectUvPoints: (
     objectId: string,
@@ -864,6 +864,7 @@ export interface AppState {
   exportPixelDocumentPng: () => void
   exportPixelDocumentProject: () => void
   importPixelDocumentProject: (file: File) => Promise<void>
+  selectPixelEditorDocument: (docId: string) => void
   addPixelEditorLayer: () => void
   deletePixelEditorLayer: (layerId: string) => void
   duplicatePixelEditorLayer: (layerId: string) => void
@@ -889,6 +890,14 @@ export interface AppState {
   paintOnModelStroke: (docId: string, points: { x: number; y: number }[]) => void
   paintOnModelEyedropper: (docId: string, x: number, y: number) => void
   paintOnModelBucket: (docId: string, x: number, y: number, global: boolean) => void
+  paintOnModelShape: (
+    docId: string,
+    tool: 'line' | 'rectangle' | 'ellipse',
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number
+  ) => void
   ensureTextureDocumentForObject: (objectId: string) => string | null
 
   startStroke: (point: { x: number; y: number }, view: ViewType) => void
@@ -1199,7 +1208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedBillboardImageId: null,
 
   uvEditorOpen: false,
-  uvEditorPanel: { x: 80, y: 80, width: 680, height: 680, minimized: false },
+  uvEditorPanel: { x: 80, y: 80, width: 520, height: 560, minimized: false },
   uvEditorGridDivisions: 16,
   uvEditorSnap: false,
   uvEditorSnapMode: 'vertex',
@@ -1280,10 +1289,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget } = get()
     const budget = obj.polyBudget ?? polyBudget
     const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(obj), budget)
-    const withUvs = ensureObjectUVs(prepared)
-    const batch = [withUvs]
+    const batch = [prepared]
     if (symmetryEnabled && !options?.skipSymmetry) {
-      batch.push(ensureObjectUVs(mirrorSceneObject(withUvs, symmetryAxis, symmetryPlane)))
+      batch.push(mirrorSceneObject(prepared, symmetryAxis, symmetryPlane))
     }
     set((s) => ({
       objects: [...s.objects, ...batch],
@@ -1318,6 +1326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     })
     textureLoadGeneration.delete(id)
+    invalidateFaceGroupCache(id)
     reconcileAppBlobUrls(get)
     get().commitHistory('Delete object')
   },
@@ -1485,6 +1494,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         }),
       }))
+      invalidateFaceGroupCache(obj.id)
       get().commitHistory('Nudge selection')
       return
     }
@@ -2503,14 +2513,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const isNewObject = result.removedIds.length === 0 && !objects.some((o) => o.id === result.primaryId)
-    let nextObjects = result.objects.map((o) =>
-      o.id === result.primaryId ? ensureObjectUVs(o) : o
-    )
+    let nextObjects = result.objects
 
     if (symmetryEnabled && isNewObject) {
       const primary = nextObjects.find((o) => o.id === result.primaryId)
       if (primary) {
-        const mirrored = ensureObjectUVs(mirrorSceneObject(primary, symmetryAxis, symmetryPlane))
+        const mirrored = mirrorSceneObject(primary, symmetryAxis, symmetryPlane)
         nextObjects = [...nextObjects, mirrored]
         set({
           objects: nextObjects,
@@ -2569,21 +2577,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = appendFaceFromVertexIndices(obj, verts, activeColor)
     if (!result) return
 
-    const updated = {
-      ...obj,
+    get().updateObject(obj.id, {
       positions: result.object.positions,
       faces: result.object.faces,
       faceColors: result.object.faceColors,
       faceGroups: result.object.faceGroups,
-    }
-    const withUvs = ensureObjectUVs(updated)
-    get().updateObject(obj.id, {
-      positions: withUvs.positions,
-      faces: withUvs.faces,
-      faceColors: withUvs.faceColors,
-      faceGroups: withUvs.faceGroups,
-      uvs: withUvs.uvs,
-      faceUvIndices: withUvs.faceUvIndices,
     })
 
     const newFaces = Array.from(
@@ -2850,19 +2848,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     const cut = insertEdgeLoop(obj, loopCutDraft.loopEdges, loopCutDraft.t)
-    const updated = {
-      ...obj,
+    get().updateObject(obj.id, {
       positions: cut.positions,
       faces: cut.faces,
       faceColors: cut.faceColors,
-    }
-    const withUvs = ensureObjectUVs(updated)
-    get().updateObject(obj.id, {
-      positions: withUvs.positions,
-      faces: withUvs.faces,
-      faceColors: withUvs.faceColors,
-      uvs: withUvs.uvs,
-      faceUvIndices: withUvs.faceUvIndices,
     })
     set({ loopCutDraft: null })
     get().commitHistory('Loop cut')
@@ -2917,21 +2906,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(knifeDraft.committed ?? []),
       { start: { ...knifeDraft.start }, end: { ...knifeDraft.end } },
     ]
-    const updated = {
-      ...obj,
+    get().updateObject(obj.id, {
       positions: cut.positions,
       faces: cut.faces,
       faceColors: cut.faceColors,
       faceGroups: cut.faceGroups,
-    }
-    const withUvs = ensureObjectUVs(updated)
-    get().updateObject(obj.id, {
-      positions: withUvs.positions,
-      faces: withUvs.faces,
-      faceColors: withUvs.faceColors,
-      faceGroups: withUvs.faceGroups,
-      uvs: withUvs.uvs,
-      faceUvIndices: withUvs.faceUvIndices,
     })
     set({
       knifeDraft: {
@@ -3476,7 +3455,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         s.objectTextures,
         s.pixelDocuments
       )
-      for (const id of ids) textureLoadGeneration.delete(id)
+      for (const id of ids) {
+        textureLoadGeneration.delete(id)
+        invalidateFaceGroupCache(id)
+      }
       return {
         objects: s.objects.filter((o) => !ids.has(o.id)),
         selectedObjectId: null,
@@ -3567,13 +3549,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   confirmMeshModal: () => {
-    const { meshModal, objects } = get()
-    if (meshModal) {
-      const obj = objects.find((o) => o.id === meshModal.objectId)
-      if (obj) {
-        get().updateObject(meshModal.objectId, ensureObjectUVs(obj))
-      }
-    }
     get().replaceHistoryHead('Mesh edit')
     set({ meshModal: null })
   },
@@ -4433,14 +4408,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (ids.length === 0) return
     const idSet = new Set(ids)
     set((s) => ({
-      objects: s.objects.map((o) => {
-        if (!idSet.has(o.id)) return o
-        const next = setObjectMaterialMode(o, mode, o.id)
-        if (mode === 'texture') {
-          return ensureObjectUVs(next)
-        }
-        return next
-      }),
+      objects: s.objects.map((o) =>
+        idSet.has(o.id) ? setObjectMaterialMode(o, mode, o.id) : o
+      ),
     }))
     get().commitHistory('Material mode')
     if (mode === 'vertexGradient') get().previewMaterialEditorGradient()
@@ -4479,14 +4449,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   togglePixelEditor: () => {
     const { pixelEditorOpen, pixelEditorPanel } = get()
     if (pixelEditorOpen && pixelEditorPanel.minimized) {
-      set({ pixelEditorPanel: { ...pixelEditorPanel, minimized: false } })
+      set({
+        pixelEditorPanel: {
+          ...pixelEditorPanel,
+          minimized: false,
+          width: pixelEditorPanel.expandedWidth ?? pixelEditorPanel.width,
+          height: pixelEditorPanel.expandedHeight ?? pixelEditorPanel.height,
+        },
+      })
       return
     }
     if (!pixelEditorOpen) {
       get().openPixelEditor()
       return
     }
-    set({ pixelEditorOpen: false, pixelEditorPaintOnModel: false })
+    set({ pixelEditorOpen: false })
   },
 
   openPixelEditor: (opts) => {
@@ -4529,7 +4506,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorOpen: true,
       pixelEditorPanel: { ...state.pixelEditorPanel, minimized: false },
       pixelEditorDocId: docId,
-      pixelEditorPaintOnModel: opts?.paintOnModel ?? state.pixelEditorPaintOnModel,
+      pixelEditorPaintOnModel: opts?.paintOnModel ?? true,
     })
   },
 
@@ -4727,6 +4704,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         pixelTextureRevision: s.pixelTextureRevision + 1,
       }))
       reconcileAppBlobUrls(get)
+      const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
+      if (objectId) {
+        get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+      }
       get().commitHistory('Import pixel image')
       return
     }
@@ -4797,7 +4778,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelTextureRevision: s.pixelTextureRevision + 1,
     }))
     reconcileAppBlobUrls(get)
+    const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
+    if (objectId) {
+      get().assignObjectTextureDocument(objectId, docId, { skipHistory: true })
+    }
     get().commitHistory('Import pixel project')
+  },
+
+  selectPixelEditorDocument: (docId) => {
+    if (!get().pixelDocuments[docId]) return
+    set({ pixelEditorDocId: docId, pixelEditorSelection: null })
   },
 
   addPixelEditorLayer: () => {
@@ -5015,6 +5005,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
   },
 
+  paintOnModelShape: (docId, tool, x0, y0, x1, y1) => {
+    const {
+      pixelDocuments,
+      pixelEditorColor,
+      pixelEditorBrushSize,
+      pixelEditorShapeFilled,
+      pixelEditorSymmetryH,
+      pixelEditorSymmetryV,
+    } = get()
+    const docs = applyShapeToDocument(
+      pixelDocuments,
+      docId,
+      tool,
+      x0,
+      y0,
+      x1,
+      y1,
+      pixelEditorColor,
+      pixelEditorBrushSize,
+      pixelEditorShapeFilled,
+      pixelEditorSymmetryH,
+      pixelEditorSymmetryV
+    )
+    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+  },
+
   setObjectUvMappingMode: (objectId, mode) => {
     const { objects, updateObject } = get()
     const obj = objects.find((o) => o.id === objectId)
@@ -5087,7 +5103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  assignObjectTextureDocument: (objectId, docId) => {
+  assignObjectTextureDocument: (objectId, docId, options) => {
     const state = get()
     const obj = state.objects.find((o) => o.id === objectId)
     if (!obj) return
@@ -5122,7 +5138,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             },
           }),
     }))
-    get().commitHistory('Assign texture')
+    if (!options?.skipHistory) get().commitHistory('Assign texture')
   },
 
   getFaceUVs: (objectId, faceIndex) => {
@@ -5457,6 +5473,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const updated = mesh.toObject(obj.id, obj.name, obj)
+    invalidateFaceGroupCache(targetId)
     set((s) => ({
       objects: s.objects.map((o) => (o.id === targetId ? updated : o)),
     }))
@@ -5474,6 +5491,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const mesh = HalfEdgeMesh.fromObject(obj)
     const simplified = simplifyMesh(mesh, Math.floor(polyBudget * 0.75))
     const updated = simplified.toObject(obj.id, obj.name, obj)
+    invalidateFaceGroupCache(targetId)
     set((s) => ({
       objects: s.objects.map((o) => (o.id === targetId ? updated : o)),
     }))

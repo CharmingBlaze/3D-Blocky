@@ -13,9 +13,9 @@ import { compositeLayers } from '../pixel/compositeLayers'
 import { pickOpenFile } from '../io/fileDialogs'
 import { IMAGE_IMPORT_FILTERS } from '../io/download'
 import { ensureObjectUVs, resolveUvMappingMode, detachFacesUvTopology, type SceneObjectWithUVs } from '../uv/uvObject'
-import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { activeObjectTextureId, listSceneTextures } from '../uv/sceneTextures'
 import {
+  boundaryEdgesForFacesSpatial,
   expandFaceToPlanarRegion,
   expandFacesToPlanarRegions,
   getFaceGroupMap,
@@ -108,7 +108,34 @@ function pointInPolygon(px: number, py: number, poly: { x: number; y: number }[]
   return inside
 }
 
-
+function uvEdgePixels(
+  obj: SceneObjectWithUVs,
+  uvs: Uv2[],
+  regionFaces: number[],
+  va: number,
+  vb: number,
+  texW: number,
+  texH: number
+): [{ x: number; y: number }, { x: number; y: number }] | null {
+  const target = spatialMeshEdgeKey(obj, va, vb)
+  for (const fi of regionFaces) {
+    const face = obj.faces[fi]
+    const uvIdx = obj.faceUvIndices[fi]
+    if (!face || !uvIdx?.length) continue
+    for (let i = 0; i < face.length; i++) {
+      const a = face[i]
+      const b = face[(i + 1) % face.length]
+      if (spatialMeshEdgeKey(obj, a, b) !== target) continue
+      const uia = uvIdx[i]
+      const uib = uvIdx[(i + 1) % face.length]
+      return [
+        uvToPixel(uvs[uia] ?? { u: 0, v: 0 }, texW, texH),
+        uvToPixel(uvs[uib] ?? { u: 0, v: 0 }, texW, texH),
+      ]
+    }
+  }
+  return null
+}
 
 function drawRegionFill(
   ctx: CanvasRenderingContext2D,
@@ -138,64 +165,24 @@ function drawRegionFill(
   ctx.fill()
 }
 
-interface BoundaryEdgeInfo {
-  faceIndex: number
-  edgeIndex: number
-}
-
-function getBoundaryEdgesSpatial(
-  obj: SceneObject,
-  faceIndices: number[]
-): BoundaryEdgeInfo[] {
-  const counts = new Map<string, number>()
-  const firstOccurrence = new Map<string, { faceIndex: number; edgeIndex: number }>()
-
-  for (const fi of faceIndices) {
-    const face = obj.faces[fi]
-    if (!face) continue
-    for (let i = 0; i < face.length; i++) {
-      const a = face[i]
-      const b = face[(i + 1) % face.length]
-      const key = spatialMeshEdgeKey(obj, a, b)
-      counts.set(key, (counts.get(key) ?? 0) + 1)
-      if (!firstOccurrence.has(key)) {
-        firstOccurrence.set(key, { faceIndex: fi, edgeIndex: i })
-      }
-    }
-  }
-
-  const boundary: BoundaryEdgeInfo[] = []
-  for (const [key, count] of counts) {
-    if (count === 1) {
-      const occurrence = firstOccurrence.get(key)
-      if (occurrence) boundary.push(occurrence)
-    }
-  }
-  return boundary
-}
-
 function drawRegionBoundary(
   ctx: CanvasRenderingContext2D,
   obj: SceneObjectWithUVs,
   uvs: Uv2[],
+  faceIndices: number[],
   strokeStyle: string,
   lineWidth: number,
   texW: number,
-  texH: number,
-  edges: BoundaryEdgeInfo[]
+  texH: number
 ) {
+  const edges = boundaryEdgesForFacesSpatial(obj, faceIndices)
   if (edges.length === 0) return
   ctx.beginPath()
-  for (const info of edges) {
-    const face = obj.faces[info.faceIndex]
-    const uvIdx = obj.faceUvIndices[info.faceIndex]
-    if (!face || !uvIdx || uvIdx.length === 0) continue
-    const uia = uvIdx[info.edgeIndex]
-    const uib = uvIdx[(info.edgeIndex + 1) % face.length]
-    const pa = uvToPixel(uvs[uia] ?? { u: 0, v: 0 }, texW, texH)
-    const pb = uvToPixel(uvs[uib] ?? { u: 0, v: 0 }, texW, texH)
-    ctx.moveTo(pa.x, pa.y)
-    ctx.lineTo(pb.x, pb.y)
+  for (const [va, vb] of edges) {
+    const seg = uvEdgePixels(obj, uvs, faceIndices, va, vb, texW, texH)
+    if (!seg) continue
+    ctx.moveTo(seg[0].x, seg[0].y)
+    ctx.lineTo(seg[1].x, seg[1].y)
   }
   ctx.strokeStyle = strokeStyle
   ctx.lineWidth = lineWidth
@@ -293,20 +280,6 @@ export function UVEditorPanel() {
     cursor: string
   }>({ face: null, point: null, cursor: 'crosshair' })
   const [hoverCursor, setHoverCursor] = useState('crosshair')
-  const [uvEditorDisplayMode, setUvEditorDisplayMode] = useState<'polys' | 'tris' | 'regions'>('regions')
-  const [activeMenu, setActiveMenu] = useState<'transform' | 'unwrap' | 'view' | null>(null)
-
-  useEffect(() => {
-    if (!activeMenu) return
-    const handleOutsideClick = (e: PointerEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.uv-dropdown-container')) {
-        setActiveMenu(null)
-      }
-    }
-    document.addEventListener('pointerdown', handleOutsideClick)
-    return () => document.removeEventListener('pointerdown', handleOutsideClick)
-  }, [activeMenu])
 
   const {
     uvEditorOpen,
@@ -408,11 +381,11 @@ export function UVEditorPanel() {
   )
   const pixelDocuments = useAppStore((s) => s.pixelDocuments)
   const objectTextures = useAppStore((s) => s.objectTextures)
-  const objects = useAppStore((s) => s.objects)
-
-  const sceneTextures = useMemo(() => {
-    return listSceneTextures(pixelDocuments, objectTextures, objects)
-  }, [pixelDocuments, objectTextures, objects])
+  const sceneObjects = useAppStore((s) => s.objects)
+  const sceneTextures = useMemo(
+    () => listSceneTextures(pixelDocuments, objectTextures, sceneObjects),
+    [pixelDocuments, objectTextures, sceneObjects]
+  )
   const activeTextureId = useMemo(() => activeObjectTextureId(obj), [obj])
   const texId = activeTextureId
   const texture = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
@@ -470,10 +443,9 @@ export function UVEditorPanel() {
 
   const regionFacesForEdit = useMemo(() => {
     if (!obj || uvEditorSelectedFaces.length === 0) return []
-    const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
-    if (shouldExpand) return expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
+    if (uvEditorSticky) return expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
     return [...uvEditorSelectedFaces]
-  }, [obj, uvEditorSelectedFaces, uvEditorSticky, uvEditorDisplayMode])
+  }, [obj, uvEditorSelectedFaces, uvEditorSticky])
 
   const selectedFaceSet = useMemo(
     () => new Set(regionFacesForEdit),
@@ -493,20 +465,6 @@ export function UVEditorPanel() {
     return regionFacesForEdit
   }, [ensured, uvEditorViewAll, regionFacesForEdit])
 
-  const regionBoundaryEdges = useMemo(() => {
-    if (!obj || !faceGroupMap) return new Map<number, BoundaryEdgeInfo[]>()
-    const map = new Map<number, BoundaryEdgeInfo[]>()
-    for (const group of faceGroupMap.groups) {
-      map.set(group.id, getBoundaryEdgesSpatial(obj, group.faceIndices))
-    }
-    return map
-  }, [obj, faceGroupMap])
-
-  const isolatedBoundaryEdges = useMemo(() => {
-    if (!obj || !isolatedFaceView || !visibleFaceIndices) return []
-    return getBoundaryEdgesSpatial(obj, visibleFaceIndices)
-  }, [obj, isolatedFaceView, visibleFaceIndices])
-
   const clearAllUvSelection = useCallback(() => {
     setUvEditorSelectedPoints([])
     if (objectId) selectUvFaces(objectId, [])
@@ -517,16 +475,13 @@ export function UVEditorPanel() {
   const resolveFacePick = useCallback(
     (faceIndex: number, current: number[], additive: boolean): number[] => {
       if (!obj) return current
-      const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
-      if (!shouldExpand) {
+      if (!uvEditorSticky) {
         if (!additive) return [faceIndex]
         return current.includes(faceIndex)
           ? current.filter((fi) => fi !== faceIndex)
           : [...current, faceIndex]
       }
-      const region = faceGroupMap
-        ? (faceGroupMap.groups.find((g) => g.faceIndices.includes(faceIndex))?.faceIndices ?? expandFaceToPlanarRegion(obj, faceIndex))
-        : expandFaceToPlanarRegion(obj, faceIndex)
+      const region = expandFaceToPlanarRegion(obj, faceIndex)
       if (!additive) return region
       const allSelected = region.length > 0 && region.every((fi) => current.includes(fi))
       if (allSelected) {
@@ -535,7 +490,7 @@ export function UVEditorPanel() {
       }
       return [...new Set([...current, ...region])]
     },
-    [obj, uvEditorSticky, uvEditorDisplayMode, faceGroupMap]
+    [obj, uvEditorSticky]
   )
 
   const getFacePixels = useCallback(
@@ -947,143 +902,77 @@ export function UVEditorPanel() {
       hoverFace !== null && faceGroupMap ? (faceGroupMap.faceToGroup[hoverFace] ?? null) : null
     const hasFaceSelection = uvEditorMode === 'faces' && selectedFaceSet.size > 0
 
-    if (ensured) {
-      if (uvEditorDisplayMode === 'regions' && faceGroupMap) {
-        if (isolatedFaceView) {
-          drawRegionFill(
-            ctx,
-            ensured,
-            uvs,
-            visibleFaceIndices,
-            'rgba(110, 203, 245, 0.12)',
-            texW,
-            texH
-          )
-          drawRegionBoundary(
-            ctx,
-            ensured,
-            uvs,
-            theme.accent,
-            2.25 / viewZoom,
-            texW,
-            texH,
-            isolatedBoundaryEdges
-          )
-        } else {
-          for (const group of faceGroupMap.groups) {
-            const state = resolveUvRegionState(group, selectedFaceSet, hoverGroupId)
-            const dimmed = hasFaceSelection && state === 'idle'
+    if (uvEditorMode === 'faces' && ensured) {
+      if (isolatedFaceView) {
+        drawRegionFill(
+          ctx,
+          ensured,
+          uvs,
+          visibleFaceIndices,
+          theme.css['--accent-soft'],
+          texW,
+          texH
+        )
+        drawRegionBoundary(
+          ctx,
+          ensured,
+          uvs,
+          visibleFaceIndices,
+          theme.accent,
+          2.25 / viewZoom,
+          texW,
+          texH
+        )
+      } else if (faceGroupMap) {
+        for (const group of faceGroupMap.groups) {
+          const state = resolveUvRegionState(group, selectedFaceSet, hoverGroupId)
+          const dimmed = hasFaceSelection && state === 'idle'
 
-            let fill = 'rgba(255,255,255,0.02)'
-            let stroke = 'rgba(255,255,255,0.18)'
-            let strokeW = 1 / viewZoom
-            if (state === 'selected') {
-              fill = 'rgba(110, 203, 245, 0.12)'
-              stroke = theme.accent
-              strokeW = 2.25 / viewZoom
-            } else if (state === 'hover') {
-              fill = 'rgba(255, 178, 102, 0.15)'
-              stroke = theme.meshHover
-              strokeW = 2 / viewZoom
-            } else if (dimmed) {
-              fill = 'rgba(0,0,0,0.1)'
-              stroke = 'rgba(255,255,255,0.05)'
-            }
-
-            drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
-
-            ctx.beginPath()
-            for (const fi of group.faceIndices) {
-              const pts = getFacePixels(fi)
-              if (pts.length < 3) continue
-              ctx.moveTo(pts[0].x, pts[0].y)
-              for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
-              ctx.closePath()
-            }
-            ctx.strokeStyle = state === 'selected' ? 'rgba(110, 203, 245, 0.35)' : 'rgba(255, 255, 255, 0.08)'
-            ctx.lineWidth = 1 / viewZoom
-            ctx.stroke()
-
-            drawRegionBoundary(
-              ctx,
-              ensured,
-              uvs,
-              stroke,
-              strokeW,
-              texW,
-              texH,
-              regionBoundaryEdges.get(group.id) ?? []
-            )
-          }
-        }
-      } else if (uvEditorDisplayMode === 'tris') {
-        for (const fi of visibleFaceIndices) {
-          const pts = getFacePixels(fi)
-          if (pts.length < 3) continue
-
-          const isSelected = selectedFaceSet.has(fi)
-          const isHovered = hoverFace === fi
-          const dimmed = hasFaceSelection && !isSelected
-
-          let fill = 'rgba(255,255,255,0.02)'
-          let stroke = 'rgba(255,255,255,0.15)'
-          if (isSelected) {
-            fill = 'rgba(110, 203, 245, 0.12)'
+          let fill = 'rgba(255,255,255,0.04)'
+          let stroke = 'rgba(255,255,255,0.22)'
+          let strokeW = 1.25 / viewZoom
+          if (state === 'selected') {
+            fill = theme.css['--accent-soft']
             stroke = theme.accent
-          } else if (isHovered) {
-            fill = 'rgba(255, 178, 102, 0.15)'
+            strokeW = 2.25 / viewZoom
+          } else if (state === 'hover') {
+            fill = theme.css['--accent-orange-soft']
             stroke = theme.meshHover
+            strokeW = 2 / viewZoom
           } else if (dimmed) {
-            fill = 'rgba(0,0,0,0.1)'
-            stroke = 'rgba(255,255,255,0.05)'
+            fill = 'rgba(0,0,0,0.06)'
+            stroke = 'rgba(255,255,255,0.07)'
           }
 
-          ctx.beginPath()
-          for (let i = 1; i <= pts.length - 2; i++) {
-            ctx.moveTo(pts[0].x, pts[0].y)
-            ctx.lineTo(pts[i].x, pts[i].y)
-            ctx.lineTo(pts[i + 1].x, pts[i + 1].y)
-            ctx.closePath()
-          }
-          ctx.fillStyle = fill
-          ctx.fill()
-          ctx.strokeStyle = stroke
-          ctx.lineWidth = (isSelected || isHovered ? 1.5 : 1) / viewZoom
-          ctx.stroke()
+          drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
+          drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
         }
       } else {
         for (const fi of visibleFaceIndices) {
           const pts = getFacePixels(fi)
           if (pts.length < 3) continue
-
-          const isSelected = selectedFaceSet.has(fi)
-          const isHovered = hoverFace === fi
-          const dimmed = hasFaceSelection && !isSelected
-
-          let fill = 'rgba(255,255,255,0.02)'
-          let stroke = 'rgba(255,255,255,0.18)'
-          if (isSelected) {
-            fill = 'rgba(110, 203, 245, 0.12)'
-            stroke = theme.accent
-          } else if (isHovered) {
-            fill = 'rgba(255, 178, 102, 0.15)'
-            stroke = theme.meshHover
-          } else if (dimmed) {
-            fill = 'rgba(0,0,0,0.1)'
-            stroke = 'rgba(255,255,255,0.05)'
-          }
-
           ctx.beginPath()
           ctx.moveTo(pts[0].x, pts[0].y)
           for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
           ctx.closePath()
-
-          ctx.fillStyle = fill
+          ctx.fillStyle = 'rgba(255,255,255,0.03)'
           ctx.fill()
-          ctx.strokeStyle = stroke
-          ctx.lineWidth = (isSelected || isHovered ? 1.5 : 1) / viewZoom
+          ctx.strokeStyle = 'rgba(255,255,255,0.18)'
           ctx.stroke()
         }
+      }
+    } else {
+      for (const fi of visibleFaceIndices) {
+        const pts = getFacePixels(fi)
+        if (pts.length < 3) continue
+        ctx.beginPath()
+        ctx.moveTo(pts[0].x, pts[0].y)
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+        ctx.closePath()
+        ctx.fillStyle = 'rgba(255,255,255,0.03)'
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+        ctx.stroke()
       }
     }
 
@@ -1098,37 +987,12 @@ export function UVEditorPanel() {
         const { x, y } = uvToPixel(uv, texW, texH)
         const selected = uvEditorSelectedPoints.includes(ui)
         const hovered = hoverPoint === ui
-
-        const r = (hovered ? 5.5 : 4) / viewZoom
-        ctx.beginPath()
-        ctx.arc(x, y, r, 0, Math.PI * 2)
-
-        if (selected) {
-          ctx.shadowColor = theme.accent
-          ctx.shadowBlur = 6
-          ctx.fillStyle = theme.accent
-          ctx.strokeStyle = '#ffffff'
-          ctx.lineWidth = 2 / viewZoom
-        } else if (hovered) {
-          ctx.fillStyle = theme.meshHover
-          ctx.strokeStyle = theme.accent
-          ctx.lineWidth = 1.5 / viewZoom
-        } else {
-          ctx.fillStyle = theme.uvCanvasBg || '#1e1e24'
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'
-          ctx.lineWidth = 1.25 / viewZoom
-        }
-
-        ctx.fill()
-        ctx.stroke()
-        ctx.shadowBlur = 0
-
-        if (!selected && !hovered) {
-          ctx.beginPath()
-          ctx.arc(x, y, 1.25 / viewZoom, 0, Math.PI * 2)
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
-          ctx.fill()
-        }
+        const hs = (hovered ? HANDLE_SIZE + 2 : HANDLE_SIZE) / viewZoom
+        ctx.fillStyle = selected ? theme.accent : hovered ? theme.meshHover : theme.text
+        ctx.strokeStyle = selected || hovered ? theme.text : theme.accent
+        ctx.lineWidth = 1 / viewZoom
+        ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs)
+        ctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs)
       }
     }
 
@@ -1138,17 +1002,15 @@ export function UVEditorPanel() {
       const pivotPx = uvToPixel(getSelectionPivotUv(regionFacesForEdit), texW, texH)
 
       if (box) {
-        ctx.fillStyle = 'rgba(110, 203, 245, 0.04)'
-        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-
-        ctx.strokeStyle = theme.accent
         ctx.setLineDash([5 / viewZoom, 4 / viewZoom])
-        ctx.lineWidth = 1.25 / viewZoom
+        ctx.strokeStyle = theme.accent
+        ctx.globalAlpha = 0.55
+        ctx.lineWidth = 1 / viewZoom
         ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 1
         ctx.setLineDash([])
 
         const hs = RESIZE_HANDLE_SIZE / viewZoom
-        const r = hs / 2
         const handles = [
           { x: box.minX, y: box.minY },
           { x: box.cx, y: box.minY },
@@ -1160,14 +1022,22 @@ export function UVEditorPanel() {
           { x: box.minX, y: box.cy },
         ]
         for (const h of handles) {
-          ctx.beginPath()
-          ctx.arc(h.x, h.y, r, 0, Math.PI * 2)
-          ctx.fillStyle = '#ffffff'
+          ctx.fillStyle = theme.text
           ctx.strokeStyle = theme.accent
-          ctx.lineWidth = 1.5 / viewZoom
-          ctx.fill()
-          ctx.stroke()
+          ctx.lineWidth = 1 / viewZoom
+          ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+          ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
         }
+
+        ctx.setLineDash([3 / viewZoom, 3 / viewZoom])
+        ctx.strokeStyle = theme.accent
+        ctx.globalAlpha = 0.25
+        ctx.fillStyle = theme.css['--accent-soft']
+        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 0.55
+        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 1
+        ctx.setLineDash([])
       }
 
       if (handle) {
@@ -1175,7 +1045,7 @@ export function UVEditorPanel() {
         ctx.moveTo(pivotPx.x, pivotPx.y)
         ctx.lineTo(handle.x, handle.y)
         ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.55
+        ctx.globalAlpha = 0.7
         ctx.lineWidth = 1 / viewZoom
         ctx.stroke()
         ctx.globalAlpha = 1
@@ -1185,29 +1055,23 @@ export function UVEditorPanel() {
         ctx.arc(handle.x, handle.y, hr, 0, Math.PI * 2)
         ctx.fillStyle = theme.accent
         ctx.fill()
-        ctx.strokeStyle = '#ffffff'
-        ctx.lineWidth = 1.5 / viewZoom
+        ctx.strokeStyle = theme.text
+        ctx.lineWidth = 1.25 / viewZoom
         ctx.stroke()
 
         ctx.beginPath()
-        ctx.arc(handle.x, handle.y, hr * 0.45, 0, Math.PI * 2)
-        ctx.fillStyle = '#ffffff'
-        ctx.fill()
+        ctx.arc(handle.x, handle.y, hr * 0.55, 0.25 * Math.PI, 1.45 * Math.PI)
+        ctx.strokeStyle = theme.uvCanvasBg
+        ctx.lineWidth = 1.25 / viewZoom
+        ctx.stroke()
       }
     }
 
     if (dragRef.current?.kind === 'marquee' && dragRef.current.marquee) {
       const m = dragRef.current.marquee
-      const w = m.x1 - m.x0
-      const h = m.y1 - m.y0
-      
-      ctx.fillStyle = 'rgba(110, 203, 245, 0.06)'
-      ctx.fillRect(m.x0, m.y0, w, h)
-
       ctx.strokeStyle = theme.accent
       ctx.setLineDash([4 / viewZoom, 4 / viewZoom])
-      ctx.lineWidth = 1.25 / viewZoom
-      ctx.strokeRect(m.x0, m.y0, w, h)
+      ctx.strokeRect(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0)
       ctx.setLineDash([])
     }
 
@@ -1262,9 +1126,6 @@ export function UVEditorPanel() {
     getUvs,
     theme,
     clearPanPreview,
-    uvEditorDisplayMode,
-    regionBoundaryEdges,
-    isolatedBoundaryEdges,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -1352,8 +1213,7 @@ export function UVEditorPanel() {
   useEffect(() => {
     if (!uvEditorOpen || !objectId || !ensured || !obj) return
     if (meshSelection?.objectId === objectId && meshSelection.faces.length > 0) {
-      const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
-      const expanded = shouldExpand
+      const expanded = uvEditorSticky
         ? expandFacesToPlanarRegions(obj, meshSelection.faces)
         : [...meshSelection.faces]
       setUvEditorSelectedFaces(expanded)
@@ -1362,7 +1222,7 @@ export function UVEditorPanel() {
       setUvEditorSelectedFaces([])
       setUvEditorSelectedPoints([])
     }
-  }, [uvEditorOpen, objectId, ensured, obj, meshSelection?.objectId, meshSelection?.faces, uvEditorSticky, uvEditorDisplayMode, setUvEditorSelectedFaces, setUvEditorSelectedPoints])
+  }, [uvEditorOpen, objectId, ensured, obj, meshSelection?.objectId, meshSelection?.faces, uvEditorSticky, setUvEditorSelectedFaces, setUvEditorSelectedPoints])
 
   useEffect(() => {
     if (!uvEditorOpen || !uvEditorAutoFit || uvEditorMode !== 'faces' || !obj) {
@@ -1381,8 +1241,7 @@ export function UVEditorPanel() {
       return
     }
     lastAutoFitFacesRef.current = [...uvEditorSelectedFaces]
-    const shouldExpand = uvEditorDisplayMode === 'regions' || (uvEditorDisplayMode === 'polys' && uvEditorSticky)
-    const expanded = shouldExpand
+    const expanded = uvEditorSticky
       ? expandFacesToPlanarRegions(obj, uvEditorSelectedFaces)
       : uvEditorSelectedFaces
     const id = window.requestAnimationFrame(() => ensureSelectionVisible(expanded))
@@ -1394,7 +1253,6 @@ export function UVEditorPanel() {
     uvEditorMode,
     obj,
     uvEditorSticky,
-    uvEditorDisplayMode,
     ensureSelectionVisible,
   ])
 
@@ -1670,6 +1528,15 @@ export function UVEditorPanel() {
       capturePointer = true
     } else if (e.button !== 0) {
       return
+    } else if (e.ctrlKey) {
+      dragRef.current = {
+        kind: 'marquee',
+        startX: px.x,
+        startY: px.y,
+        marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
+        additive: e.shiftKey,
+      }
+      capturePointer = true
     } else if (uvEditorMode === 'points') {
       const handle = pickHandle(px.x, px.y)
       if (handle !== null) {
@@ -1691,23 +1558,11 @@ export function UVEditorPanel() {
           e.clientY
         )
         capturePointer = true
-      } else {
-        if (!e.shiftKey) {
-          clearAllUvSelection()
-        }
-        dragRef.current = {
-          kind: 'marquee',
-          startX: px.x,
-          startY: px.y,
-          marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
-          additive: e.shiftKey,
-        }
-        capturePointer = true
+      } else if (!e.shiftKey) {
+        clearAllUvSelection()
       }
-    } else if (uvEditorMode === 'faces') {
-      const resize = uvEditorSelectedFaces.length > 0 ? pickResizeHandle(px.x, px.y, regionFacesForEdit) : null
-      const rotate = uvEditorSelectedFaces.length > 0 ? pickRotateHandle(px.x, px.y) : false
-
+    } else if (uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0) {
+      const resize = pickResizeHandle(px.x, px.y, regionFacesForEdit)
       if (resize) {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
@@ -1728,7 +1583,7 @@ export function UVEditorPanel() {
           startY: px.y,
         }
         capturePointer = true
-      } else if (rotate) {
+      } else if (pickRotateHandle(px.x, px.y)) {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
@@ -1750,43 +1605,40 @@ export function UVEditorPanel() {
         setIslandFields((f) => ({ ...f, rot: 0 }))
         lastIslandRotRef.current = 0
         capturePointer = true
-      } else {
-        const clickedFace = pickFace(px.x, px.y)
-        if (clickedFace !== null) {
-          const isAlreadySelected = uvEditorSelectedFaces.includes(clickedFace)
-          const nextFaces = isAlreadySelected
-            ? uvEditorSelectedFaces
-            : resolveFacePick(clickedFace, uvEditorSelectedFaces, e.shiftKey)
+      } else if (isInSelectionBBox(px.x, px.y, regionFacesForEdit)) {
+        const uvIndices = collectFaceUvIndices(regionFacesForEdit)
+        beginPendingUvDrag(
+          'faceDrag',
+          uvIndices,
+          uvIndices.map((i) => ({ ...ensured.uvs[i] })),
+          px.x,
+          px.y,
+          e.clientX,
+          e.clientY
+        )
+        capturePointer = true
+      }
+    }
 
-          if (!isAlreadySelected) {
-            selectUvFaces(objectId, nextFaces)
-          }
-
-          const uvIndices = collectFaceUvIndices(nextFaces)
-          beginPendingUvDrag(
-            'faceDrag',
-            uvIndices,
-            uvIndices.map((i) => ({ ...ensured.uvs[i] })),
-            px.x,
-            px.y,
-            e.clientX,
-            e.clientY
-          )
-          capturePointer = true
-        } else {
-          if (!e.shiftKey) {
-            clearAllUvSelection()
-            selectUvFaces(objectId, [])
-          }
-          dragRef.current = {
-            kind: 'marquee',
-            startX: px.x,
-            startY: px.y,
-            marquee: { x0: px.x, y0: px.y, x1: px.x, y1: px.y },
-            additive: e.shiftKey,
-          }
-          capturePointer = true
-        }
+    if (!capturePointer && uvEditorMode === 'faces') {
+      const face = pickFace(px.x, px.y)
+      if (face !== null) {
+        const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
+        selectUvFaces(objectId, nextFaces)
+        const uvIndices = collectFaceUvIndices(nextFaces)
+        beginPendingUvDrag(
+          'faceDrag',
+          uvIndices,
+          uvIndices.map((i) => ({ ...ensured.uvs[i] })),
+          px.x,
+          px.y,
+          e.clientX,
+          e.clientY
+        )
+        capturePointer = true
+      } else if (!e.shiftKey) {
+        clearAllUvSelection()
+        selectUvFaces(objectId, [])
       }
     }
 
@@ -2002,20 +1854,28 @@ export function UVEditorPanel() {
     redraw()
   }
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const factor = e.deltaY > 0 ? 0.9 : 1.1
-    const px = screenToUvPixel(e.clientX, e.clientY)
-    setZoom((z) => {
-      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor))
-      const rect = canvasRef.current!.getBoundingClientRect()
-      setPan({
-        x: e.clientX - rect.left - px.x * nz,
-        y: e.clientY - rect.top - px.y * nz,
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !uvEditorOpen) return
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY > 0 ? 0.9 : 1.1
+      const px = screenToUvPixel(e.clientX, e.clientY)
+      setZoom((z) => {
+        const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor))
+        const rect = canvasRef.current!.getBoundingClientRect()
+        setPan({
+          x: e.clientX - rect.left - px.x * nz,
+          y: e.clientY - rect.top - px.y * nz,
+        })
+        return nz
       })
-      return nz
-    })
-  }
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [uvEditorOpen, screenToUvPixel, setZoom, setPan])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2155,8 +2015,37 @@ export function UVEditorPanel() {
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
       >
-        <div className="uv-editor-toolbar-single">
-          {/* Select Mode */}
+        <div className="uv-editor-toolbar">
+          {objectId && (
+            <label
+              className="uv-editor-texture-select"
+              title="Scene textures — pick an atlas shared by any number of objects"
+            >
+              <span className="uv-editor-texture-label">Texture</span>
+              <select
+                className="shape-kind-select side-select uv-texture-select"
+                value={activeTextureId ?? ''}
+                onChange={(e) => {
+                  const id = e.target.value
+                  if (id) assignObjectTextureDocument(objectId, id)
+                }}
+                disabled={sceneTextures.length === 0}
+              >
+                {sceneTextures.length === 0 ? (
+                  <option value="">No textures — import one</option>
+                ) : (
+                  <>
+                    {!activeTextureId && <option value="">Select texture…</option>}
+                    {sceneTextures.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
+          )}
           <div className="uv-editor-mode-group">
             <button
               type="button"
@@ -2175,33 +2064,97 @@ export function UVEditorPanel() {
               Faces
             </button>
           </div>
-
-          <div className="uv-toolbar-divider" />
-
-          {/* Display Mode */}
+          {obj && objectId && (
+            <div className="uv-editor-mode-group" title="UV mapping mode">
+              <button
+                type="button"
+                className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'perFace' ? 'active' : ''}`}
+                onClick={() => setObjectUvMappingMode(objectId, 'perFace')}
+                title="Per-face planar UV (scale-correct per face)"
+              >
+                Per-Face
+              </button>
+              <button
+                type="button"
+                className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'box' ? 'active' : ''}`}
+                onClick={() => setObjectUvMappingMode(objectId, 'box')}
+                title="Box UV — each face maps to a full 0–1 square"
+              >
+                Box UV
+              </button>
+            </div>
+          )}
+          <button type="button" className="uv-tool-btn" onClick={() => void onImport()}>
+            Import…
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')}>
+            Flip H
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipV')}>
+            Flip V
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCW')}>
+            Rot 90°
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('rotateCCW')}>
+            Rot −90°
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('fit')}>
+            Fit
+          </button>
           <select
-            className="shape-kind-select side-select uv-display-select-compact"
-            value={uvEditorDisplayMode}
-            onChange={(e) => setUvEditorDisplayMode(e.target.value as any)}
-            title="UV Display mode: Regions, Polys, or Triangles"
+            className="shape-kind-select side-select uv-unwrap-select"
+            value={unwrapMethod}
+            onChange={(e) => setUnwrapMethod(e.target.value as UvUnwrapMethod)}
+            title="Unwrap method"
           >
-            <option value="regions">Regions</option>
-            <option value="polys">Quads/Polys</option>
-            <option value="tris">Triangles</option>
+            {UV_UNWRAP_METHODS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
           </select>
-
           <button
             type="button"
-            className={`uv-tool-btn compact-btn ${uvEditorViewAll ? 'active' : ''}`}
-            onClick={() => setUvEditorViewAll(!uvEditorViewAll)}
-            title="Show all UV islands (All)"
+            className="uv-tool-btn uv-tool-btn-primary"
+            onClick={() => unwrapSelectedUvFaces(unwrapMethod)}
+            title={
+              UV_UNWRAP_METHODS.find((m) => m.id === unwrapMethod)?.hint ??
+              'Unwrap selected faces (or all if none selected)'
+            }
           >
-            All
+            Unwrap
           </button>
-
+          {(unwrapMethod === 'smart' || unwrapMethod === 'auto') && (
+            <label className="uv-editor-angle" title="Smart UV angle limit (degrees)">
+              °
+              <input
+                className="uv-grid-input"
+                type="number"
+                min={1}
+                max={180}
+                value={uvEditorSmartUvAngle}
+                onChange={(e) => setUvEditorSmartUvAngle(Number(e.target.value))}
+              />
+            </label>
+          )}
+          <button type="button" className="uv-tool-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Mirror UV horizontally">
+            Mirror
+          </button>
+          <button type="button" className="uv-tool-btn" onClick={frameSelection} title="Frame view (F · double-click)">
+            Frame
+          </button>
+          <label className="uv-editor-toggle" title="When selecting a face, pan/zoom to it only if it is off-screen. Manual pan and zoom are kept otherwise.">
+            <input
+              type="checkbox"
+              checked={uvEditorAutoFit}
+              onChange={(e) => setUvEditorAutoFit(e.target.checked)}
+            />
+            Auto fit
+          </label>
           <label
-            className="uv-editor-toggle compact-toggle"
-            title="Sticky selection: adjacent coplanar faces move together"
+            className="uv-editor-toggle"
+            title="When on, coplanar faces move together. When off, each face breaks away on move."
           >
             <input
               type="checkbox"
@@ -2210,247 +2163,103 @@ export function UVEditorPanel() {
             />
             Sticky
           </label>
-
-          {obj && objectId && (
-            <>
-              <div className="uv-toolbar-divider" />
-              <div className="uv-editor-mode-group">
-                <button
-                  type="button"
-                  className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'perFace' ? 'active' : ''}`}
-                  onClick={() => setObjectUvMappingMode(objectId, 'perFace')}
-                  title="Per-Face Mapping"
-                >
-                  Per-Face
-                </button>
-                <button
-                  type="button"
-                  className={`uv-mode-btn ${resolveUvMappingMode(obj) === 'box' ? 'active' : ''}`}
-                  onClick={() => setObjectUvMappingMode(objectId, 'box')}
-                  title="Box UV Mapping"
-                >
-                  Box UV
-                </button>
-              </div>
-            </>
-          )}
-
-
-
-          {/* Unwrap Dropdown */}
-          <div className="uv-dropdown-container">
-            <button
-              type="button"
-              className={`uv-dropdown-trigger ${activeMenu === 'unwrap' ? 'active' : ''}`}
-              onClick={() => setActiveMenu(activeMenu === 'unwrap' ? null : 'unwrap')}
-            >
-              Unwrap ▾
-            </button>
-            {activeMenu === 'unwrap' && (
-              <div className="uv-dropdown-menu uv-dropdown-menu-wide">
-                <div className="uv-dropdown-form-row">
-                  <label>Method:</label>
-                  <select
-                    className="shape-kind-select side-select"
-                    value={unwrapMethod}
-                    onChange={(e) => setUnwrapMethod(e.target.value as UvUnwrapMethod)}
-                  >
-                    {UV_UNWRAP_METHODS.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {(unwrapMethod === 'smart' || unwrapMethod === 'auto') && (
-                  <div className="uv-dropdown-form-row">
-                    <label>Angle Limit:</label>
-                    <input
-                      className="uv-grid-input"
-                      type="number"
-                      min={1}
-                      max={180}
-                      value={uvEditorSmartUvAngle}
-                      onChange={(e) => setUvEditorSmartUvAngle(Number(e.target.value))}
-                    />
-                    <span>°</span>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className="uv-tool-btn uv-tool-btn-primary"
-                  onClick={() => { unwrapSelectedUvFaces(unwrapMethod); setActiveMenu(null); }}
-                  style={{ marginTop: '8px', width: '100%' }}
-                >
-                  Run Unwrap
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* View / Grid Dropdown */}
-          <div className="uv-dropdown-container">
-            <button
-              type="button"
-              className={`uv-dropdown-trigger ${activeMenu === 'view' ? 'active' : ''}`}
-              onClick={() => setActiveMenu(activeMenu === 'view' ? null : 'view')}
-            >
-              Grid & View ▾
-            </button>
-            {activeMenu === 'view' && (
-              <div className="uv-dropdown-menu uv-dropdown-menu-wide align-right">
-                <label className="uv-dropdown-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={uvEditorShowGrid}
-                    onChange={(e) => setUvEditorShowGrid(e.target.checked)}
-                  />
-                  <span>Show Grid</span>
-                </label>
-                <div className="uv-dropdown-form-row">
-                  <label>Grid Divisions:</label>
-                  <input
-                    className="uv-grid-input"
-                    type="number"
-                    min={1}
-                    max={64}
-                    value={uvEditorGridDivisions}
-                    onChange={(e) => setUvEditorGridDivisions(Number(e.target.value))}
-                  />
-                </div>
-                <div className="uv-dropdown-divider" />
-                <label className="uv-dropdown-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={uvEditorSnap}
-                    onChange={(e) => setUvEditorSnap(e.target.checked)}
-                  />
-                  <span>Enable Snapping</span>
-                </label>
-                <div className="uv-dropdown-form-row">
-                  <label>Snap Target:</label>
-                  <select
-                    className="shape-kind-select side-select"
-                    value={uvEditorSnapMode}
-                    disabled={!uvEditorSnap}
-                    onChange={(e) => setUvEditorSnapMode(e.target.value as UvSnapMode)}
-                  >
-                    <option value="grid">Grid</option>
-                    <option value="vertex">Vertices</option>
-                    <option value="island">Islands</option>
-                  </select>
-                </div>
-                <div className="uv-dropdown-divider" />
-                <label className="uv-dropdown-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={uvEditorTilePreview}
-                    onChange={(e) => setUvEditorTilePreview(e.target.checked)}
-                  />
-                  <span>Tile Preview (3x3)</span>
-                </label>
-                <label className="uv-dropdown-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={uvEditorAutoFit}
-                    onChange={(e) => setUvEditorAutoFit(e.target.checked)}
-                  />
-                  <span>Auto-fit Selection</span>
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="uv-toolbar-divider" />
-
-          {/* Texture & Import */}
-          {objectId && (
-            <select
-              className="shape-kind-select side-select uv-texture-select-compact"
-              value={activeTextureId ?? ''}
-              onChange={(e) => {
-                const id = e.target.value
-                if (id) assignObjectTextureDocument(objectId, id)
-              }}
-              disabled={sceneTextures.length === 0}
-              title="Scene textures"
-            >
-              {sceneTextures.length === 0 ? (
-                <option value="">No textures</option>
-              ) : (
-                <>
-                  {!activeTextureId && <option value="">Select texture…</option>}
-                  {sceneTextures.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          )}
-
           <button
             type="button"
-            className="uv-tool-btn compact-btn"
-            onClick={() => void onImport()}
-            title="Import Texture Image"
+            className={`uv-tool-btn ${uvEditorViewAll ? 'active' : ''}`}
+            onClick={() => setUvEditorViewAll(!uvEditorViewAll)}
+            title="Show all UV islands in the atlas (Blockbench UV window)"
           >
-            Import…
+            All
           </button>
+          <label className="uv-editor-toggle">
+            <input
+              type="checkbox"
+              checked={uvEditorShowGrid}
+              onChange={(e) => setUvEditorShowGrid(e.target.checked)}
+            />
+            Grid
+          </label>
+          <label className="uv-editor-toggle">
+            <input type="checkbox" checked={uvEditorSnap} onChange={(e) => setUvEditorSnap(e.target.checked)} />
+            Snap
+          </label>
+          <select
+            className="shape-kind-select side-select uv-snap-select"
+            value={uvEditorSnapMode}
+            disabled={!uvEditorSnap}
+            onChange={(e) => setUvEditorSnapMode(e.target.value as UvSnapMode)}
+            title={
+              uvEditorMode === 'faces'
+                ? 'Island snap aligns selected faces to other UV islands'
+                : 'Vertex snap aligns points to other UV vertices'
+            }
+          >
+            <option value="grid">Grid</option>
+            <option value="vertex">Vertices</option>
+            <option value="island">Islands</option>
+          </select>
+          <label className="uv-editor-toggle" title="3×3 tiled texture preview">
+            <input
+              type="checkbox"
+              checked={uvEditorTilePreview}
+              onChange={(e) => setUvEditorTilePreview(e.target.checked)}
+            />
+            Tile
+          </label>
+          <input
+            className="uv-grid-input"
+            type="number"
+            min={1}
+            max={64}
+            value={uvEditorGridDivisions}
+            onChange={(e) => setUvEditorGridDivisions(Number(e.target.value))}
+            title="Grid divisions"
+          />
+        </div>
+
+        <div className="uv-editor-shortcuts">
+          <span>
+            {uvEditorMode === 'faces'
+              ? uvEditorViewAll
+                ? 'All islands: full packed atlas · toggle All off to focus selection'
+                : 'Selected face(s) only · All = full atlas · Unwrap repacks islands'
+              : 'Points: drag handles · Snap to verts/grid'}
+            {' · Scroll zoom · Space/middle pan · Alt+click reposition · F frame'}
+          </span>
         </div>
 
         {(texture || pixelDoc) && (
           <div className="uv-editor-meta">
             {pixelDoc ? 'Pixel texture' : texture!.name} — {texW}×{texH}px
+            <span className="uv-editor-hint"> · Shift+click toggle region · Ctrl+drag box-select</span>
+          </div>
+        )}
+        {!texture && (
+          <div className="uv-editor-meta uv-editor-hint">
+            Shift+click toggle planar region · Ctrl+drag box-select · Alt+click move selection to cursor
           </div>
         )}
 
-        <div className="uv-editor-workspace">
-          <div className="uv-editor-sidebar-left">
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Flip horizontally">
-              Flip H
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipV')} title="Flip vertically">
-              Flip V
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('rotateCW')} title="Rotate 90° CW">
-              Rot 90°
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('rotateCCW')} title="Rotate 90° CCW">
-              Rot −90°
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('fit')} title="Fit selected face UVs to fill 0-1 texture area">
-              Fit UV
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={() => transformSelectedUvIslands('flipH')} title="Mirror UV horizontally">
-              Mirror
-            </button>
-            <button type="button" className="uv-sidebar-btn" onClick={frameSelection} title="Frame view (F · double-click)">
-              Frame (F)
-            </button>
-          </div>
-
-          <div
-            ref={containerRef}
-            className="uv-editor-canvas-wrap"
-            style={{ cursor: hoverCursor }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerLeave={(e) => {
-              if (dragRef.current?.kind === 'pan') {
-                onPointerUp(e)
-                return
-              }
-              hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
-              setHoverCursor('crosshair')
-              scheduleRedraw()
-            }}
-            onAuxClick={(e) => e.preventDefault()}
-            onWheel={onWheel}
-          >
-            <canvas ref={canvasRef} className="uv-editor-canvas" />
-            {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
-          </div>
+        <div
+          ref={containerRef}
+          className="uv-editor-canvas-wrap"
+          style={{ cursor: hoverCursor }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={(e) => {
+            if (dragRef.current?.kind === 'pan') {
+              onPointerUp(e)
+              return
+            }
+            hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
+            setHoverCursor('crosshair')
+            scheduleRedraw()
+          }}
+          onAuxClick={(e) => e.preventDefault()}
+        >
+          <canvas ref={canvasRef} className="uv-editor-canvas" />
+          {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
         </div>
 
         <div className="uv-editor-precision">

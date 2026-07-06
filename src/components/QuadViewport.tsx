@@ -3,6 +3,10 @@ import { OrbitControls } from '@react-three/drei'
 import { useRef, useCallback, useState, useLayoutEffect, useEffect } from 'react'
 import { MOUSE, Vector3 } from 'three'
 import type * as THREE from 'three'
+
+const _viewMoveRight = new Vector3()
+const _viewMoveUp = new Vector3()
+const _viewMoveForward = new Vector3()
 import { useShallow } from 'zustand/react/shallow'
 import { ObjectNode } from './ObjectNode'
 import { MeshSelectionGizmo } from './MeshSelectionGizmo'
@@ -36,10 +40,12 @@ import { pickObjectAt, objectsInScreenRect } from '../select/objectPick'
 import { meshComponentsInScreenRect, pickMeshComponent, pickKnifeHit, resolveMarqueeMeshObjectId, type MeshPickHit } from '../select/meshPick'
 import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
 import {
+  constrainPixelShape,
   estimateTexelScreenSize,
   interpolateScreenPaintSamples,
   pickMeshSurfaceUv,
   uvToPixelCoords,
+  type PixelShapeTool,
 } from '../pixel/uvPaint'
 import { resolveEffectiveMaterial } from '../material/materials'
 import { edgeKey, getAffectedVertices, meshSelectionWorldCenter, selectionHasComponents, type MeshComponentSelection } from '../mesh/meshSelection'
@@ -178,14 +184,12 @@ function ViewMoveBasisSync({ enabled }: { enabled: boolean }) {
 
   useFrame(({ camera }) => {
     if (!enabled) return
-    const right = new Vector3()
-    const up = new Vector3()
-    camera.matrixWorld.extractBasis(right, up, new Vector3())
+    camera.matrixWorld.extractBasis(_viewMoveRight, _viewMoveUp, _viewMoveForward)
 
     const prev = lastBasisRef.current
     const next = {
-      right: { x: right.x, y: right.y, z: right.z },
-      up: { x: up.x, y: up.y, z: up.z },
+      right: { x: _viewMoveRight.x, y: _viewMoveRight.y, z: _viewMoveRight.z },
+      up: { x: _viewMoveUp.x, y: _viewMoveUp.y, z: _viewMoveUp.z },
     }
     if (
       prev &&
@@ -270,6 +274,25 @@ function ViewportControls({
   )
 }
 
+function pickPixelOnTexturedMesh(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  camera: THREE.Camera,
+  objects: SceneObject[],
+  objectId: string,
+  docId: string,
+  docW: number,
+  docH: number
+): { x: number; y: number } | null {
+  const hit = pickMeshSurfaceUv(clientX, clientY, rect, camera, objects, objectId)
+  if (!hit) return null
+  const hitObj = objects.find((o) => o.id === hit.objectId)
+  const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
+  if (mat?.textureId !== docId) return null
+  return uvToPixelCoords(hit.uv, docW, docH)
+}
+
 export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
@@ -281,6 +304,15 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
     objectId: string
     lastX: number
     lastY: number
+  } | null>(null)
+  const pixelShapeRef = useRef<{
+    docId: string
+    objectId: string
+    tool: PixelShapeTool
+    x0: number
+    y0: number
+    x1: number
+    y1: number
   } | null>(null)
   const vectorGestureViewRef = useRef<ViewType | null>(null)
   const strokeGestureViewRef = useRef<ViewType | null>(null)
@@ -837,7 +869,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
           const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
           const docId = mat?.textureId
           const doc = docId ? store.pixelDocuments[docId] : undefined
-          if (mat?.mode === 'texture' && docId && doc) {
+          if (mat?.mode === 'texture' && docId && doc && store.pixelEditorDocId && docId === store.pixelEditorDocId) {
             e.currentTarget.setPointerCapture(e.pointerId)
             e.preventDefault()
             e.stopPropagation()
@@ -850,6 +882,19 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
             }
             if (pixelTool === 'bucket') {
               store.paintOnModelBucket(docId, px.x, px.y, e.altKey)
+              return
+            }
+            if (pixelTool === 'line' || pixelTool === 'rectangle' || pixelTool === 'ellipse') {
+              store.beginPixelEdit()
+              pixelShapeRef.current = {
+                docId,
+                objectId: hit.objectId,
+                tool: pixelTool,
+                x0: px.x,
+                y0: px.y,
+                x1: px.x,
+                y1: px.y,
+              }
               return
             }
             if (pixelTool !== 'pencil' && pixelTool !== 'eraser') return
@@ -1206,6 +1251,33 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       if (useAppStore.getState().meshModal || useAppStore.getState().objectTransformModal) return
       if (e.buttons === 4) return
 
+      if (pixelShapeRef.current && (e.buttons & 1) === 1) {
+        const rect = containerRef.current?.getBoundingClientRect()
+        const camera = cameraRef.current
+        const shape = pixelShapeRef.current
+        if (rect && camera) {
+          const store = useAppStore.getState()
+          const doc = store.pixelDocuments[shape.docId]
+          if (doc) {
+            const px = pickPixelOnTexturedMesh(
+              e.clientX,
+              e.clientY,
+              rect,
+              camera,
+              objects,
+              shape.objectId,
+              shape.docId,
+              doc.width,
+              doc.height
+            )
+            if (px) {
+              pixelShapeRef.current = { ...shape, x1: px.x, y1: px.y }
+            }
+          }
+        }
+        return
+      }
+
       if (pixelPaintRef.current && (e.buttons & 1) === 1) {
         const rect = containerRef.current?.getBoundingClientRect()
         const camera = cameraRef.current
@@ -1423,6 +1495,24 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate }: QuadView
       if (e.button === 1) return
 
       const store = useAppStore.getState()
+      if (pixelShapeRef.current) {
+        const shape = pixelShapeRef.current
+        const { x0, y0, x1, y1 } = constrainPixelShape(
+          shape.tool,
+          shape.x0,
+          shape.y0,
+          shape.x1,
+          shape.y1,
+          e.shiftKey
+        )
+        store.paintOnModelShape(shape.docId, shape.tool, x0, y0, x1, y1)
+        store.commitPixelEdit()
+        pixelShapeRef.current = null
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+        return
+      }
       if (pixelPaintRef.current) {
         store.commitPixelEdit()
         pixelPaintRef.current = null

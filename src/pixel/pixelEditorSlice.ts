@@ -57,14 +57,14 @@ export interface PixelEditorState {
 
 export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorOpen: false,
-  pixelEditorPanel: { x: 112, y: 112, width: 720, height: 640, minimized: false },
+  pixelEditorPanel: { x: 112, y: 112, width: 840, height: 560, minimized: false },
   pixelEditorDocId: null,
   pixelEditorTool: 'pencil',
   pixelEditorBrushSize: 1,
   pixelEditorPixelPerfect: false,
   pixelEditorSymmetryH: false,
   pixelEditorSymmetryV: false,
-  pixelEditorPaintOnModel: false,
+  pixelEditorPaintOnModel: true,
   pixelEditorShapeFilled: false,
   pixelEditorZoom: 8,
   pixelEditorPanX: 0,

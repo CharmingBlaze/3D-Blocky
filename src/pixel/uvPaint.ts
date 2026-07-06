@@ -229,6 +229,31 @@ export function interpolateScreenPaintSamples(
   return samples
 }
 
+export type PixelShapeTool = 'line' | 'rectangle' | 'ellipse'
+
+/** Shift-constrain shape endpoints (matches Pixel Editor canvas). */
+export function constrainPixelShape(
+  tool: PixelShapeTool,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  shiftKey: boolean
+): { x0: number; y0: number; x1: number; y1: number } {
+  if (!shiftKey) return { x0, y0, x1, y1 }
+  if (tool === 'line') {
+    if (Math.abs(x1 - x0) > Math.abs(y1 - y0)) return { x0, y0, x1, y1: y0 }
+    return { x0, y0, x1: x0, y1 }
+  }
+  const side = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
+  return {
+    x0,
+    y0,
+    x1: x0 + Math.sign(x1 - x0 || 1) * side,
+    y1: y0 + Math.sign(y1 - y0 || 1) * side,
+  }
+}
+
 /** Estimate screen pixels per texel at hit for stroke stepping. */
 export function estimateTexelScreenSize(
   hit: MeshSurfaceUvHit,

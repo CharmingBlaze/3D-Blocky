@@ -87,14 +87,15 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     const outer = size / 2 - 2
     const inner = outer - 14
     ctx.clearRect(0, 0, size, size)
-    for (let a = 0; a < 360; a++) {
-      const start = ((a - 1) * Math.PI) / 180
-      const end = ((a + 1) * Math.PI) / 180
+    // Hue 0° (red) at 12 o'clock — match pick/marker math (not canvas default 3 o'clock).
+    for (let hueDeg = 0; hueDeg < 360; hueDeg++) {
+      const start = ((hueDeg - 90 - 1) * Math.PI) / 180
+      const end = ((hueDeg - 90 + 1) * Math.PI) / 180
       ctx.beginPath()
       ctx.moveTo(cx, cy)
       ctx.arc(cx, cy, outer, start, end)
       ctx.closePath()
-      ctx.fillStyle = `hsl(${a}, 100%, 50%)`
+      ctx.fillStyle = `hsl(${hueDeg}, 100%, 50%)`
       ctx.fill()
     }
     ctx.beginPath()
@@ -120,8 +121,8 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     if (!ctx) return
     const w = canvas.width
     const hPx = canvas.height
-    const hueColor = `hsl(${Math.round(h * 360)}, 100%, 50%)`
-    ctx.fillStyle = hueColor
+    const [hr, hg, hb] = hsvToRgb(((h % 1) + 1) % 1, 1, 1)
+    ctx.fillStyle = `rgb(${Math.round(hr * 255)}, ${Math.round(hg * 255)}, ${Math.round(hb * 255)})`
     ctx.fillRect(0, 0, w, hPx)
     const white = ctx.createLinearGradient(0, 0, w, 0)
     white.addColorStop(0, '#fff')

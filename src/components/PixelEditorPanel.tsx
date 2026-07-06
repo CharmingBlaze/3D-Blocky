@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { FloatingPanel } from './FloatingPanel'
+import { SideButtonDropdown } from './SideButtonDropdown'
 import { PixelColorSection } from './material/PixelColorSection'
 import { useAppStore } from '../store/appStore'
 import { compositeLayers } from '../pixel/compositeLayers'
@@ -9,16 +10,18 @@ import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
 import { resolveEffectiveMaterial } from '../material/materials'
 import { pickOpenFile } from '../io/fileDialogs'
 import { IMAGE_IMPORT_FILTERS, PIXEL_PROJECT_FILTERS } from '../io/download'
+import { listSceneTextures } from '../uv/sceneTextures'
+import { constrainPixelShape } from '../pixel/uvPaint'
 
-const TOOLS: { id: PixelTool; label: string; title: string }[] = [
-  { id: 'pencil', label: 'Pencil', title: 'Pencil (P)' },
-  { id: 'eraser', label: 'Eraser', title: 'Eraser (E)' },
-  { id: 'line', label: 'Line', title: 'Line (L)' },
-  { id: 'rectangle', label: 'Rectangle', title: 'Rectangle (R)' },
-  { id: 'ellipse', label: 'Ellipse', title: 'Ellipse (O)' },
-  { id: 'bucket', label: 'Bucket', title: 'Bucket fill (B)' },
-  { id: 'rectSelect', label: 'Select', title: 'Rectangle select' },
-  { id: 'eyedropper', label: 'Eyedropper', title: 'Eyedropper (I)' },
+const TOOLS: { id: PixelTool; label: string; title: string; glyph: string }[] = [
+  { id: 'pencil', label: 'Pencil', title: 'Pencil (P)', glyph: '✎' },
+  { id: 'eraser', label: 'Eraser', title: 'Eraser (E)', glyph: '◻' },
+  { id: 'line', label: 'Line', title: 'Line (L)', glyph: '╱' },
+  { id: 'rectangle', label: 'Rect', title: 'Rectangle (R)', glyph: '▭' },
+  { id: 'ellipse', label: 'Ellipse', title: 'Ellipse (O)', glyph: '○' },
+  { id: 'bucket', label: 'Bucket', title: 'Bucket fill (B)', glyph: '▣' },
+  { id: 'rectSelect', label: 'Select', title: 'Rectangle select', glyph: '⬚' },
+  { id: 'eyedropper', label: 'Pick', title: 'Eyedropper (I)', glyph: '⌖' },
 ]
 
 const BLEND_MODES: PixelBlendMode[] = ['normal', 'multiply', 'add', 'screen']
@@ -79,6 +82,8 @@ export function PixelEditorPanel() {
       exportPng: s.exportPixelDocumentPng,
       exportProject: s.exportPixelDocumentProject,
       importProject: s.importPixelDocumentProject,
+      selectDocument: s.selectPixelEditorDocument,
+      assignTexture: s.assignObjectTextureDocument,
       addLayer: s.addPixelEditorLayer,
       deleteLayer: s.deletePixelEditorLayer,
       duplicateLayer: s.duplicatePixelEditorLayer,
@@ -96,6 +101,14 @@ export function PixelEditorPanel() {
       setUvEditorOpen: s.setUvEditorOpen,
       unwrapSelectedUvFaces: s.unwrapSelectedUvFaces,
     }))
+  )
+
+  const pixelDocuments = useAppStore((s) => s.pixelDocuments)
+  const objectTextures = useAppStore((s) => s.objectTextures)
+  const sceneObjects = useAppStore((s) => s.objects)
+  const sceneTextures = useMemo(
+    () => listSceneTextures(pixelDocuments, objectTextures, sceneObjects),
+    [pixelDocuments, objectTextures, sceneObjects]
   )
 
   const doc = store.docId ? store.docs[store.docId] : null
@@ -214,21 +227,28 @@ export function PixelEditorPanel() {
     redrawOverlay()
   }, [redrawOverlay])
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el || !store.open) return
+
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      const { pixelEditorZoom, pixelEditorPanX, pixelEditorPanY, setPixelEditorView } =
+        useAppStore.getState()
       const delta = e.deltaY > 0 ? -1 : 1
-      const next = Math.max(1, Math.min(64, store.zoom + delta))
-      store.setView(next, store.panX, store.panY)
-    },
-    [store]
-  )
+      const next = Math.max(1, Math.min(64, pixelEditorZoom + delta))
+      setPixelEditorView(next, pixelEditorPanX, pixelEditorPanY)
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [store.open, store.panel.minimized, doc?.id])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpacePan(e.type === 'keydown')
       if (e.type !== 'keydown' || e.repeat) return
-      if (!store.open) return
+      if (!useAppStore.getState().pixelEditorOpen) return
       const target = e.target
       if (
         target instanceof HTMLInputElement ||
@@ -237,14 +257,15 @@ export function PixelEditorPanel() {
       ) {
         return
       }
+      const { setPixelEditorTool } = useAppStore.getState()
       const key = e.key.toLowerCase()
-      if (key === 'p') store.setTool('pencil')
-      else if (key === 'e') store.setTool('eraser')
-      else if (key === 'i') store.setTool('eyedropper')
-      else if (key === 'b') store.setTool('bucket')
-      else if (key === 'l') store.setTool('line')
-      else if (key === 'r') store.setTool('rectangle')
-      else if (key === 'o') store.setTool('ellipse')
+      if (key === 'p') setPixelEditorTool('pencil')
+      else if (key === 'e') setPixelEditorTool('eraser')
+      else if (key === 'i') setPixelEditorTool('eyedropper')
+      else if (key === 'b') setPixelEditorTool('bucket')
+      else if (key === 'l') setPixelEditorTool('line')
+      else if (key === 'r') setPixelEditorTool('rectangle')
+      else if (key === 'o') setPixelEditorTool('ellipse')
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKey)
@@ -252,7 +273,7 @@ export function PixelEditorPanel() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [store])
+  }, [])
 
   const finishStroke = useCallback(() => {
     strokeRef.current = []
@@ -266,18 +287,10 @@ export function PixelEditorPanel() {
 
   const constrainShape = useCallback(
     (x0: number, y0: number, x1: number, y1: number, shiftKey: boolean) => {
-      if (!shiftKey) return { x0, y0, x1, y1 }
-      if (store.tool === 'line') {
-        if (Math.abs(x1 - x0) > Math.abs(y1 - y0)) return { x0, y0, x1, y1: y0 }
-        return { x0, y0, x1: x0, y1 }
+      if (store.tool !== 'line' && store.tool !== 'rectangle' && store.tool !== 'ellipse') {
+        return { x0, y0, x1, y1 }
       }
-      const side = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))
-      return {
-        x0,
-        y0,
-        x1: x0 + Math.sign(x1 - x0 || 1) * side,
-        y1: y0 + Math.sign(y1 - y0 || 1) * side,
-      }
+      return constrainPixelShape(store.tool, x0, y0, x1, y1, shiftKey)
     },
     [store.tool]
   )
@@ -398,6 +411,14 @@ export function PixelEditorPanel() {
       if (file) await store.importImage(file, 'new')
       return
     }
+    if (action === 'import-layer') {
+      const file = await pickOpenFile({
+        title: 'Import image as layer',
+        filters: IMAGE_IMPORT_FILTERS,
+      })
+      if (file) await store.importImage(file, 'layer')
+      return
+    }
     if (action === 'save') {
       await store.saveDoc()
       return
@@ -432,6 +453,36 @@ export function PixelEditorPanel() {
       else store.createNew(preset.width, preset.height, objectId ?? undefined)
     }
   }
+
+  const newDocOptions = useMemo(
+    () => [
+      { value: 'new', label: 'Blank document' },
+      ...PIXEL_SIZE_PRESETS.map((p) => ({
+        value: `preset-${p.label}`,
+        label: p.label,
+      })),
+      { value: 'custom', label: `Custom ${customW}×${customH}` },
+    ],
+    [customW, customH]
+  )
+
+  const importOptions = useMemo(
+    () => [
+      { value: 'import', label: 'Image as new texture…' },
+      { value: 'import-layer', label: 'Image as layer…', disabled: !doc },
+      { value: 'import-project', label: 'Project file…' },
+    ],
+    [doc]
+  )
+
+  const exportOptions = useMemo(
+    () => [
+      { value: 'export-png', label: 'PNG image…' },
+      { value: 'export-project', label: 'Project file…' },
+      { value: 'save', label: 'Save project as…' },
+    ],
+    []
+  )
 
   const layerList = useMemo(() => {
     if (!doc) return null
@@ -490,186 +541,315 @@ export function PixelEditorPanel() {
       }
     : undefined
 
-  return (
-    <FloatingPanel
-      title="Pixel Editor"
-      open={store.open}
-      state={store.panel}
-      minWidth={560}
-      minHeight={480}
-      onClose={store.toggle}
-      onStateChange={store.setPanel}
-    >
-      <div className="px-editor">
-        <div className="px-toolbar">
-          <select
-            className="shape-kind-select side-select px-menu-select"
-            value={store.tool}
-            onChange={(e) => store.setTool(e.target.value as PixelTool)}
-            title="Drawing tool"
+  const paintOnModelHint =
+    !canPaintOnModel && store.paintOnModel ? (
+      <p className="px-hint px-hint-warn">Set material to Texture and unwrap UVs to paint on the model.</p>
+    ) : canPaintOnModel && store.paintOnModel ? (
+      <p className="px-hint">Painting on the 3D model — use the viewports.</p>
+    ) : null
+
+  const renderFileSection = () => (
+    <section className="px-sidebar-section">
+      <h3 className="px-sidebar-heading">File</h3>
+      <label className="px-sidebar-field">
+        <span>Texture</span>
+        <select
+          className="shape-kind-select side-select"
+          value={store.docId ?? ''}
+          onChange={(e) => {
+            const id = e.target.value
+            if (!id) return
+            if (objectId) store.assignTexture(objectId, id)
+            else store.selectDocument(id)
+          }}
+          disabled={sceneTextures.length === 0}
+        >
+          {sceneTextures.length === 0 ? (
+            <option value="">No textures</option>
+          ) : (
+            <>
+              {!store.docId && <option value="">Select…</option>}
+              {sceneTextures.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                </option>
+              ))}
+            </>
+          )}
+        </select>
+      </label>
+      {doc && (
+        <p className="px-doc-meta">
+          {doc.width}×{doc.height} · {doc.layers.length} layer{doc.layers.length === 1 ? '' : 's'} ·{' '}
+          {Math.round(store.zoom * 100)}%
+        </p>
+      )}
+      <div className="px-sidebar-menu">
+        <SideButtonDropdown
+          label="New"
+          options={newDocOptions}
+          onSelect={handleFileMenu}
+          title="New blank document or canvas size"
+          alwaysShowLabel
+        />
+        <SideButtonDropdown
+          label="Import"
+          options={importOptions}
+          onSelect={handleFileMenu}
+          title="Import image or project"
+          alwaysShowLabel
+        />
+        <SideButtonDropdown
+          label="Export"
+          options={exportOptions}
+          onSelect={handleFileMenu}
+          title="Export PNG or project"
+          disabled={!doc}
+          alwaysShowLabel
+        />
+      </div>
+    </section>
+  )
+
+  const renderResizeSection = (compact = false) => (
+    <div className={compact ? 'px-compact-resize' : 'px-size-row'}>
+      <label className="px-sidebar-field px-sidebar-field-inline">
+        <span>W</span>
+        <input
+          type="number"
+          min={1}
+          max={512}
+          value={customW}
+          onChange={(e) => setCustomW(Number(e.target.value))}
+        />
+      </label>
+      <label className="px-sidebar-field px-sidebar-field-inline">
+        <span>H</span>
+        <input
+          type="number"
+          min={1}
+          max={512}
+          value={customH}
+          onChange={(e) => setCustomH(Number(e.target.value))}
+        />
+      </label>
+      <button
+        type="button"
+        className={`side-btn${compact ? ' px-resize-btn' : ''}`}
+        title="Apply custom canvas size"
+        onClick={() => handleFileMenu('custom')}
+      >
+        Resize
+      </button>
+    </div>
+  )
+
+  const renderToolsSection = () => (
+    <section className="px-sidebar-section">
+      <h3 className="px-sidebar-heading">Tools</h3>
+      <div className="px-tool-list" role="toolbar" aria-label="Drawing tools">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`px-tool-item ${store.tool === t.id ? 'active' : ''}`}
+            title={t.title}
+            aria-pressed={store.tool === t.id}
+            onClick={() => store.setTool(t.id)}
           >
-            {TOOLS.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
-              </option>
-            ))}
-          </select>
+            <span className="px-tool-glyph" aria-hidden>
+              {t.glyph}
+            </span>
+            <span className="px-tool-label">{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
 
-          {TOOLS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`px-tool-btn ${store.tool === t.id ? 'active' : ''}`}
-              title={t.title}
-              onClick={() => store.setTool(t.id)}
-            >
-              {t.label.charAt(0)}
-            </button>
-          ))}
-
-          <label className="px-toggle" title="Pixel-perfect freehand">
-            <input type="checkbox" checked={store.pixelPerfect} onChange={(e) => store.setPixelPerfect(e.target.checked)} />
-            PxPerfect
-          </label>
-          <label className="px-toggle" title="Horizontal symmetry">
-            <input type="checkbox" checked={store.symH} onChange={(e) => store.setSymH(e.target.checked)} />
-            Sym H
-          </label>
-          <label className="px-toggle" title="Vertical symmetry">
-            <input type="checkbox" checked={store.symV} onChange={(e) => store.setSymV(e.target.checked)} />
-            Sym V
-          </label>
-          <label className="px-field">
-            Brush
-            <input
-              type="number"
-              min={1}
-              max={32}
-              value={store.brushSize}
-              onChange={(e) => store.setBrushSize(Number(e.target.value))}
-            />
-          </label>
-          <label className="px-field" title="Bucket fill color tolerance">
-            Tolerance
-            <input
-              type="number"
-              min={0}
-              max={255}
-              value={store.fillTolerance}
-              onChange={(e) => store.setFillTolerance(Number(e.target.value))}
-            />
-          </label>
-          <label className="px-toggle" title="Paint on 3D model surface">
+  const renderOptionsSection = (compact: boolean) => (
+    <section className={`px-sidebar-section${compact ? '' : ' px-sidebar-section-grow'}`}>
+      <h3 className="px-sidebar-heading">Options</h3>
+      <label className="px-sidebar-option">
+        <span>Brush size</span>
+        <input
+          type="range"
+          min={1}
+          max={32}
+          value={store.brushSize}
+          onChange={(e) => store.setBrushSize(Number(e.target.value))}
+        />
+        <span className="px-option-value">{store.brushSize}px</span>
+      </label>
+      <label className="px-sidebar-option">
+        <span>Fill tolerance</span>
+        <input
+          type="range"
+          min={0}
+          max={255}
+          value={store.fillTolerance}
+          onChange={(e) => store.setFillTolerance(Number(e.target.value))}
+        />
+        <span className="px-option-value">{store.fillTolerance}</span>
+      </label>
+      {!compact && (
+        <>
+          <label className="px-sidebar-check">
             <input
               type="checkbox"
               checked={store.paintOnModel}
               disabled={!canPaintOnModel}
               onChange={(e) => store.setPaintOnModel(e.target.checked)}
             />
-            Paint on Model
+            <span>Paint on model</span>
           </label>
-          <label className="px-toggle" title="Filled shapes">
+          <label className="px-sidebar-check">
             <input type="checkbox" checked={store.shapeFilled} onChange={(e) => store.setShapeFilled(e.target.checked)} />
-            Fill
+            <span>Filled shapes</span>
+          </label>
+          <label className="px-sidebar-check">
+            <input type="checkbox" checked={store.pixelPerfect} onChange={(e) => store.setPixelPerfect(e.target.checked)} />
+            <span>Pixel perfect</span>
+          </label>
+          <label className="px-sidebar-check">
+            <input type="checkbox" checked={store.symH} onChange={(e) => store.setSymH(e.target.checked)} />
+            <span>Symmetry H</span>
+          </label>
+          <label className="px-sidebar-check">
+            <input type="checkbox" checked={store.symV} onChange={(e) => store.setSymV(e.target.checked)} />
+            <span>Symmetry V</span>
           </label>
           <button
             type="button"
-            className="side-btn"
-            title="Open UV Editor / Auto UV"
+            className="side-btn side-btn-wide"
+            title="Open UV Editor and auto-unwrap"
             onClick={() => {
               store.setUvEditorOpen(true)
               if (objectId) store.unwrapSelectedUvFaces('auto')
             }}
           >
-            Unwrap
+            Unwrap UVs
+          </button>
+        </>
+      )}
+    </section>
+  )
+
+  const renderSidebar = () => (
+    <aside className="px-sidebar">
+      {renderFileSection()}
+      {renderResizeSection(false)}
+      {renderToolsSection()}
+      {renderOptionsSection(false)}
+    </aside>
+  )
+
+  const renderCompactPanel = () => (
+    <aside className="px-compact-panel">
+      <section className="px-compact-color">
+        <PixelColorSection />
+      </section>
+      {renderFileSection()}
+      {renderResizeSection(true)}
+      {renderToolsSection()}
+      {renderOptionsSection(true)}
+      {paintOnModelHint}
+    </aside>
+  )
+
+  const renderColorRail = () => (
+    <aside className="px-rail">
+      <PixelColorSection />
+      <div className="px-layers">
+        <div className="px-layers-head">
+          <span>Layers</span>
+          <button type="button" className="side-btn" onClick={store.addLayer} disabled={!doc} title="Add layer">
+            +
           </button>
         </div>
-
-        <div className="px-main">
-          <div className="px-canvas-wrap">
-            <div className="px-file-bar">
-              <select
-                className="shape-kind-select side-select px-doc-menu"
-                value=""
-                onChange={(e) => {
-                  handleFileMenu(e.target.value)
-                  e.target.value = ''
-                }}
-                title="New, import, save, export, and canvas size"
-              >
-                <option value="">Document…</option>
-                <option value="new">New</option>
-                <option value="import">Import image…</option>
-                <option value="import-project">Import project…</option>
-                <option value="save">Save project</option>
-                <option value="export-png">Export PNG</option>
-                <option value="export-project">Export project</option>
-                <optgroup label="Canvas size">
-                  {PIXEL_SIZE_PRESETS.map((p) => (
-                    <option key={p.label} value={`preset-${p.label}`}>
-                      New {p.label}
-                    </option>
-                  ))}
-                  <option value="custom">Custom ({customW}×{customH})</option>
-                </optgroup>
-              </select>
-              <label className="px-field">
-                W
-                <input type="number" min={1} max={512} value={customW} onChange={(e) => setCustomW(Number(e.target.value))} />
-              </label>
-              <label className="px-field">
-                H
-                <input type="number" min={1} max={512} value={customH} onChange={(e) => setCustomH(Number(e.target.value))} />
-              </label>
-              {doc && (
-                <span className="side-color-hint muted">
-                  {doc.width}×{doc.height} · {doc.layers.length} layer{doc.layers.length === 1 ? '' : 's'}
-                </span>
-              )}
-            </div>
-            {!canPaintOnModel && store.paintOnModel && (
-              <p className="side-color-hint warn">Switch material to Texture mode and unwrap UVs to paint on the model.</p>
-            )}
-            {canPaintOnModel && store.paintOnModel && (
-              <p className="side-color-hint muted">
-                Paint on Model: pencil/eraser drag · eyedropper pick · bucket fill (Alt = global)
-              </p>
-            )}
-            <div
-              ref={viewportRef}
-              className="px-viewport"
-              onWheel={onWheel}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-            >
-              {doc ? (
-                <div className="px-canvas-stack" style={canvasStyle}>
-                  <canvas ref={canvasRef} className="px-canvas" style={{ width: '100%', height: '100%' }} />
-                  <canvas ref={overlayRef} className="px-canvas px-overlay" style={{ width: '100%', height: '100%' }} />
-                </div>
-              ) : (
-                <p className="side-color-hint muted">Use Document → New or pick a canvas size to begin.</p>
-              )}
-            </div>
-            <p className="side-color-hint muted">
-              Scroll zoom · Space+drag pan · Shift constrains shapes · Alt+click bucket = global fill · I eyedropper · B bucket
-            </p>
-          </div>
-
-          <aside className="px-side">
-            <PixelColorSection />
-            <div className="px-layers">
-              <div className="px-layers-head">
-                <span>Layers</span>
-                <button type="button" className="side-btn" onClick={store.addLayer} disabled={!doc}>+</button>
-              </div>
-              {layerList}
-            </div>
-          </aside>
-        </div>
+        <div className="px-layers-list">{layerList}</div>
       </div>
+    </aside>
+  )
+
+  const renderCanvas = () => (
+    <div className="px-stage">
+      {paintOnModelHint}
+      <div
+        ref={viewportRef}
+        className="px-viewport"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
+        {doc ? (
+          <div className="px-canvas-stack" style={canvasStyle}>
+            <canvas ref={canvasRef} className="px-canvas" style={{ width: '100%', height: '100%' }} />
+            <canvas ref={overlayRef} className="px-canvas px-overlay" style={{ width: '100%', height: '100%' }} />
+          </div>
+        ) : (
+          <div className="px-empty-state">
+            <p>No document open</p>
+            <p className="muted">Use File → New to create a texture, or Import an image.</p>
+          </div>
+        )}
+      </div>
+      <footer className="px-statusbar">
+        <span>Scroll zoom · Space pan · Shift constrain · Alt bucket global</span>
+        <span>I pick · B bucket · P E L R O shortcuts</span>
+      </footer>
+    </div>
+  )
+
+  const handlePanelStateChange = useCallback(
+    (panel: typeof store.panel) => {
+      const prev = store.panel
+      if (panel.minimized && !prev.minimized) {
+        store.setPanel({
+          ...panel,
+          expandedWidth: prev.width,
+          expandedHeight: prev.height,
+          width: 236,
+        })
+        if (canPaintOnModel) store.setPaintOnModel(true)
+        return
+      }
+      if (!panel.minimized && prev.minimized) {
+        store.setPanel({
+          ...panel,
+          width: prev.expandedWidth ?? panel.width,
+          height: prev.expandedHeight ?? panel.height,
+        })
+        return
+      }
+      store.setPanel(panel)
+    },
+    [canPaintOnModel, store]
+  )
+
+  const compactLayout = <div className="px-editor px-editor-compact">{renderCompactPanel()}</div>
+
+  const fullLayout = (
+    <div className="px-editor">
+      {renderSidebar()}
+      {renderCanvas()}
+      {renderColorRail()}
+    </div>
+  )
+
+  return (
+    <FloatingPanel
+      title="Pixel Editor"
+      open={store.open}
+      state={store.panel}
+      minWidth={720}
+      minHeight={480}
+      minimizedContent={compactLayout}
+      onClose={store.toggle}
+      onStateChange={handlePanelStateChange}
+    >
+      {fullLayout}
     </FloatingPanel>
   )
 }

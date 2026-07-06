@@ -74,24 +74,13 @@ export function mergeSceneObjects(objects: SceneObject[], primaryId: string): Me
     }
 
     const faceOffset = merged.faces.length
-    const uvBase = merged.uvs?.length ?? 0
-    if (obj.uvs?.length) {
-      if (!merged.uvs) merged.uvs = []
-      for (const u of obj.uvs) {
-        merged.uvs.push({ ...u })
-      }
-    }
 
     for (let fi = 0; fi < obj.faces.length; fi++) {
       merged.faces.push(obj.faces[fi].map((idx) => idx + base))
       merged.faceColors.push(obj.faceColors[fi] ?? obj.color)
       if (obj.faceUvIndices?.[fi]) {
-        if (!merged.faceUvIndices) {
-          merged.faceUvIndices = Array.from({ length: faceOffset }, () => [])
-        }
-        merged.faceUvIndices.push(obj.faceUvIndices[fi].map((ui) => ui + uvBase))
-      } else if (merged.faceUvIndices) {
-        merged.faceUvIndices.push([])
+        if (!merged.faceUvIndices) merged.faceUvIndices = []
+        merged.faceUvIndices.push([...obj.faceUvIndices[fi]])
       }
     }
 

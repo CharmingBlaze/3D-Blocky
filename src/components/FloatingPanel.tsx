@@ -6,6 +6,9 @@ export interface FloatingPanelState {
   width: number
   height: number
   minimized: boolean
+  /** Size before compact minimize — restored when maximizing. */
+  expandedWidth?: number
+  expandedHeight?: number
 }
 
 interface FloatingPanelProps {
@@ -14,6 +17,8 @@ interface FloatingPanelProps {
   state: FloatingPanelState
   minWidth?: number
   minHeight?: number
+  /** When minimized, show this instead of hiding all panel content (tools-only mode). */
+  minimizedContent?: ReactNode
   onClose: () => void
   onStateChange: (state: FloatingPanelState) => void
   children: ReactNode
@@ -27,6 +32,7 @@ export function FloatingPanel({
   state,
   minWidth = 320,
   minHeight = 240,
+  minimizedContent,
   onClose,
   onStateChange,
   children,
@@ -123,21 +129,31 @@ export function FloatingPanel({
 
   const handles: ResizeDir[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
+  const compactMinimized = state.minimized && minimizedContent != null
+
   return (
     <div
-      className={`floating-panel${state.minimized ? ' floating-panel-minimized' : ''}`}
+      className={`floating-panel${state.minimized ? ' floating-panel-minimized' : ''}${
+        compactMinimized ? ' floating-panel-minimized-compact' : ''
+      }`}
       style={{
         left: state.x,
         top: state.y,
         width: state.width,
-        height: state.minimized ? 36 : state.height,
+        height: state.minimized ? (compactMinimized ? undefined : 36) : state.height,
       }}
     >
       <div
         className="floating-panel-titlebar"
         onPointerDown={onDragStart}
         onDoubleClick={onTitleDoubleClick}
-        title={state.minimized ? 'Double-click to restore' : 'Double-click to minimize'}
+        title={
+          state.minimized
+            ? compactMinimized
+              ? 'Double-click to show canvas'
+              : 'Double-click to restore'
+            : 'Double-click to minimize tools'
+        }
       >
         <span className="floating-panel-title">{title}</span>
         <div className="floating-panel-chrome">
@@ -149,7 +165,7 @@ export function FloatingPanel({
               e.stopPropagation()
               toggleMinimize()
             }}
-            title="Minimize"
+            title={state.minimized ? 'Show canvas' : 'Minimize to tools only'}
           >
             {state.minimized ? '▢' : '—'}
           </button>
@@ -167,7 +183,9 @@ export function FloatingPanel({
           </button>
         </div>
       </div>
-      {!state.minimized && (
+      {compactMinimized ? (
+        <div className="floating-panel-body floating-panel-body-compact">{minimizedContent}</div>
+      ) : !state.minimized ? (
         <>
           <div className="floating-panel-body">{children}</div>
           {handles.map((dir) => (
@@ -178,7 +196,7 @@ export function FloatingPanel({
             />
           ))}
         </>
-      )}
+      ) : null}
     </div>
   )
 }

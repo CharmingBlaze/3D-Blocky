@@ -24,26 +24,15 @@ function ensureUvTopology(obj: SceneObject): SceneObjectWithUVs {
   if (obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length) {
     return obj as SceneObjectWithUVs
   }
-  const uvs: Uv2[] = obj.uvs?.length ? obj.uvs.map(cloneUv2) : []
-  const faceUvIndices: number[][] = obj.faceUvIndices?.length
-    ? obj.faceUvIndices.map((f) => [...f])
-    : []
-
-  for (let fi = 0; fi < obj.faces.length; fi++) {
-    if (fi < faceUvIndices.length && faceUvIndices[fi] && faceUvIndices[fi].length === obj.faces[fi].length) {
-      continue
-    }
-    const face = obj.faces[fi]
+  const uvs: Uv2[] = []
+  const faceUvIndices: number[][] = []
+  for (const face of obj.faces) {
     const indices: number[] = []
     for (let i = 0; i < face.length; i++) {
       indices.push(uvs.length)
       uvs.push({ u: 0, v: 0 })
     }
-    if (fi < faceUvIndices.length) {
-      faceUvIndices[fi] = indices
-    } else {
-      faceUvIndices.push(indices)
-    }
+    faceUvIndices.push(indices)
   }
   return { ...obj, uvs, faceUvIndices }
 }
@@ -78,56 +67,9 @@ export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
       uvAutoPacked: uvAutoPacked ?? true,
     }
   }
-
-  if (!obj.uvs?.length) {
-    if (obj.uvMappingMode === 'box') {
-      return assignBoxFaceUVs(obj) as SceneObjectWithUVs
-    }
+  if (!obj.uvs?.length || obj.faceUvIndices?.length !== obj.faces.length || needsUvRepack(obj)) {
     return autoUnwrapObject(obj)
   }
-
-  if (obj.faceUvIndices?.length !== obj.faces.length) {
-    const base = ensureUvTopology(obj)
-    const uvs = base.uvs.map(cloneUv2)
-    const faceUvIndices = base.faceUvIndices.map((f) => [...f])
-
-    for (let fi = 0; fi < base.faces.length; fi++) {
-      const isNewFaceUvs =
-        !obj.faceUvIndices ||
-        fi >= obj.faceUvIndices.length ||
-        !obj.faceUvIndices[fi] ||
-        obj.faceUvIndices[fi].length !== obj.faces[fi].length
-
-      if (isNewFaceUvs) {
-        const face = base.faces[fi]
-        const fIdx = faceUvIndices[fi]
-        if (fIdx) {
-          if (obj.uvMappingMode === 'box') {
-            for (let i = 0; i < face.length; i++) {
-              uvs[fIdx[i]] = cloneUv2(boxUVsForCornerCount(face.length, i))
-            }
-          } else {
-            const corners = face.map((vi) => base.positions[vi]).filter(Boolean)
-            if (corners.length >= 3) {
-              const n = faceNormal3D(base, fi)
-              const projected = planarProjectFaceUVs(n, corners)
-              if (fIdx.length === projected.length) {
-                for (let i = 0; i < fIdx.length; i++) {
-                  uvs[fIdx[i]] = projected[i] ?? uvs[fIdx[i]]
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    return { ...base, uvs, faceUvIndices }
-  }
-
-  if (needsUvRepack(obj)) {
-    return autoUnwrapObject(obj)
-  }
-
   return obj as SceneObjectWithUVs
 }
 

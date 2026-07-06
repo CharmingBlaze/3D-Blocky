@@ -174,6 +174,7 @@ export function releaseCachedTexture(url: string): void {
   tex.dispose()
   cache.delete(url)
   loadListeners.delete(url)
+  loadGeneration.delete(url)
 }
 
 /** Revoke a blob URL and dispose its cached GPU texture. */
