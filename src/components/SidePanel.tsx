@@ -854,6 +854,11 @@ export function SidePanel() {
             <p className="side-color-hint muted">
               X: toggle — see vertices, edges, and faces through the mesh.
             </p>
+            {selectionMode === 'object' && (
+              <p className="side-color-hint muted">
+                Shift+click to add or remove objects from the selection. Drag any selected object to move the group.
+              </p>
+            )}
             {selectionMode === 'vertex' && (
               <p className="side-color-hint muted">
                 Click to select vertices · drag to move · Shift+click to add/remove. F: face from selection. M: merge · hold M and click a second vertex.

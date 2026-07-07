@@ -162,7 +162,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   showDensityHeatmap,
   displayMode,
 }: MeshRendererProps) {
-  const { meshOutline, meshOutlineSecondary, objectSelectOutline, objectSelectOutlineSecondary, accentOrange } = useTheme()
+  const { meshOutline, meshOutlineSecondary, accentOrange } = useTheme()
   const meshRef = useRef<THREE.Mesh>(null)
   const materialSettings = useMemo(() => ensureObjectMaterial(object).material!, [object])
   const texId = useMemo(
@@ -313,8 +313,8 @@ export const MeshRenderer = memo(function MeshRenderer({
         )}
         {objectSelectionOutline && (
           <Outlines
-            color={isPrimary ? objectSelectOutline : objectSelectOutlineSecondary}
-            thickness={isPrimary ? 0.022 : 0.018}
+            color={isPrimary ? meshOutline : meshOutlineSecondary}
+            thickness={2}
             screenspace
             transparent
             opacity={isPrimary ? 0.95 : 0.85}

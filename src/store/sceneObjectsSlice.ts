@@ -28,6 +28,7 @@ export interface SceneObjectsLayoutActions {
   updateObject: (id: string, updates: Partial<SceneObject>) => void
   removeObject: (id: string) => void
   updateObjectTransform: (id: string, transform: ObjectTransform) => void
+  updateSelectionObjectTransforms: (transforms: Record<string, ObjectTransform>) => void
   setSymmetryEnabled: (on: boolean) => void
   toggleSymmetry: () => void
   setSymmetryAxis: (axis: SymmetryAxis) => void
@@ -145,6 +146,18 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
           const current = ensureTransform(o)
           if (transformsEqual(current, transform)) return o
           return { ...o, transform: cloneTransform(transform) }
+        }),
+      }))
+    },
+
+    updateSelectionObjectTransforms: (transforms) => {
+      setPartial((s) => ({
+        objects: s.objects.map((o) => {
+          const next = transforms[o.id]
+          if (!next) return o
+          const current = ensureTransform(o)
+          if (transformsEqual(current, next)) return o
+          return { ...o, transform: cloneTransform(next) }
         }),
       }))
     },

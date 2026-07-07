@@ -11,6 +11,7 @@ const _viewMoveForward = new Vector3()
 import { useShallow } from 'zustand/react/shallow'
 import { ObjectNode } from './ObjectNode'
 import { MeshSelectionGizmo } from './MeshSelectionGizmo'
+import { ObjectSelectionGizmo } from './ObjectSelectionGizmo'
 import { PrimitiveBoxCanvas } from './PrimitiveBoxCanvas'
 import { PolyDrawVisuals } from './PolyDrawVisuals'
 import { KnifeVisuals } from './KnifeVisuals'
@@ -366,6 +367,13 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
     TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
     !selectionHasComponents(meshSelection)
 
+  const multiObjectGizmoActive =
+    isActiveViewport &&
+    selectionMode === 'object' &&
+    selectionObjectIds.length > 1 &&
+    TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
+    !selectionHasComponents(meshSelection)
+
   const componentGizmoActive =
     isActiveViewport &&
     isComponentSelectionMode(selectionMode) &&
@@ -373,7 +381,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
     !componentGizmoObject.topologyLocked &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool)
 
-  const transformGizmoActive = objectGizmoActive || componentGizmoActive
+  const transformGizmoActive = objectGizmoActive || multiObjectGizmoActive || componentGizmoActive
 
   const billboardGizmoActive =
     isActiveViewport &&
@@ -509,6 +517,13 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
             viewportDisplayMode={viewportDisplayMode}
           />
         ))}
+
+        {multiObjectGizmoActive && (
+          <ObjectSelectionGizmo
+            selectionObjectIds={selectionObjectIds}
+            activeTool={activeTool}
+          />
+        )}
 
         {componentGizmoActive && meshSelection && componentGizmoObject && (
           <MeshSelectionGizmo

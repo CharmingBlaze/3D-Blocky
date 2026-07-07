@@ -214,3 +214,61 @@ export function selectionWorldCenter(objects: SceneObject[], ids: string[]): Vec
   const n = selected.length
   return { x: x / n, y: y / n, z: z / n }
 }
+
+const _startM = new THREE.Matrix4()
+const _curM = new THREE.Matrix4()
+const _deltaM = new THREE.Matrix4()
+const _invStartM = new THREE.Matrix4()
+const _pivot = new THREE.Vector3()
+const _pos = new THREE.Vector3()
+const _gizmoEuler = new THREE.Euler()
+const _baseQuat = new THREE.Quaternion()
+const _deltaQuat = new THREE.Quaternion()
+const _outQuat = new THREE.Quaternion()
+const _deltaScale = new THREE.Vector3()
+const _dummyPos = new THREE.Vector3()
+
+/** Apply move / rotate / scale gizmo delta to multiple object transforms around a shared pivot. */
+export function transformObjectsWithGizmo(
+  baseTransforms: Record<string, ObjectTransform>,
+  objectIds: string[],
+  pivotWorld: Vec3,
+  startPosition: THREE.Vector3,
+  startQuaternion: THREE.Quaternion,
+  startScale: THREE.Vector3,
+  currentPosition: THREE.Vector3,
+  currentQuaternion: THREE.Quaternion,
+  currentScale: THREE.Vector3
+): Record<string, ObjectTransform> {
+  _startM.compose(startPosition, startQuaternion, startScale)
+  _curM.compose(currentPosition, currentQuaternion, currentScale)
+  _invStartM.copy(_startM).invert()
+  _deltaM.copy(_curM).multiply(_invStartM)
+  _deltaM.decompose(_dummyPos, _deltaQuat, _deltaScale)
+  _pivot.set(pivotWorld.x, pivotWorld.y, pivotWorld.z)
+
+  const out: Record<string, ObjectTransform> = {}
+  for (const id of objectIds) {
+    const base = baseTransforms[id]
+    if (!base) continue
+
+    _pos.set(base.position.x, base.position.y, base.position.z)
+    _pos.sub(_pivot).applyMatrix4(_deltaM).add(_pivot)
+
+    _gizmoEuler.set(base.rotation.x, base.rotation.y, base.rotation.z, 'XYZ')
+    _baseQuat.setFromEuler(_gizmoEuler)
+    _outQuat.copy(_deltaQuat).multiply(_baseQuat)
+    const outEuler = new THREE.Euler().setFromQuaternion(_outQuat, 'XYZ')
+
+    out[id] = {
+      position: { x: _pos.x, y: _pos.y, z: _pos.z },
+      rotation: { x: outEuler.x, y: outEuler.y, z: outEuler.z },
+      scale: {
+        x: base.scale.x * _deltaScale.x,
+        y: base.scale.y * _deltaScale.y,
+        z: base.scale.z * _deltaScale.z,
+      },
+    }
+  }
+  return out
+}

@@ -602,6 +602,36 @@ export function useViewportPointerHandlers({
     [view, getPlanePoint]
   )
 
+  const tryBeginSelectionObjectDrag = useCallback(
+    (e: React.PointerEvent): boolean => {
+      const store = useAppStore.getState()
+      if (store.selectionObjectIds.length === 0) return false
+      const baseTransforms: Record<string, ObjectTransform> = {}
+      for (const id of store.selectionObjectIds) {
+        const obj = store.objects.find((o) => o.id === id)
+        if (obj) baseTransforms[id] = cloneTransform(ensureTransform(obj))
+      }
+      const center = selectionWorldCenter(store.objects, store.selectionObjectIds)
+      return beginObjectDrag(e, baseTransforms, center)
+    },
+    [beginObjectDrag]
+  )
+
+  const resolveObjectClickSelection = useCallback(
+    (picked: string, shiftKey: boolean): boolean => {
+      if (shiftKey) {
+        selectObject(picked, { additive: true })
+        return false
+      }
+      const store = useAppStore.getState()
+      if (!store.selectionObjectIds.includes(picked)) {
+        selectObject(picked, { additive: false })
+      }
+      return true
+    },
+    [selectObject]
+  )
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (useAppStore.getState().meshModal || useAppStore.getState().objectTransformModal) return
@@ -728,7 +758,12 @@ export function useViewportPointerHandlers({
       ) {
         const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
         if (picked) {
-          selectObject(picked, { additive: e.shiftKey })
+          const canDrag = resolveObjectClickSelection(picked, e.shiftKey)
+          if (canDrag && activeTool === 'move' && !e.shiftKey) {
+            if (tryBeginSelectionObjectDrag(e)) {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            }
+          }
         } else if (!e.shiftKey) {
           selectObject(null)
           selectBillboardImage(null)
@@ -850,17 +885,15 @@ export function useViewportPointerHandlers({
         const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
 
         if (picked) {
-          selectObject(picked, { additive: e.shiftKey })
-          if (!e.shiftKey) {
-            const store = useAppStore.getState()
-            const baseTransforms: Record<string, ObjectTransform> = {}
-            for (const id of store.selectionObjectIds) {
-              const obj = store.objects.find((o) => o.id === id)
-              if (obj) baseTransforms[id] = cloneTransform(ensureTransform(obj))
-            }
-            const center = selectionWorldCenter(store.objects, store.selectionObjectIds)
-            beginObjectDrag(e, baseTransforms, center)
+          if (e.shiftKey) {
+            selectObject(picked, { additive: true })
+            return
           }
+          const store = useAppStore.getState()
+          if (!store.selectionObjectIds.includes(picked)) {
+            selectObject(picked, { additive: false })
+          }
+          tryBeginSelectionObjectDrag(e)
           return
         }
 
