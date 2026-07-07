@@ -1579,8 +1579,8 @@ export function UVEditorPanel() {
           const dx = moveEvent.clientX - d.startClientX
           const dy = moveEvent.clientY - (d.startClientY ?? 0)
           liveViewRef.current = {
-            panX: d.panX - dx,
-            panY: (d.panY ?? 0) - dy,
+            panX: d.panX + dx,
+            panY: (d.panY ?? 0) + dy,
             zoom,
           }
           applyPanPreview()
@@ -1810,8 +1810,8 @@ export function UVEditorPanel() {
       const dx = e.clientX - active.startClientX
       const dy = e.clientY - (active.startClientY ?? 0)
       liveViewRef.current = {
-        panX: active.panX - dx,
-        panY: (active.panY ?? 0) - dy,
+        panX: active.panX + dx,
+        panY: (active.panY ?? 0) + dy,
         zoom,
       }
       applyPanPreview()
