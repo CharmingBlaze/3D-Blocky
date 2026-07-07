@@ -38,6 +38,8 @@ import {
   collectIslandSnapTargets,
   collectVertexSnapTargets,
   snapUvDrag,
+  snapIslandDrag,
+  snapPixelToTargets,
   type UvSnapContext,
   type UvSnapMode,
 } from '../uv/uvSnap'
@@ -759,12 +761,6 @@ export function UVEditorPanel() {
     canvas.style.willChange = ''
   }, [])
 
-  const applyPanPreview = useCallback((dx: number, dy: number) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    canvas.style.willChange = 'transform'
-    canvas.style.transform = `translate3d(${dx}px, ${dy}px, 0)`
-  }, [])
 
   const screenToUvPixel = useCallback(
     (clientX: number, clientY: number) => {
@@ -813,6 +809,7 @@ export function UVEditorPanel() {
     clearPanPreview()
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    ctx.imageSmoothingEnabled = false
 
     const { panX, panY, zoom: viewZoom } = getViewPanZoom()
     const hoverFace = hoverRef.current.face
@@ -1136,6 +1133,10 @@ export function UVEditorPanel() {
       redraw()
     })
   }, [redraw])
+
+  const applyPanPreview = useCallback(() => {
+    scheduleRedraw()
+  }, [scheduleRedraw])
 
   const applyUvDraft = useCallback(
     (updates: Array<{ uvIndex: number; u: number; v: number }>) => {
@@ -1697,7 +1698,7 @@ export function UVEditorPanel() {
         panY: (active.panY ?? 0) + dy,
         zoom,
       }
-      applyPanPreview(dx, dy)
+      applyPanPreview()
       return
     }
 
@@ -1712,15 +1713,62 @@ export function UVEditorPanel() {
       const currUv = pixelToUv(px.x, px.y, texW, texH)
       const du = currUv.u - startUv.u
       const dv = currUv.v - startUv.v
-      const updates = active.uvIndices.map((ui, idx) => {
-        const base = active.startUvs![idx]
-        const snapped = applySnap(base.u + du, base.v + dv, e.ctrlKey, active.kind === 'faceDrag' ? 'island' : 'point', {
-          x: px.x,
-          y: px.y,
+
+      if (active.kind === 'faceDrag') {
+        let snapDu = du
+        let snapDv = dv
+        const enabled = e.ctrlKey ? !uvEditorSnap : uvEditorSnap
+        const mode: UvSnapMode = enabled ? uvEditorSnapMode : 'off'
+        const ctx = snapCtxRef.current
+        if (ctx && mode !== 'off') {
+          if (mode === 'grid') {
+            const stepU = 1 / ctx.gridDivisions
+            const stepV = 1 / ctx.gridDivisions
+            snapDu = Math.round(du / stepU) * stepU
+            snapDv = Math.round(dv / stepV) * stepV
+          } else if (mode === 'island' && dragSelectionBoundsRef.current) {
+            const bounds = dragSelectionBoundsRef.current
+            const pdx = (currUv.u - startUv.u) * texW
+            const pdy = (currUv.v - startUv.v) * texH
+            const draggedBounds = {
+              minX: bounds.minX + pdx,
+              minY: bounds.minY + pdy,
+              maxX: bounds.maxX + pdx,
+              maxY: bounds.maxY + pdy,
+            }
+            const { dx, dy } = snapIslandDrag(
+              draggedBounds,
+              ctx.islandTargets,
+              ctx.thresholdPx
+            )
+            const snapPx = { x: px.x + dx, y: px.y + dy }
+            const snapUv = pixelToUv(snapPx.x, snapPx.y, texW, texH)
+            snapDu = snapUv.u - startUv.u
+            snapDv = snapUv.v - startUv.v
+          } else if (mode === 'vertex') {
+            const snapped = snapPixelToTargets(px.x, px.y, ctx.vertexTargets, ctx.thresholdPx)
+            const snapUv = pixelToUv(snapped.x, snapped.y, texW, texH)
+            snapDu = snapUv.u - startUv.u
+            snapDv = snapUv.v - startUv.v
+          }
+        }
+
+        const updates = active.uvIndices.map((ui, idx) => {
+          const base = active.startUvs![idx]
+          return { uvIndex: ui, u: base.u + snapDu, v: base.v + snapDv }
         })
-        return { uvIndex: ui, u: snapped.u, v: snapped.v }
-      })
-      applyUvDraft(updates)
+        applyUvDraft(updates)
+      } else {
+        const updates = active.uvIndices.map((ui, idx) => {
+          const base = active.startUvs![idx]
+          const snapped = applySnap(base.u + du, base.v + dv, e.ctrlKey, 'point', {
+            x: px.x,
+            y: px.y,
+          })
+          return { uvIndex: ui, u: snapped.u, v: snapped.v }
+        })
+        applyUvDraft(updates)
+      }
       return
     }
 
@@ -1734,12 +1782,15 @@ export function UVEditorPanel() {
     ) {
       const px = screenToUvPixel(e.clientX, e.clientY)
       const currUv = pixelToUv(px.x, px.y, texW, texH)
-      const [scaleU, scaleV] = getScaleFromHandle(active.startBounds, active.resizeHandle, currUv)
+      let [scaleU, scaleV] = getScaleFromHandle(active.startBounds, active.resizeHandle, currUv)
+      if (e.ctrlKey) {
+        scaleU = Math.round(scaleU / 0.1) * 0.1
+        scaleV = Math.round(scaleV / 0.1) * 0.1
+      }
       const scaled = scaleUvSnapshot(active.startUvs, scaleU, scaleV, active.pivotUv)
       const updates = active.uvIndices.map((ui, idx) => {
         const uv = scaled[idx]
-        const snapped = applySnap(uv.u, uv.v, e.ctrlKey, 'island', { x: px.x, y: px.y })
-        return { uvIndex: ui, u: snapped.u, v: snapped.v }
+        return { uvIndex: ui, u: uv.u, v: uv.v }
       })
       applyUvDraft(updates)
       return
@@ -1755,13 +1806,15 @@ export function UVEditorPanel() {
       const px = screenToUvPixel(e.clientX, e.clientY)
       const currUv = pixelToUv(px.x, px.y, texW, texH)
       const pivot = active.pivotUv
-      const angle =
-        Math.atan2(currUv.v - pivot.v, currUv.u - pivot.u) - active.startAngle
+      let angle = Math.atan2(currUv.v - pivot.v, currUv.u - pivot.u) - active.startAngle
+      if (e.ctrlKey) {
+        const step = 15 * Math.PI / 180
+        angle = Math.round(angle / step) * step
+      }
       const rotated = rotateUvSnapshot(active.startUvs, angle, pivot)
       const updates = active.uvIndices.map((ui, idx) => {
         const uv = rotated[idx]
-        const snapped = applySnap(uv.u, uv.v, e.ctrlKey, 'island', { x: px.x, y: px.y })
-        return { uvIndex: ui, u: snapped.u, v: snapped.v }
+        return { uvIndex: ui, u: uv.u, v: uv.v }
       })
       applyUvDraft(updates)
       lastIslandRotRef.current = Math.round((angle * 180) / Math.PI)

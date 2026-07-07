@@ -21,7 +21,7 @@ function dist2(a: { x: number; y: number }, b: { x: number; y: number }): number
   return dx * dx + dy * dy
 }
 
-function snapPixelToTargets(
+export function snapPixelToTargets(
   px: number,
   py: number,
   targets: { x: number; y: number }[],
@@ -40,7 +40,7 @@ function snapPixelToTargets(
   return best ?? { x: px, y: py }
 }
 
-function snapIslandDrag(
+export function snapIslandDrag(
   selectionBounds: { minX: number; minY: number; maxX: number; maxY: number },
   targets: UvSnapContext['islandTargets'],
   thresholdPx: number
