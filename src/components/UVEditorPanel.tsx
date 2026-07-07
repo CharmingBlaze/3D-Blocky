@@ -2056,24 +2056,25 @@ export function UVEditorPanel() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const rect = canvas.getBoundingClientRect()
+
       const state = useAppStore.getState()
       const currentZoom = state.uvEditorZoom
       const currentPanX = state.uvEditorPanX
       const currentPanY = state.uvEditorPanY
 
       const factor = e.deltaY > 0 ? 0.9 : 1.1
-      const cw = el.clientWidth
-      const ch = el.clientHeight
-      if (cw <= 0 || ch <= 0) return
-
-      const cx = cw / 2
-      const cy = ch / 2
       const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor))
 
-      const px = (cx - currentPanX) / currentZoom
-      const py = (cy - currentPanY) / currentZoom
-      const nx = cx - px * nz
-      const ny = cy - py * nz
+      const sx = e.clientX - rect.left
+      const sy = e.clientY - rect.top
+
+      const px = (sx - currentPanX) / currentZoom
+      const py = (sy - currentPanY) / currentZoom
+      const nx = sx - px * nz
+      const ny = sy - py * nz
 
       setUvEditorView(nz, nx, ny)
     }
