@@ -355,7 +355,7 @@ export function applyMeshModalOp(
 export function extrudeValueFromScreenDelta(
   dx: number,
   dyUp: number,
-  sensitivity = 0.08
+  sensitivity = 0.04
 ): number {
   return (dyUp + dx) * sensitivity
 }
