@@ -787,6 +787,22 @@ export function UVEditorPanel() {
     setZoom,
   ])
 
+  const fitCanvasToCamera = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    const cw = container.clientWidth
+    const ch = container.clientHeight
+    if (cw <= 0 || ch <= 0) return
+
+    const pad = 32
+    const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min((cw - pad * 2) / texW, (ch - pad * 2) / texH)))
+    setZoom(nz)
+    setPan({
+      x: (cw - texW * nz) / 2,
+      y: (ch - texH * nz) / 2,
+    })
+  }, [texW, texH, setPan, setZoom])
+
   const getViewPanZoom = useCallback(() => {
     const live = liveViewRef.current
     if (live) return live
@@ -1542,6 +1558,51 @@ export function UVEditorPanel() {
     ]
   )
 
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 1) {
+      e.preventDefault()
+      liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
+      dragRef.current = {
+        kind: 'pan',
+        panX: pan.x,
+        panY: pan.y,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+      }
+      setHoverCursor('grabbing')
+
+      const onWindowMouseMove = (moveEvent: MouseEvent) => {
+        const d = dragRef.current
+        if (d && d.kind === 'pan' && d.panX !== undefined && d.startClientX !== undefined) {
+          const dx = moveEvent.clientX - d.startClientX
+          const dy = moveEvent.clientY - (d.startClientY ?? 0)
+          liveViewRef.current = {
+            panX: d.panX + dx,
+            panY: (d.panY ?? 0) + dy,
+            zoom,
+          }
+          applyPanPreview()
+        }
+      }
+
+      const onWindowMouseUp = (upEvent: MouseEvent) => {
+        if (upEvent.button === 1) {
+          window.removeEventListener('mousemove', onWindowMouseMove)
+          window.removeEventListener('mouseup', onWindowMouseUp)
+          commitLiveView()
+          setHoverCursor('crosshair')
+          if (dragRef.current?.kind === 'pan') {
+            dragRef.current = null
+          }
+          scheduleRedraw()
+        }
+      }
+
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+    }
+  }
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (!objectId || !ensured) return
     const px = screenToUvPixel(e.clientX, e.clientY)
@@ -1952,7 +2013,33 @@ export function UVEditorPanel() {
       if (kind === 'faceRotate') {
         setIslandFields((f) => ({ ...f, rot: lastIslandRotRef.current }))
       }
-    } else if (!wasPending) {
+    } else if (wasPending && objectId && ensured) {
+      draftUvsRef.current = null
+      const px = screenToUvPixel(e.clientX, e.clientY)
+      if (uvEditorMode === 'faces') {
+        const face = pickFace(px.x, px.y)
+        if (face !== null) {
+          const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
+          selectUvFaces(objectId, nextFaces)
+        } else if (!e.shiftKey) {
+          clearAllUvSelection()
+          selectUvFaces(objectId, [])
+        }
+      } else if (uvEditorMode === 'points') {
+        const handle = pickHandle(px.x, px.y)
+        if (handle !== null) {
+          const indices = e.shiftKey
+            ? uvEditorSelectedPoints.includes(handle)
+              ? uvEditorSelectedPoints.filter((i) => i !== handle)
+              : [...uvEditorSelectedPoints, handle]
+            : [handle]
+          setUvEditorSelectedPoints(indices)
+          setUvEditorSelectedFaces([])
+        } else if (!e.shiftKey) {
+          clearAllUvSelection()
+        }
+      }
+    } else {
       draftUvsRef.current = null
     }
     updateHoverAt(e.clientX, e.clientY)
@@ -2174,6 +2261,7 @@ export function UVEditorPanel() {
           onSetUnwrapMethod={setUnwrapMethod}
           onSetSmartUvAngle={setUvEditorSmartUvAngle}
           onFrameSelection={frameSelection}
+          onFitCanvas={fitCanvasToCamera}
           onSetAutoFit={setUvEditorAutoFit}
           onSetSticky={setUvEditorSticky}
           onSetViewAll={setUvEditorViewAll}
@@ -2208,6 +2296,7 @@ export function UVEditorPanel() {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onMouseDown={onMouseDown}
             onPointerLeave={(e) => {
               if (dragRef.current?.kind === 'pan') {
                 onPointerUp(e)

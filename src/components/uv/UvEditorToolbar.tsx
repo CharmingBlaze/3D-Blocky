@@ -34,6 +34,7 @@ interface UvEditorToolbarProps {
   onSetUnwrapMethod: (method: UvUnwrapMethod) => void
   onSetSmartUvAngle: (deg: number) => void
   onFrameSelection: () => void
+  onFitCanvas: () => void
   onSetAutoFit: (on: boolean) => void
   onSetSticky: (on: boolean) => void
   onSetViewAll: (on: boolean) => void
@@ -116,6 +117,7 @@ export function UvEditorToolbar({
   onSetUnwrapMethod,
   onSetSmartUvAngle,
   onFrameSelection,
+  onFitCanvas,
   onSetAutoFit,
   onSetSticky,
   onSetViewAll,
@@ -271,6 +273,14 @@ export function UvEditorToolbar({
             title="Show all UV islands in the atlas"
           >
             All islands
+          </button>
+          <button
+            type="button"
+            className="uv-btn uv-btn-block"
+            onClick={onFitCanvas}
+            title="Fit the entire UV grid canvas to the camera view"
+          >
+            Fit Canvas
           </button>
           <UvToggle label="Grid" checked={uvEditorShowGrid} onChange={onSetShowGrid} />
           <UvToggle label="Snap" checked={uvEditorSnap} onChange={onSetSnap} />
