@@ -84,10 +84,8 @@ export function meshSelectionWorldCenter(
   return { x: x / n, y: y / n, z: z / n }
 }
 
-const _pivot = new THREE.Vector3()
 const _startM = new THREE.Matrix4()
 const _curM = new THREE.Matrix4()
-const _deltaM = new THREE.Matrix4()
 const _w = new THREE.Vector3()
 
 /** Apply move / rotate / scale gizmo delta to selected mesh vertices in world space. */
@@ -95,7 +93,7 @@ export function transformMeshSelectionWithGizmo(
   object: SceneObject,
   vertexIndices: Set<number>,
   basePositions: Record<number, Vec3>,
-  pivotWorld: Vec3,
+  _pivotWorld: Vec3,
   startPosition: THREE.Vector3,
   startQuaternion: THREE.Quaternion,
   startScale: THREE.Vector3,
@@ -105,9 +103,8 @@ export function transformMeshSelectionWithGizmo(
 ): Vec3[] {
   _startM.compose(startPosition, startQuaternion, startScale)
   _curM.compose(currentPosition, currentQuaternion, currentScale)
-  _deltaM.copy(_curM).multiply(_startM.clone().invert())
 
-  _pivot.set(pivotWorld.x, pivotWorld.y, pivotWorld.z)
+  const invStart = _startM.clone().invert()
 
   const snapshot: SceneObject = {
     ...object,
@@ -119,7 +116,7 @@ export function transformMeshSelectionWithGizmo(
 
     const world = worldPointFromObject(snapshot, basePositions[i])
     _w.set(world.x, world.y, world.z)
-    _w.sub(_pivot).applyMatrix4(_deltaM).add(_pivot)
+    _w.applyMatrix4(invStart).applyMatrix4(_curM)
 
     return localPointFromWorld(object, { x: _w.x, y: _w.y, z: _w.z })
   })
