@@ -470,6 +470,16 @@ export function UVEditorPanel() {
     return [...uvEditorSelectedFaces]
   }, [obj, uvEditorSelectedFaces, uvEditorSticky])
 
+  const ensuredRef = useRef<SceneObjectWithUVs | null>(null)
+  const objectIdRef = useRef<string | null>(null)
+  const regionFacesForEditRef = useRef<number[]>([])
+
+  useEffect(() => {
+    ensuredRef.current = ensured
+    objectIdRef.current = objectId
+    regionFacesForEditRef.current = regionFacesForEdit
+  }, [ensured, objectId, regionFacesForEdit])
+
   const selectedFaceSet = useMemo(
     () => new Set(regionFacesForEdit),
     [regionFacesForEdit]
@@ -1421,20 +1431,22 @@ export function UVEditorPanel() {
 
   const activatePendingDrag = useCallback(() => {
     const d = dragRef.current
-    if (!d || d.kind !== 'pending' || !d.activeKind || !ensured || !objectId) return false
+    const latestEnsured = ensuredRef.current
+    const latestObjectId = objectIdRef.current
+    if (!d || d.kind !== 'pending' || !d.activeKind || !latestEnsured || !latestObjectId) return false
     d.kind = d.activeKind
     captureUndoPoint('Edit UV')
 
-    const editFaces = regionFacesForEdit
+    const editFaces = regionFacesForEditRef.current
     const transformMesh =
       d.activeKind === 'faceDrag' ||
       d.activeKind === 'faceRotate' ||
       d.activeKind === 'faceScale'
         ? prepareFaceTransformMesh(editFaces)
         : null
-    const mesh = transformMesh ?? ensured
+    const mesh = transformMesh ?? latestEnsured
 
-    if (transformMesh && d.uvIndices) {
+    if (transformMesh && transformMesh !== latestEnsured && d.uvIndices) {
       const uvIndices = collectFaceUvIndices(editFaces, mesh)
       d.uvIndices = uvIndices
       d.startUvs = uvIndices.map((i) => ({ ...mesh.uvs[i]! }))
@@ -1450,11 +1462,8 @@ export function UVEditorPanel() {
     }
     return true
   }, [
-    ensured,
-    objectId,
     captureUndoPoint,
     buildSnapContext,
-    regionFacesForEdit,
     prepareFaceTransformMesh,
     collectFaceUvIndices,
     getSelectionBBoxPx,
@@ -1687,7 +1696,7 @@ export function UVEditorPanel() {
     }
 
     if (capturePointer) {
-      canvasRef.current?.setPointerCapture(e.pointerId)
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     }
   }
 
@@ -1871,8 +1880,8 @@ export function UVEditorPanel() {
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
-    if (canvasRef.current?.hasPointerCapture(e.pointerId)) {
-      canvasRef.current.releasePointerCapture(e.pointerId)
+    if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
     }
     const d = dragRef.current
     if (d?.kind === 'marquee' && d.marquee && ensured) {
@@ -2199,9 +2208,6 @@ export function UVEditorPanel() {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onMouseDown={(e) => {
-              if (e.button === 1) e.preventDefault()
-            }}
             onPointerLeave={(e) => {
               if (dragRef.current?.kind === 'pan') {
                 onPointerUp(e)
