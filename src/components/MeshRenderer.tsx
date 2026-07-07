@@ -1,4 +1,5 @@
 import { useMemo, useRef, useEffect, memo } from 'react'
+import { useThree } from '@react-three/fiber'
 import { Edges, Outlines } from '@react-three/drei'
 import * as THREE from 'three'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
@@ -23,6 +24,8 @@ import {
   buildEdgeSegmentsGeometry,
   collectUniqueEdges,
 } from '../mesh/meshTopology'
+import { subscribeUvDraft } from '../uv/uvDraftRelay'
+import { patchMeshGeometryUvs } from '../uv/patchMeshGeometryUvs'
 
 interface MeshRendererProps {
   object: SceneObject
@@ -34,7 +37,7 @@ interface MeshRendererProps {
   displayMode: ViewportDisplayMode
 }
 
-function buildGeometry(
+export function buildViewportMeshGeometry(
   object: SceneObject,
   flatShading: boolean,
   facetExaggeration: number,
@@ -164,6 +167,11 @@ export const MeshRenderer = memo(function MeshRenderer({
 }: MeshRendererProps) {
   const { meshOutline, meshOutlineSecondary, accentOrange } = useTheme()
   const meshRef = useRef<THREE.Mesh>(null)
+  const invalidate = useThree((s) => s.invalidate)
+  const uvPatchRef = useRef({
+    topology: null as SceneObject | null,
+    flatShading: true,
+  })
   const materialSettings = useMemo(() => ensureObjectMaterial(object).material!, [object])
   const texId = useMemo(
     () => (materialSettings.mode === 'texture' ? materialSettings.textureId ?? object.id : null),
@@ -211,7 +219,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   const cageGeometry = useMemo(() => {
     if (!object.subdEnabled || !object.subdLevels || object.subdLevels <= 0) return null
     const cage = useTexture ? ensureObjectUVs(object) : object
-    return buildGeometry(cage, true, 0, false, true)
+    return buildViewportMeshGeometry(cage, true, 0, false, true)
   }, [
     object,
     object.subdEnabled,
@@ -224,7 +232,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   useEffect(() => () => cageGeometry?.dispose(), [cageGeometry])
 
   const geometry = useMemo(() => {
-    const geo = buildGeometry(
+    const geo = buildViewportMeshGeometry(
       renderObject,
       flatShading,
       facetExaggeration,
@@ -251,6 +259,28 @@ export const MeshRenderer = memo(function MeshRenderer({
   ])
 
   useEffect(() => () => geometry.dispose(), [geometry])
+
+  uvPatchRef.current.topology = renderObject
+  uvPatchRef.current.flatShading = flatShading
+
+  useEffect(() => {
+    return subscribeUvDraft((snapshot) => {
+      if (!snapshot || snapshot.objectId !== object.id) return
+      const mesh = meshRef.current
+      const topology = uvPatchRef.current.topology
+      if (!mesh || !topology) return
+      if (
+        patchMeshGeometryUvs(
+          mesh.geometry,
+          topology,
+          snapshot.uvs,
+          uvPatchRef.current.flatShading
+        )
+      ) {
+        invalidate()
+      }
+    })
+  }, [object.id, invalidate])
 
   const emissive = useMemo(() => new THREE.Color(0x000000), [])
   const emissiveIntensity = 0

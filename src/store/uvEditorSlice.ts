@@ -250,7 +250,6 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
     setUvEditorAutoFit: (on) => setPartial({ uvEditorAutoFit: on }),
     setUvEditorSticky: (on) => setPartial({ uvEditorSticky: on }),
 
-
     setObjectUvMappingMode: (objectId, mode) => {
       const { objects, updateObject } = store()
       const obj = objects.find((o) => o.id === objectId)

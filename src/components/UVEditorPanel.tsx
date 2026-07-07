@@ -45,6 +45,7 @@ import {
 } from '../uv/uvSnap'
 import { type UvUnwrapMethod } from '../uv/uvUnwrap'
 import type { Uv2 } from '../uv/uvTypes'
+import { clearUvDraft, setUvDraft } from '../uv/uvDraftRelay'
 import { UvEditorToolbar } from './uv/UvEditorToolbar'
 
 const HANDLE_SIZE = 7
@@ -295,9 +296,17 @@ export function UVEditorPanel() {
   } | null>(null)
 
   const draftUvsRef = useRef<Uv2[] | null>(null)
+  const previewRelayRafRef = useRef<number | null>(null)
   const redrawRafRef = useRef<number | null>(null)
   const canvasSizeRef = useRef({ w: 0, h: 0 })
   const liveViewRef = useRef<{ panX: number; panY: number; zoom: number } | null>(null)
+  const dragWindowListenersRef = useRef<{
+    pointerId: number
+    onMove: (e: PointerEvent) => void
+    onUp: (e: PointerEvent) => void
+  } | null>(null)
+  const moveCanvasDragRef = useRef<(e: PointerEvent) => void>(() => {})
+  const finishCanvasDragRef = useRef<(e: PointerEvent) => void>(() => {})
   const hoverRef = useRef<{
     face: number | null
     point: number | null
@@ -543,9 +552,10 @@ export function UVEditorPanel() {
 
   const getFacePixels = useCallback(
     (fi: number) => {
-      if (!ensured) return []
+      const mesh = ensuredRef.current ?? ensured
+      if (!mesh) return []
       const uvs = getUvs()
-      const uvIdx = ensured.faceUvIndices[fi]
+      const uvIdx = mesh.faceUvIndices[fi]
       if (!uvIdx?.length) return []
       return uvIdx.map((ui) => uvToPixel(uvs[ui] ?? { u: 0, v: 0 }, texW, texH))
     },
@@ -573,6 +583,7 @@ export function UVEditorPanel() {
         uvs: detached.uvs,
         faceUvIndices: detached.faceUvIndices,
       })
+      ensuredRef.current = detached
       return detached
     },
     [obj, objectId, ensured, uvEditorSticky, updateObject]
@@ -911,9 +922,9 @@ export function UVEditorPanel() {
 
   const screenToUvPixel = useCallback(
     (clientX: number, clientY: number) => {
-      const canvas = canvasRef.current
-      if (!canvas) return { x: 0, y: 0 }
-      const rect = canvas.getBoundingClientRect()
+      const container = containerRef.current
+      if (!container) return { x: 0, y: 0 }
+      const rect = container.getBoundingClientRect()
       const sx = clientX - rect.left
       const sy = clientY - rect.top
       const { panX, panY, zoom: z } = getViewPanZoom()
@@ -945,7 +956,8 @@ export function UVEditorPanel() {
   const redraw = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
-    if (!canvas || !container || !ensured) return
+    if (!canvas || !container) return
+    const mesh = ensuredRef.current ?? ensured
     const cw = container.clientWidth
     const ch = container.clientHeight
     if (canvasSizeRef.current.w !== cw || canvasSizeRef.current.h !== ch) {
@@ -966,6 +978,12 @@ export function UVEditorPanel() {
     ctx.save()
     ctx.translate(panX, panY)
     ctx.scale(viewZoom, viewZoom)
+
+    if (!mesh) {
+      drawChecker(ctx, texW, texH, theme.uvGridA, theme.uvGridB)
+      ctx.restore()
+      return
+    }
 
     ctx.fillStyle = theme.uvCanvasBg
     ctx.fillRect(0, 0, texW, texH)
@@ -994,7 +1012,7 @@ export function UVEditorPanel() {
     ctx.strokeRect(0, 0, texW, texH)
     ctx.globalAlpha = 1
 
-    if (resolveUvMappingMode(ensured) === 'perFace') {
+    if (resolveUvMappingMode(mesh) === 'perFace') {
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'
       ctx.lineWidth = 1.25 / viewZoom
       ctx.beginPath()
@@ -1044,11 +1062,11 @@ export function UVEditorPanel() {
       hoverFace !== null && faceGroupMap ? (faceGroupMap.faceToGroup[hoverFace] ?? null) : null
     const hasFaceSelection = uvEditorMode === 'faces' && selectedFaceSet.size > 0
 
-    if (uvEditorMode === 'faces' && ensured) {
+    if (uvEditorMode === 'faces' && mesh) {
       if (isolatedFaceView) {
         drawRegionFill(
           ctx,
-          ensured,
+          mesh,
           uvs,
           visibleFaceIndices,
           theme.css['--accent-soft'],
@@ -1057,7 +1075,7 @@ export function UVEditorPanel() {
         )
         drawRegionBoundary(
           ctx,
-          ensured,
+          mesh,
           uvs,
           visibleFaceIndices,
           theme.accent,
@@ -1087,10 +1105,10 @@ export function UVEditorPanel() {
             stroke = 'rgba(255,255,255,0.07)'
           }
 
-          drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
+          drawRegionFill(ctx, mesh, uvs, group.faceIndices, fill, texW, texH)
           drawRegionBoundary(
             ctx,
-            ensured,
+            mesh,
             uvs,
             group.faceIndices,
             stroke,
@@ -1132,7 +1150,7 @@ export function UVEditorPanel() {
     if (uvEditorMode === 'points') {
       const handleSet = new Set<number>()
       for (const fi of visibleFaceIndices) {
-        for (const ui of ensured.faceUvIndices[fi] ?? []) handleSet.add(ui)
+        for (const ui of mesh.faceUvIndices[fi] ?? []) handleSet.add(ui)
       }
 
       for (const ui of handleSet) {
@@ -1279,6 +1297,9 @@ export function UVEditorPanel() {
     getUvs,
     theme,
     clearPanPreview,
+    pan.x,
+    pan.y,
+    zoom,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -1293,35 +1314,115 @@ export function UVEditorPanel() {
     scheduleRedraw()
   }, [scheduleRedraw])
 
+  const detachDragWindowListeners = useCallback(() => {
+    const listeners = dragWindowListenersRef.current
+    if (!listeners) return
+    window.removeEventListener('pointermove', listeners.onMove)
+    window.removeEventListener('pointerup', listeners.onUp)
+    window.removeEventListener('pointercancel', listeners.onUp)
+    dragWindowListenersRef.current = null
+  }, [])
+
+  const attachDragWindowListeners = useCallback(
+    (pointerId: number) => {
+      detachDragWindowListeners()
+      const onWinMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return
+        moveCanvasDragRef.current(ev)
+      }
+      const onWinUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return
+        finishCanvasDragRef.current(ev)
+        detachDragWindowListeners()
+      }
+      dragWindowListenersRef.current = { pointerId, onMove: onWinMove, onUp: onWinUp }
+      window.addEventListener('pointermove', onWinMove)
+      window.addEventListener('pointerup', onWinUp)
+      window.addEventListener('pointercancel', onWinUp)
+    },
+    [detachDragWindowListeners]
+  )
+
+  useEffect(() => () => detachDragWindowListeners(), [detachDragWindowListeners])
+
+  const cancelPreviewRelay = useCallback(() => {
+    if (previewRelayRafRef.current !== null) {
+      cancelAnimationFrame(previewRelayRafRef.current)
+      previewRelayRafRef.current = null
+    }
+  }, [])
+
+  const publishViewportDraft = useCallback(() => {
+    if (!objectId || !draftUvsRef.current) return
+    if (previewRelayRafRef.current !== null) return
+    previewRelayRafRef.current = requestAnimationFrame(() => {
+      previewRelayRafRef.current = null
+      const draft = draftUvsRef.current
+      if (draft && objectId) setUvDraft(objectId, draft)
+    })
+  }, [objectId])
+
+  const resetDraftPreview = useCallback(() => {
+    cancelPreviewRelay()
+    draftUvsRef.current = null
+    if (objectId) clearUvDraft(objectId)
+  }, [objectId, cancelPreviewRelay])
+
   const applyUvDraft = useCallback(
     (updates: Array<{ uvIndex: number; u: number; v: number }>) => {
-      if (!ensured || updates.length === 0) return
-      const base = draftUvsRef.current ?? ensured.uvs.map((u) => ({ ...u }))
+      const mesh = ensuredRef.current ?? ensured
+      if (!mesh || updates.length === 0) return
+      const base = draftUvsRef.current ?? mesh.uvs.map((u) => ({ ...u }))
       const next = base.map((u) => ({ ...u }))
       for (const u of updates) next[u.uvIndex] = { u: u.u, v: u.v }
       draftUvsRef.current = next
-      scheduleRedraw()
+      publishViewportDraft()
+      const drag = dragRef.current
+      const isLiveUvDrag =
+        drag &&
+        drag.kind !== 'pan' &&
+        drag.kind !== 'marquee' &&
+        (drag.kind === 'handle' ||
+          drag.kind === 'faceDrag' ||
+          drag.kind === 'faceRotate' ||
+          drag.kind === 'faceScale' ||
+          (drag.kind === 'pending' &&
+            (drag.activeKind === 'faceDrag' || drag.activeKind === 'handle')))
+      if (isLiveUvDrag) {
+        if (redrawRafRef.current != null) {
+          cancelAnimationFrame(redrawRafRef.current)
+          redrawRafRef.current = null
+        }
+        redraw()
+      } else {
+        scheduleRedraw()
+      }
     },
-    [ensured, scheduleRedraw]
+    [ensured, scheduleRedraw, redraw, publishViewportDraft]
   )
 
   const flushDraftUvs = useCallback(() => {
-    if (!objectId || !draftUvsRef.current || !ensured) {
+    cancelPreviewRelay()
+    if (objectId) clearUvDraft(objectId)
+    if (!objectId || !draftUvsRef.current) {
       draftUvsRef.current = null
       return
     }
     const draft = draftUvsRef.current
+    const liveObj = useAppStore.getState().objects.find((o) => o.id === objectId)
+    const baseUvs = liveObj?.uvs?.length ? liveObj.uvs : ensured?.uvs
+    draftUvsRef.current = null
+    if (!baseUvs) return
     const updates: Array<{ uvIndex: number; u: number; v: number }> = []
     for (let i = 0; i < draft.length; i++) {
-      const orig = ensured.uvs[i]
+      const orig = baseUvs[i]
       const d = draft[i]
       if (!orig || orig.u !== d.u || orig.v !== d.v) {
         updates.push({ uvIndex: i, u: d.u, v: d.v })
       }
     }
-    draftUvsRef.current = null
     if (updates.length > 0) setObjectUvPoints(objectId, updates, false)
-  }, [objectId, ensured, setObjectUvPoints])
+  }, [objectId, ensured, setObjectUvPoints, cancelPreviewRelay])
 
   useEffect(() => {
     if (pixelDoc) {
@@ -1415,7 +1516,7 @@ export function UVEditorPanel() {
 
   useEffect(() => {
     redraw()
-  }, [redraw, obj, uvEditorOpen])
+  }, [redraw, obj, uvEditorOpen, pan.x, pan.y, zoom])
 
   useEffect(() => {
     const container = containerRef.current
@@ -1493,6 +1594,10 @@ export function UVEditorPanel() {
     clientY: number,
     extra: Partial<NonNullable<typeof dragRef.current>> = {}
   ) => {
+    const mesh = ensuredRef.current ?? ensured
+    if (mesh) {
+      draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
+    }
     dragRef.current = {
       kind: 'pending',
       activeKind,
@@ -1556,6 +1661,7 @@ export function UVEditorPanel() {
     }
 
     draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
+    ensuredRef.current = mesh
 
     buildSnapContext(d.uvIndices ?? [], editFaces)
     if (d.activeKind === 'faceDrag' && editFaces.length > 0) {
@@ -1571,6 +1677,44 @@ export function UVEditorPanel() {
     collectFaceUvIndices,
     getSelectionBBoxPx,
   ])
+
+  const startFaceDragNow = useCallback(
+    (
+      faceIndices: number[],
+      px: { x: number; y: number },
+      clientX: number,
+      clientY: number
+    ) => {
+      if (!ensured || !objectId) return false
+      captureUndoPoint('Edit UV')
+      const mesh = prepareFaceTransformMesh(faceIndices) ?? ensured
+      const uvIndices = collectFaceUvIndices(faceIndices, mesh)
+      draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
+      ensuredRef.current = mesh
+      buildSnapContext(uvIndices, faceIndices)
+      dragSelectionBoundsRef.current = getSelectionBBoxPx(faceIndices)
+      dragRef.current = {
+        kind: 'faceDrag',
+        uvIndices,
+        startUvs: uvIndices.map((i) => ({ ...mesh.uvs[i]! })),
+        startX: px.x,
+        startY: px.y,
+        startClientX: clientX,
+        startClientY: clientY,
+        faces: [...faceIndices],
+      }
+      return true
+    },
+    [
+      ensured,
+      objectId,
+      captureUndoPoint,
+      prepareFaceTransformMesh,
+      collectFaceUvIndices,
+      buildSnapContext,
+      getSelectionBBoxPx,
+    ]
+  )
 
   const commitLiveView = useCallback(() => {
     const live = liveViewRef.current
@@ -1652,10 +1796,26 @@ export function UVEditorPanel() {
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!objectId || !ensured) return
     const px = screenToUvPixel(e.clientX, e.clientY)
     let capturePointer = false
 
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && spacePan)) {
+      e.preventDefault()
+      liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
+      dragRef.current = {
+        kind: 'pan',
+        panX: pan.x,
+        panY: pan.y,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+      }
+      setHoverCursor('grabbing')
+      capturePointer = true
+    } else if (e.button !== 0) {
+      return
+    } else if (!objectId || !ensured) {
+      return
+    } else {
     const now = Date.now()
     if (
       e.button === 0 &&
@@ -1676,21 +1836,7 @@ export function UVEditorPanel() {
       return
     }
 
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && spacePan)) {
-      e.preventDefault()
-      liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
-      dragRef.current = {
-        kind: 'pan',
-        panX: pan.x,
-        panY: pan.y,
-        startClientX: e.clientX,
-        startClientY: e.clientY,
-      }
-      setHoverCursor('grabbing')
-      capturePointer = true
-    } else if (e.button !== 0) {
-      return
-    } else if (e.ctrlKey) {
+    if (e.ctrlKey) {
       dragRef.current = {
         kind: 'marquee',
         startX: px.x,
@@ -1732,6 +1878,7 @@ export function UVEditorPanel() {
         const startBounds = getSelectionBoundsUv(regionFacesForEdit)
         const pivotUv = getScalePivotForHandle(startBounds, resize)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
+        ensuredRef.current = mesh
         buildSnapContext(uvIndices, regionFacesForEdit)
         dragSelectionBoundsRef.current = getSelectionBBoxPx(regionFacesForEdit)
         dragRef.current = {
@@ -1753,6 +1900,7 @@ export function UVEditorPanel() {
         const startUv = pixelToUv(px.x, px.y, texW, texH)
         const startAngle = Math.atan2(startUv.v - pivotUv.v, startUv.u - pivotUv.u)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
+        ensuredRef.current = mesh
         buildSnapContext(uvIndices, regionFacesForEdit)
         dragSelectionBoundsRef.current = getSelectionBBoxPx(regionFacesForEdit)
         dragRef.current = {
@@ -1768,18 +1916,9 @@ export function UVEditorPanel() {
         lastIslandRotRef.current = 0
         capturePointer = true
       } else if (isInSelectionBBox(px.x, px.y, regionFacesForEdit)) {
-        const uvIndices = collectFaceUvIndices(regionFacesForEdit)
-        beginPendingUvDrag(
-          'faceDrag',
-          uvIndices,
-          uvIndices.map((i) => ({ ...ensured.uvs[i] })),
-          px.x,
-          px.y,
-          e.clientX,
-          e.clientY,
-          { faces: [...regionFacesForEdit] }
-        )
-        capturePointer = true
+        if (startFaceDragNow(regionFacesForEdit, px, e.clientX, e.clientY)) {
+          capturePointer = true
+        }
       }
     }
 
@@ -1805,9 +1944,13 @@ export function UVEditorPanel() {
         selectUvFaces(objectId, [])
       }
     }
+    }
 
     if (capturePointer) {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      e.preventDefault()
+      const el = e.currentTarget as HTMLElement
+      el.setPointerCapture(e.pointerId)
+      attachDragWindowListeners(e.pointerId)
     }
   }
 
@@ -1837,15 +1980,78 @@ export function UVEditorPanel() {
     )
   }
 
+  const applyFaceDragAtPointer = (
+    clientX: number,
+    clientY: number,
+    ctrlKey: boolean,
+    drag: NonNullable<typeof dragRef.current>
+  ) => {
+    if (!drag.uvIndices || !drag.startUvs || drag.startX === undefined) return
+    const px = screenToUvPixel(clientX, clientY)
+    const startUv = pixelToUv(drag.startX, drag.startY ?? 0, texW, texH)
+    const currUv = pixelToUv(px.x, px.y, texW, texH)
+    const du = currUv.u - startUv.u
+    const dv = currUv.v - startUv.v
+
+    let snapDu = du
+    let snapDv = dv
+    const enabled = ctrlKey ? !uvEditorSnap : uvEditorSnap
+    const mode: UvSnapMode = enabled ? uvEditorSnapMode : 'off'
+    const ctx = snapCtxRef.current
+    if (ctx && mode !== 'off') {
+      if (mode === 'grid') {
+        const stepU = 1 / ctx.gridDivisions
+        const stepV = 1 / ctx.gridDivisions
+        snapDu = Math.round(du / stepU) * stepU
+        snapDv = Math.round(dv / stepV) * stepV
+      } else if (mode === 'island' && dragSelectionBoundsRef.current) {
+        const bounds = dragSelectionBoundsRef.current
+        const pdx = (currUv.u - startUv.u) * texW
+        const pdy = (currUv.v - startUv.v) * texH
+        const draggedBounds = {
+          minX: bounds.minX + pdx,
+          minY: bounds.minY + pdy,
+          maxX: bounds.maxX + pdx,
+          maxY: bounds.maxY + pdy,
+        }
+        const { dx, dy } = snapIslandDrag(
+          draggedBounds,
+          ctx.islandTargets,
+          ctx.thresholdPx
+        )
+        const snapPx = { x: px.x + dx, y: px.y + dy }
+        const snapUv = pixelToUv(snapPx.x, snapPx.y, texW, texH)
+        snapDu = snapUv.u - startUv.u
+        snapDv = snapUv.v - startUv.v
+      } else if (mode === 'vertex') {
+        const snapped = snapPixelToTargets(px.x, px.y, ctx.vertexTargets, ctx.thresholdPx)
+        const snapUv = pixelToUv(snapped.x, snapped.y, texW, texH)
+        snapDu = snapUv.u - startUv.u
+        snapDv = snapUv.v - startUv.v
+      }
+    }
+
+    const updates = drag.uvIndices.map((ui, idx) => {
+      const base = drag.startUvs![idx]
+      return { uvIndex: ui, u: base.u + snapDu, v: base.v + snapDv }
+    })
+    applyUvDraft(updates)
+  }
+
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current
-    if (!d || !objectId || !ensured) {
+    if (!d) {
       updateHoverAt(e.clientX, e.clientY)
       return
     }
 
     if (d.kind === 'pending' && d.startClientX !== undefined && d.startClientY !== undefined) {
       const dist = Math.hypot(e.clientX - d.startClientX, e.clientY - d.startClientY)
+      if (d.activeKind === 'faceDrag' && dist > 0) {
+        if (dist >= DRAG_THRESHOLD_PX) activatePendingDrag()
+        applyFaceDragAtPointer(e.clientX, e.clientY, e.ctrlKey, dragRef.current!)
+        return
+      }
       if (dist >= DRAG_THRESHOLD_PX) activatePendingDrag()
     }
 
@@ -1864,73 +2070,33 @@ export function UVEditorPanel() {
       return
     }
 
+    if (!objectId || !ensured) return
+
     if (
       (active.kind === 'handle' || active.kind === 'faceDrag') &&
       active.uvIndices &&
       active.startUvs &&
       active.startX !== undefined
     ) {
+      if (active.kind === 'faceDrag') {
+        applyFaceDragAtPointer(e.clientX, e.clientY, e.ctrlKey, active)
+        return
+      }
+
       const px = screenToUvPixel(e.clientX, e.clientY)
       const startUv = pixelToUv(active.startX, active.startY ?? 0, texW, texH)
       const currUv = pixelToUv(px.x, px.y, texW, texH)
       const du = currUv.u - startUv.u
       const dv = currUv.v - startUv.v
-
-      if (active.kind === 'faceDrag') {
-        let snapDu = du
-        let snapDv = dv
-        const enabled = e.ctrlKey ? !uvEditorSnap : uvEditorSnap
-        const mode: UvSnapMode = enabled ? uvEditorSnapMode : 'off'
-        const ctx = snapCtxRef.current
-        if (ctx && mode !== 'off') {
-          if (mode === 'grid') {
-            const stepU = 1 / ctx.gridDivisions
-            const stepV = 1 / ctx.gridDivisions
-            snapDu = Math.round(du / stepU) * stepU
-            snapDv = Math.round(dv / stepV) * stepV
-          } else if (mode === 'island' && dragSelectionBoundsRef.current) {
-            const bounds = dragSelectionBoundsRef.current
-            const pdx = (currUv.u - startUv.u) * texW
-            const pdy = (currUv.v - startUv.v) * texH
-            const draggedBounds = {
-              minX: bounds.minX + pdx,
-              minY: bounds.minY + pdy,
-              maxX: bounds.maxX + pdx,
-              maxY: bounds.maxY + pdy,
-            }
-            const { dx, dy } = snapIslandDrag(
-              draggedBounds,
-              ctx.islandTargets,
-              ctx.thresholdPx
-            )
-            const snapPx = { x: px.x + dx, y: px.y + dy }
-            const snapUv = pixelToUv(snapPx.x, snapPx.y, texW, texH)
-            snapDu = snapUv.u - startUv.u
-            snapDv = snapUv.v - startUv.v
-          } else if (mode === 'vertex') {
-            const snapped = snapPixelToTargets(px.x, px.y, ctx.vertexTargets, ctx.thresholdPx)
-            const snapUv = pixelToUv(snapped.x, snapped.y, texW, texH)
-            snapDu = snapUv.u - startUv.u
-            snapDv = snapUv.v - startUv.v
-          }
-        }
-
-        const updates = active.uvIndices.map((ui, idx) => {
-          const base = active.startUvs![idx]
-          return { uvIndex: ui, u: base.u + snapDu, v: base.v + snapDv }
+      const updates = active.uvIndices.map((ui, idx) => {
+        const base = active.startUvs![idx]
+        const snapped = applySnap(base.u + du, base.v + dv, e.ctrlKey, 'point', {
+          x: px.x,
+          y: px.y,
         })
-        applyUvDraft(updates)
-      } else {
-        const updates = active.uvIndices.map((ui, idx) => {
-          const base = active.startUvs![idx]
-          const snapped = applySnap(base.u + du, base.v + dv, e.ctrlKey, 'point', {
-            x: px.x,
-            y: px.y,
-          })
-          return { uvIndex: ui, u: snapped.u, v: snapped.v }
-        })
-        applyUvDraft(updates)
-      }
+        return { uvIndex: ui, u: snapped.u, v: snapped.v }
+      })
+      applyUvDraft(updates)
       return
     }
 
@@ -1991,9 +2157,13 @@ export function UVEditorPanel() {
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
-    if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    if (!dragRef.current) return
+
+    const el = containerRef.current
+    if (el?.hasPointerCapture(e.pointerId)) {
+      el.releasePointerCapture(e.pointerId)
     }
+    detachDragWindowListeners()
     const d = dragRef.current
     if (d?.kind === 'marquee' && d.marquee && ensured) {
       const x0 = Math.min(d.marquee.x0, d.marquee.x1)
@@ -2041,8 +2211,9 @@ export function UVEditorPanel() {
         }
       }
     }
-    const kind = dragRef.current?.kind
+    const kind = d?.kind
     const wasPending = kind === 'pending'
+    const pendingDrag = wasPending ? d : null
     dragRef.current = null
     if (kind === 'pan') {
       commitLiveView()
@@ -2063,37 +2234,73 @@ export function UVEditorPanel() {
       if (kind === 'faceRotate') {
         setIslandFields((f) => ({ ...f, rot: lastIslandRotRef.current }))
       }
-    } else if (wasPending && objectId && ensured) {
-      draftUvsRef.current = null
-      const px = screenToUvPixel(e.clientX, e.clientY)
-      if (uvEditorMode === 'faces') {
-        const face = pickFace(px.x, px.y)
-        if (face !== null) {
-          const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
-          selectUvFaces(objectId, nextFaces)
-        } else if (!e.shiftKey) {
-          clearAllUvSelection()
-          selectUvFaces(objectId, [])
+    } else if (wasPending && objectId && ensured && pendingDrag) {
+      const dist =
+        pendingDrag.startClientX !== undefined
+          ? Math.hypot(
+              e.clientX - pendingDrag.startClientX,
+              e.clientY - (pendingDrag.startClientY ?? 0)
+            )
+          : 0
+
+      if (
+        dist >= DRAG_THRESHOLD_PX &&
+        pendingDrag.activeKind === 'faceDrag' &&
+        pendingDrag.uvIndices &&
+        pendingDrag.startUvs
+      ) {
+        captureUndoPoint('Edit UV')
+        flushDraftUvs()
+        replaceHistoryHead('Edit UV')
+      } else {
+        if (dist > 0 && pendingDrag.uvIndices && pendingDrag.startUvs) {
+          const reverts = pendingDrag.uvIndices.map((ui, idx) => ({
+            uvIndex: ui,
+            u: pendingDrag.startUvs![idx].u,
+            v: pendingDrag.startUvs![idx].v,
+          }))
+          setObjectUvPoints(objectId, reverts, false)
         }
-      } else if (uvEditorMode === 'points') {
-        const handle = pickHandle(px.x, px.y)
-        if (handle !== null) {
-          const indices = e.shiftKey
-            ? uvEditorSelectedPoints.includes(handle)
-              ? uvEditorSelectedPoints.filter((i) => i !== handle)
-              : [...uvEditorSelectedPoints, handle]
-            : [handle]
-          setUvEditorSelectedPoints(indices)
-          setUvEditorSelectedFaces([])
-        } else if (!e.shiftKey) {
-          clearAllUvSelection()
+        draftUvsRef.current = null
+        if (objectId) clearUvDraft(objectId)
+        cancelPreviewRelay()
+        const px = screenToUvPixel(e.clientX, e.clientY)
+        if (uvEditorMode === 'faces') {
+          const face = pickFace(px.x, px.y)
+          if (face !== null) {
+            const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
+            selectUvFaces(objectId, nextFaces)
+          } else if (!e.shiftKey) {
+            clearAllUvSelection()
+            selectUvFaces(objectId, [])
+          }
+        } else if (uvEditorMode === 'points') {
+          const handle = pickHandle(px.x, px.y)
+          if (handle !== null) {
+            const indices = e.shiftKey
+              ? uvEditorSelectedPoints.includes(handle)
+                ? uvEditorSelectedPoints.filter((i) => i !== handle)
+                : [...uvEditorSelectedPoints, handle]
+              : [handle]
+            setUvEditorSelectedPoints(indices)
+            setUvEditorSelectedFaces([])
+          } else if (!e.shiftKey) {
+            clearAllUvSelection()
+          }
         }
       }
     } else {
-      draftUvsRef.current = null
+      resetDraftPreview()
     }
     updateHoverAt(e.clientX, e.clientY)
     redraw()
+  }
+
+  moveCanvasDragRef.current = (ev: PointerEvent) => {
+    onPointerMove(ev as unknown as React.PointerEvent)
+  }
+  finishCanvasDragRef.current = (ev: PointerEvent) => {
+    onPointerUp(ev as unknown as React.PointerEvent)
   }
 
   useEffect(() => {
@@ -2248,19 +2455,41 @@ export function UVEditorPanel() {
     if (!ensured || uvEditorSelectedFaces.length === 0) return
     const box = getSelectionBBoxPx(regionFacesForEdit)
     if (!box) return
-    setIslandFields({
+    const next = {
       x: Math.round(box.minX),
       y: Math.round(box.minY),
       w: Math.round(box.maxX - box.minX),
       h: Math.round(box.maxY - box.minY),
       rot: 0,
-    })
+    }
+    setIslandFields((prev) =>
+      prev.x === next.x &&
+      prev.y === next.y &&
+      prev.w === next.w &&
+      prev.h === next.h &&
+      prev.rot === next.rot
+        ? prev
+        : next
+    )
     lastIslandRotRef.current = 0
-  }, [ensured, uvEditorSelectedFaces, texW, texH, obj, getSelectionBBoxPx])
+  }, [ensured, uvEditorSelectedFaces, regionFacesForEdit, getSelectionBBoxPx])
 
   useEffect(() => {
-    draftUvsRef.current = null
-  }, [obj?.id])
+    resetDraftPreview()
+  }, [obj?.id, resetDraftPreview])
+
+  useEffect(() => {
+    if (uvEditorOpen) return
+    cancelPreviewRelay()
+    clearUvDraft()
+  }, [uvEditorOpen, cancelPreviewRelay])
+
+  useEffect(() => {
+    return () => {
+      cancelPreviewRelay()
+      clearUvDraft()
+    }
+  }, [cancelPreviewRelay])
 
   const applyIslandTransform = useCallback(() => {
     if (uvEditorSelectedFaces.length === 0) return
@@ -2345,7 +2574,7 @@ export function UVEditorPanel() {
                   ? 'Full atlas view'
                   : 'Face island edit'
                 : 'Point edit'}
-              {' · Scroll zoom · Space pan · F frame'}
+              {' · Scroll zoom · Middle drag pan · Space pan · F frame'}
             </span>
           </div>
 
@@ -2356,13 +2585,11 @@ export function UVEditorPanel() {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
             onMouseDown={onMouseDown}
             onContextMenu={(e) => e.preventDefault()}
-            onPointerLeave={(e) => {
-              if (dragRef.current?.kind === 'pan') {
-                onPointerUp(e)
-                return
-              }
+            onPointerLeave={() => {
+              if (dragRef.current) return
               hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
               setHoverCursor('crosshair')
               scheduleRedraw()
@@ -2538,7 +2765,7 @@ export function UVEditorPanel() {
               />
             </label>
           </div>
-        </div>
+          </div>
         </div>
       </div>
     </FloatingPanel>
