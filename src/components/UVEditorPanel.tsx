@@ -1579,8 +1579,8 @@ export function UVEditorPanel() {
           const dx = moveEvent.clientX - d.startClientX
           const dy = moveEvent.clientY - (d.startClientY ?? 0)
           liveViewRef.current = {
-            panX: d.panX - dx,
-            panY: (d.panY ?? 0) - dy,
+            panX: d.panX + dx,
+            panY: (d.panY ?? 0) + dy,
             zoom,
           }
           applyPanPreview()
@@ -1810,8 +1810,8 @@ export function UVEditorPanel() {
       const dx = e.clientX - active.startClientX
       const dy = e.clientY - (active.startClientY ?? 0)
       liveViewRef.current = {
-        panX: active.panX - dx,
-        panY: (active.panY ?? 0) - dy,
+        panX: active.panX + dx,
+        panY: (active.panY ?? 0) + dy,
         zoom,
       }
       applyPanPreview()
@@ -2056,18 +2056,31 @@ export function UVEditorPanel() {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      const state = useAppStore.getState()
+      const currentZoom = state.uvEditorZoom
+      const currentPanX = state.uvEditorPanX
+      const currentPanY = state.uvEditorPanY
+
       const factor = e.deltaY > 0 ? 0.9 : 1.1
-      const px = screenToUvPixel(e.clientX, e.clientY)
-      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor))
-      const rect = canvasRef.current!.getBoundingClientRect()
-      const nx = e.clientX - rect.left - px.x * nz
-      const ny = e.clientY - rect.top - px.y * nz
+      const cw = el.clientWidth
+      const ch = el.clientHeight
+      if (cw <= 0 || ch <= 0) return
+
+      const cx = cw / 2
+      const cy = ch / 2
+      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor))
+
+      const px = (cx - currentPanX) / currentZoom
+      const py = (cy - currentPanY) / currentZoom
+      const nx = cx - px * nz
+      const ny = cy - py * nz
+
       setUvEditorView(nz, nx, ny)
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [uvEditorOpen, screenToUvPixel, zoom, setUvEditorView])
+  }, [uvEditorOpen, setUvEditorView])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
