@@ -373,9 +373,9 @@ export function modalValueFromMouseDelta(
     case 'bevel':
       return dy * 0.04 * sensitivityScale
     case 'rotate':
-      return dx * 0.012 * sensitivityScale
+      return dx * 0.02 * sensitivityScale
     case 'scale':
-      const dyScaled = dy * 0.008 * sensitivityScale
+      const dyScaled = dy * 0.015 * sensitivityScale
       return Math.max(0.01, 1 + dyScaled)
   }
 }
