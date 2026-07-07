@@ -118,7 +118,7 @@ export const uvEditorInitialState: UvEditorLayoutState = {
   uvEditorTilePreview: false,
   uvEditorViewAll: false,
   uvEditorAutoFit: true,
-  uvEditorSticky: false,
+  uvEditorSticky: true,
   objectTextures: {},
 }
 
