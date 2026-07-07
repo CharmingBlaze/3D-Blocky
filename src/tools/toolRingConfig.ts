@@ -43,13 +43,18 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
   ],
   create: [
     { kind: 'primitive', primitive: 'box', label: 'Box' },
-    { kind: 'primitive', primitive: 'roundedBox', label: 'Rounded Box' },
     { kind: 'primitive', primitive: 'icosphere', label: 'Icosphere' },
     { kind: 'primitive', primitive: 'sphere', label: 'Sphere' },
     { kind: 'primitive', primitive: 'cylinder', label: 'Cylinder' },
     { kind: 'primitive', primitive: 'capsule', label: 'Capsule' },
     { kind: 'primitive', primitive: 'cone', label: 'Cone' },
     { kind: 'primitive', primitive: 'pyramid', label: 'Pyramid' },
+    { kind: 'primitive', primitive: 'doughnut', label: 'Doughnut' },
+    { kind: 'primitive', primitive: 'ring', label: 'Ring' },
+    { kind: 'primitive', primitive: 'stairs', label: 'Stairs' },
+    { kind: 'primitive', primitive: 'star', label: 'Star' },
+    { kind: 'primitive', primitive: 'dome', label: 'Dome' },
+    { kind: 'primitive', primitive: 'halfCircle', label: 'Half Circle' },
   ],
   vector: [
     { kind: 'drawInput', mode: 'vector-pen', label: 'Pen Tool' },
@@ -83,6 +88,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'tool', tool: 'move', label: 'Move (W)' },
     { kind: 'tool', tool: 'rotate', label: 'Rotate (R)' },
     { kind: 'tool', tool: 'scale', label: 'Scale (S)' },
+    { kind: 'tool', tool: 'bend', label: 'Bend' },
     { kind: 'action', id: 'select-tool', label: 'Select (Q)' },
   ],
   mesh: [
@@ -110,7 +116,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
 const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate', 'relax', 'pinch']
 
 export function categoryForActiveTool(tool: ActiveTool, fallback: ToolCategory): ToolCategory {
-  if (tool === 'move' || tool === 'rotate' || tool === 'scale') return 'transform'
+  if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'bend') return 'transform'
   if (SCULPT_TOOLS.includes(tool)) return 'sculpt'
   if (tool === 'boolean-hole') return 'boolean'
   if (tool === 'knife' || tool === 'loop-cut') return 'mesh'
@@ -175,7 +181,7 @@ export function isToolRingEntryDisabled(state: ToolRingStateSlice, entry: ToolRi
     }
   }
 
-  if (entry.kind === 'tool' && (entry.tool === 'knife' || entry.tool === 'loop-cut')) {
+  if (entry.kind === 'tool' && (entry.tool === 'knife' || entry.tool === 'loop-cut' || entry.tool === 'bend')) {
     return !hasObjectSelection
   }
 

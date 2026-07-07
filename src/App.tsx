@@ -166,11 +166,12 @@ export default function App() {
         useAppStore.getState().cancelPrimitiveBoxDraft()
         useAppStore.getState().polyDrawCancel()
         useAppStore.getState().knifeCancel()
+        useAppStore.getState().bendCancel()
         useAppStore.getState().loopCutCancel()
         useAppStore.getState().clearMeshSelection()
         useAppStore.getState().setMeshHover(null)
         useAppStore.getState().setVertexMergeModifierHeld(false)
-        if (useAppStore.getState().maximizedView) toggleMaximizedView()
+        if (useAppStore.getState().maximizedSlot !== null) toggleMaximizedView()
       }
       if (e.key === ' ') {
         const state = useAppStore.getState()

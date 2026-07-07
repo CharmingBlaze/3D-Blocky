@@ -49,6 +49,8 @@ export interface FinalizeMeshOptions {
   facet?: boolean
   /** Collect validation issues (default true in dev builds). */
   validate?: boolean
+  /** Skip per-face centroid flip (needed for torus-like shapes). */
+  skipOutwardWinding?: boolean
 }
 
 export class MeshBuilder {
@@ -375,7 +377,7 @@ export function finalizeIndexedMesh(
   const shouldValidate = options.validate ?? true
   const shouldFacet = options.facet ?? true
 
-  let next = ensureOutwardWinding(mesh, outwardCenter)
+  let next = options.skipOutwardWinding ? mesh : ensureOutwardWinding(mesh, outwardCenter)
   if (import.meta.env?.DEV) {
     console.log('[CAD trace] ensureOutwardWinding', {
       faces: next.faces.length,

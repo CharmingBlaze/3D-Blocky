@@ -624,31 +624,6 @@ export function SidePanel() {
                 onSelect={handleShapeKindChange}
               />
             </div>
-            {activeTool === 'primitive-box' && activePrimitiveKind === 'roundedBox' && (
-              <>
-                <SideSlider
-                  label="Roundness"
-                  value={roundedBoxRoundness}
-                  display={`${Math.round(roundedBoxRoundness * 100)}%`}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  onChange={setRoundedBoxRoundness}
-                />
-                <SideSlider
-                  label="Subdivisions"
-                  value={roundedBoxSubdivisions}
-                  display={String(roundedBoxSubdivisions)}
-                  min={0}
-                  max={3}
-                  step={1}
-                  onChange={setRoundedBoxSubdivisions}
-                />
-                <p className="side-color-hint muted">
-                  Scroll: subdivisions · Shift+scroll: roundness. During perspective height scroll, use Shift+scroll for roundness.
-                </p>
-              </>
-            )}
             <SideBtnGroup cols={3}>
               {POLY_DRAW_MODES.map((m) => (
                 <button
@@ -915,6 +890,14 @@ export function SidePanel() {
                 Scale
               </button>
               <button
+                className={`side-btn ${activeTool === 'bend' ? 'active' : ''}`}
+                onClick={() => setActiveTool('bend')}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title="Bend — click-drag axis on object, drag vertically to angle, double-click to apply, Esc to cancel"
+              >
+                Bend
+              </button>
+              <button
                 className={`side-btn ${isSelectTool ? 'active' : ''}`}
                 onClick={activateSelectTool}
                 title="Select · click and drag (Q for object mode)"
@@ -922,6 +905,12 @@ export function SidePanel() {
                 Select
               </button>
             </SideBtnGroup>
+            {activeTool === 'bend' && (
+              <p className="side-color-hint muted">
+                Click and drag on the object to place the bend axis. Drag vertically to set the angle.
+                Double-click to apply · Esc to cancel.
+              </p>
+            )}
             <SideBtnGroup cols={3}>
               <button
                 type="button"

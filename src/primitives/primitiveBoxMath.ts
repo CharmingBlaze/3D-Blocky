@@ -138,8 +138,10 @@ export function startPrimitiveBoxSession(
   return { baseView: ortho, heightAxis, box, cornerA, cornerB }
 }
 
-/** Perspective CAD: drag footprint on XZ ground, scroll wheel sets extent on height axis. */
+/** Perspective CAD: drag footprint on XZ ground, drag up/down or scroll wheel sets height. */
 export const PERSPECTIVE_PRIMITIVE_HEIGHT_AXIS: Axis = 1
+/** World units gained per screen pixel when dragging perspective primitive height. */
+export const PERSPECTIVE_PRIMITIVE_HEIGHT_DRAG_SCALE = 0.1
 
 export function baseBoxFromGroundCorners(
   cornerA: Vec3,
@@ -238,4 +240,43 @@ const BOX_EDGES: [number, number][] = [
 export function boxWireSegments(box: WorldBox): [Vec3, Vec3][] {
   const corners = boxWireCorners(box)
   return BOX_EDGES.map(([a, b]) => [corners[a], corners[b]])
+}
+
+export type PrimitivePreviewPhase = 'drawingBase' | 'drawingHeight' | 'scrollHeight'
+
+export interface PrimitivePreviewDraft {
+  phase: PrimitivePreviewPhase
+  heightAxis: Axis
+  box: WorldBox
+}
+
+const Y_UP_GROUND_PREVIEW_TYPES = new Set(['dome', 'stairs'])
+
+/** Dome/stairs are Y-up on the ground — inflate thin extrusion axis while the box is still being drawn. */
+export function primitivePreviewBox(type: string, draft: PrimitivePreviewDraft): WorldBox {
+  if (!Y_UP_GROUND_PREVIEW_TYPES.has(type)) return draft.box
+
+  const { box, heightAxis, phase } = draft
+  const size = boundsSize(box.min, box.max)
+  const extDepth = axisComponent(size, heightAxis)
+  const otherAxes = ([0, 1, 2] as Axis[]).filter((a) => a !== heightAxis)
+  const estDepth = Math.max(
+    axisComponent(size, otherAxes[0]!),
+    axisComponent(size, otherAxes[1]!),
+    MIN_EXTENT
+  )
+
+  const needsInflate =
+    phase === 'drawingBase' ||
+    (phase === 'drawingHeight' && extDepth <= MIN_EXTENT * 1.01)
+
+  if (!needsInflate) return box
+
+  const center = boundsCenter(box.min, box.max)
+  const half = estDepth / 2
+  const c = axisComponent(center, heightAxis)
+  return clampBoxMinSize({
+    min: setAxisComponent(box.min, heightAxis, c - half),
+    max: setAxisComponent(box.max, heightAxis, c + half),
+  })
 }

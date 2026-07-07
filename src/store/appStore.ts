@@ -151,6 +151,7 @@ export type {
   LastPolyDrawFace,
   LoopCutDraft,
   KnifeDraft,
+  BendDraft,
 } from './cadMeshToolsSlice'
 
 export type { SymmetryAxis } from '../symmetry/symmetry'
@@ -338,6 +339,7 @@ function closeEditorsForProjectSwitch(): Partial<AppState> {
     polyDrawDraft: null,
     loopCutDraft: null,
     knifeDraft: null,
+    bendDraft: null,
   }
 }
 
@@ -375,6 +377,7 @@ function restoreSceneToStore(
     polyDrawDraft: null,
     loopCutDraft: null,
     knifeDraft: null,
+    bendDraft: null,
     ...(options?.resetEditors ? closeEditorsForProjectSwitch() : {}),
     ...options?.extra,
   })

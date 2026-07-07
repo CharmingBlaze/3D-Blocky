@@ -22,6 +22,7 @@ export const DRAW_TOOLS: ActiveTool[] = ['draw', 'boolean-hole']
 export const VECTOR_TOOLS: ActiveTool[] = ['vector-pen', 'vector-shape', 'primitive-box', 'poly-draw']
 export const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate', 'relax', 'pinch']
 export const TRANSFORM_GIZMO_TOOLS: ActiveTool[] = ['move', 'rotate', 'scale']
+export const DEFORM_TOOLS: ActiveTool[] = ['bend']
 export const MESH_SELECT_TOOLS: ActiveTool[] = ['select-vertex', 'select-edge', 'select-face']
 export const MESH_EDIT_TOOLS: ActiveTool[] = ['knife', 'loop-cut']
 

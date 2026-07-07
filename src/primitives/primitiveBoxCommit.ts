@@ -11,6 +11,7 @@ import { weldSceneObjectCoincidentVertices } from '../mesh/subdivisionSurface'
 import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 import { generateId } from '../utils/math'
 import type { WorldBox } from './primitiveBoxMath'
+import type { ViewType } from '../scene/viewTypes'
 import {
   createPrimitiveInBox,
   type PrimitiveBoxType,
@@ -26,6 +27,12 @@ const PRIMITIVE_NAMES: Record<PrimitiveBoxType, string> = {
   cylinder: 'Cylinder',
   capsule: 'Capsule',
   pyramid: 'Pyramid',
+  doughnut: 'Doughnut',
+  ring: 'Ring',
+  stairs: 'Stairs',
+  star: 'Star',
+  dome: 'Dome',
+  halfCircle: 'Half Circle',
 }
 
 /** Weld position-coincident corners so face/edge/vertex edits stay connected. */
@@ -39,10 +46,11 @@ export function primitiveBoxToSceneObject(
   heightAxis: Axis,
   color: number,
   polyBudget: number,
-  roundedParams?: RoundedBoxParams
+  roundedParams?: RoundedBoxParams,
+  baseView?: ViewType | null
 ): SceneObject | null {
   if (type === 'roundedBox') {
-    const params = roundedParams ?? { roundness: 0.25, subdivisions: 1 }
+    const params = roundedParams ?? { roundness: 0.25, subdivisions: 2 }
     const obj = roundedBoxFromWorldBox(box, color, params, polyBudget)
     if (obj.positions.length === 0) return null
     const mesh = HalfEdgeMesh.fromObject(obj)
@@ -60,7 +68,8 @@ export function primitiveBoxToSceneObject(
     type,
     box,
     heightAxis,
-    primitiveSegmentsForBudget(polyBudget)
+    primitiveSegmentsForBudget(polyBudget),
+    { baseView }
   )
   if (data.indices.length === 0) return null
 
@@ -91,17 +100,19 @@ export function primitiveBoxPreviewMesh(
   heightAxis: Axis,
   color: number,
   polyBudget: number,
-  roundedParams?: RoundedBoxParams
+  roundedParams?: RoundedBoxParams,
+  baseView?: ViewType | null
 ): HalfEdgeMesh | null {
   if (type === 'roundedBox') {
-    const params = roundedParams ?? { roundness: 0.25, subdivisions: 1 }
+    const params = roundedParams ?? { roundness: 0.25, subdivisions: 2 }
     return roundedBoxHalfEdgeFromWorldBox(box, color, params, polyBudget)
   }
   const data = createPrimitiveInBox(
     type,
     box,
     heightAxis,
-    primitiveSegmentsForBudget(polyBudget)
+    primitiveSegmentsForBudget(polyBudget),
+    { baseView }
   )
   if (data.indices.length === 0) return null
   return meshDataToHalfEdgeMesh(data, color)

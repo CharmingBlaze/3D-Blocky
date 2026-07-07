@@ -124,6 +124,7 @@ export interface VectorToolsLayoutActions {
   ) => void
   primitiveBoxPointerUp: (point: Vec2, view: ViewType, shiftKey: boolean, worldPoint?: Vec3) => void
   adjustPrimitiveBoxWheel: (deltaY: number) => void
+  setPrimitiveBoxScrollHeight: (height: number) => void
   commitPrimitiveBox: () => void
 }
 
@@ -140,7 +141,7 @@ export const vectorToolsInitialState: VectorToolsLayoutState = {
   activeShapeKind: 'sphere',
   activePrimitiveKind: null,
   roundedBoxRoundness: 0.25,
-  roundedBoxSubdivisions: 1,
+  roundedBoxSubdivisions: 2,
   primitiveBoxDraft: null,
 }
 
@@ -641,9 +642,10 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
 
     setActivePrimitiveKind: (kind) => {
       store().penCancelPath()
+      const resolvedKind = kind === 'roundedBox' ? 'box' : kind
       setPartial({
-        activePrimitiveKind: kind,
-        activeTool: kind ? 'primitive-box' : 'draw',
+        activePrimitiveKind: resolvedKind,
+        activeTool: resolvedKind ? 'primitive-box' : 'draw',
         toolCategory: 'draw',
         primitiveBoxDraft: null,
         vectorDraft: [],
@@ -987,9 +989,22 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         return
       }
 
-      const step = deltaY > 0 ? -2 : 2
+      const step = deltaY > 0 ? -3 : 3
       const prev = primitiveBoxDraft.scrollHeight ?? 4
-      const next = Math.max(0.5, prev + step)
+      store().setPrimitiveBoxScrollHeight(prev + step)
+    },
+
+    setPrimitiveBoxScrollHeight: (height) => {
+      const { primitiveBoxDraft } = store()
+      if (
+        !primitiveBoxDraft ||
+        primitiveBoxDraft.phase !== 'scrollHeight' ||
+        primitiveBoxDraft.baseView !== 'perspective'
+      ) {
+        return
+      }
+
+      const next = Math.max(0.5, height)
       setPartial({
         primitiveBoxDraft: {
           ...primitiveBoxDraft,
@@ -1025,7 +1040,8 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         primitiveBoxDraft.heightAxis,
         activeColor,
         polyBudget,
-        roundedParams
+        roundedParams,
+        primitiveBoxDraft.baseView
       )
 
       if (obj) {

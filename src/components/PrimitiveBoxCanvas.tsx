@@ -3,7 +3,7 @@ import { Line } from '@react-three/drei'
 import { useShallow } from 'zustand/react/shallow'
 import * as THREE from 'three'
 import { useAppStore } from '../store/appStore'
-import { boxWireSegments } from '../primitives/primitiveBoxMath'
+import { boxWireSegments, primitivePreviewBox } from '../primitives/primitiveBoxMath'
 import { primitiveBoxPreviewMesh } from '../primitives/primitiveBoxCommit'
 import { useTheme } from '../theme/useTheme'
 
@@ -41,13 +41,20 @@ export function PrimitiveBoxCanvas() {
         ? { roundness: roundedBoxRoundness, subdivisions: roundedBoxSubdivisions }
         : undefined
 
+    const previewBox = primitivePreviewBox(activePrimitiveKind, {
+      phase: primitiveBoxDraft.phase,
+      heightAxis: primitiveBoxDraft.heightAxis,
+      box: primitiveBoxDraft.box,
+    })
+
     const mesh = primitiveBoxPreviewMesh(
       activePrimitiveKind,
-      primitiveBoxDraft.box,
+      previewBox,
       primitiveBoxDraft.heightAxis,
       activeColor,
       polyBudget,
-      roundedParams
+      roundedParams,
+      primitiveBoxDraft.baseView
     )
     if (!mesh) return null
     const data = mesh.toMeshData(true, 0)
@@ -70,7 +77,7 @@ export function PrimitiveBoxCanvas() {
   if (!activePrimitiveKind || !primitiveBoxDraft) return null
 
   const color = meshOutlineSecondary
-  const smoothPreview = activePrimitiveKind === 'roundedBox'
+  const smoothPreview = activePrimitiveKind === 'roundedBox' || activePrimitiveKind === 'dome'
 
   return (
     <group renderOrder={20}>

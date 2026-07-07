@@ -385,7 +385,7 @@ describe('MeshBuilder', () => {
 
   it('rounded CAD box keeps welded topology for component edits', () => {
     const obj = prepareSceneObject(
-      roundedBoxFromWorldBox(TEST_BOX, 0x6ecbf5, { roundness: 0.25, subdivisions: 1 }, 64)
+      roundedBoxFromWorldBox(TEST_BOX, 0x6ecbf5, { roundness: 0.25, subdivisions: 2 }, 64)
     )
     expect(obj.positions.length).toBeGreaterThan(0)
     expect(inwardFaceCount(obj.positions, obj.faces)).toBe(0)

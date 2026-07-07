@@ -44,6 +44,7 @@ export type ActiveTool =
   | 'move'
   | 'rotate'
   | 'scale'
+  | 'bend'
   | 'select-vertex'
   | 'select-edge'
   | 'select-face'
@@ -127,6 +128,7 @@ type ToolStore = ToolActivationLayoutState & {
   polyDrawCancel: () => void
   clearPolyDrawHover: () => void
   knifeCancel: () => void
+  bendCancel: () => void
   loopCutCancel: () => void
   setSelectionMode: (mode: SelectionMode) => void
   setActivePrimitiveKind: (kind: import('./vectorToolsSlice').PrimitiveKind | null) => void
@@ -177,6 +179,9 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       }
       if (tool !== 'knife') {
         store().knifeCancel()
+      }
+      if (tool !== 'bend') {
+        store().bendCancel()
       }
       if (tool !== 'loop-cut') {
         store().loopCutCancel()

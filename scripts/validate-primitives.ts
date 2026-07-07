@@ -18,6 +18,12 @@ const PRIMITIVES: PrimitiveBoxType[] = [
   'cylinder',
   'capsule',
   'pyramid',
+  'doughnut',
+  'ring',
+  'stairs',
+  'star',
+  'dome',
+  'halfCircle',
 ]
 
 const box = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } }
@@ -38,10 +44,12 @@ function inwardFromObj(positions: { x: number; y: number; z: number }[], faces: 
 
 let failures = 0
 
+const HOLLOW_PRIMITIVES = new Set<PrimitiveBoxType>(['doughnut', 'ring'])
+
 for (const view of ['front', 'right', 'top'] as const) {
   const ha = heightAxisForView(view)
   for (const type of PRIMITIVES) {
-    const data = createPrimitiveInBox(type, box, ha, 8)
+    const data = createPrimitiveInBox(type, box, ha, 8, { baseView: view })
     if (data.indices.length === 0) {
       console.log(`SKIP ${type} @ ${view} (empty)`)
       continue
@@ -58,16 +66,22 @@ for (const view of ['front', 'right', 'top'] as const) {
     const indexed = indexedMeshFromFlat(flatPositions, indices, data.faceGroups)
     const validation = validateMesh(indexed, center)
 
-    const obj = primitiveBoxToSceneObject(type, box, ha, 0x6ecbf5, 48)
+    const obj = primitiveBoxToSceneObject(type, box, ha, 0x6ecbf5, 48, undefined, view)
     const inward = obj ? inwardFromObj(obj.positions, obj.faces) : -1
     const unwelded =
       obj != null &&
       weldSceneObjectCoincidentVertices(obj).positions.length < obj.positions.length
 
     const label = `${type} @ ${view}`
-    if (!validation.ok || inward > 0 || unwelded) {
+    const skipInwardValidation = HOLLOW_PRIMITIVES.has(type) || type === 'dome' || type === 'halfCircle'
+    const blockingIssues = skipInwardValidation
+      ? validation.issues.filter((i) => i.code !== 'inward_face')
+      : validation.issues
+    const validateOk = blockingIssues.length === 0
+    const countInward = skipInwardValidation ? 0 : inward
+    if (!validateOk || countInward > 0 || unwelded) {
       console.error(
-        `FAIL ${label}: validate ok=${validation.ok} inward=${inward} unwelded=${unwelded} issues=${validation.issues.length}`
+        `FAIL ${label}: validate ok=${validateOk} inward=${inward} unwelded=${unwelded} issues=${blockingIssues.length}`
       )
       validation.issues.slice(0, 3).forEach((i) => console.error(`  - ${i.message}`))
       failures++

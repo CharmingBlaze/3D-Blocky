@@ -5,7 +5,10 @@ import type { SelectableViewType, ViewType, ViewportSlotIndex } from '../scene/v
 
 export interface ViewportLayoutState {
   activeView: ViewType
-  maximizedView: ViewType | null
+  /** Slot index (0–3) when quad layout is maximized to one pane. */
+  maximizedSlot: ViewportSlotIndex | null
+  /** Viewport slot under the pointer (for hover outline + space maximize). */
+  hoveredViewportSlot: ViewportSlotIndex | null
   viewportSlotViews: ViewType[]
   viewportColSplit: number
   viewportRowSplit: number
@@ -19,6 +22,7 @@ export interface ViewportLayoutState {
 export interface ViewportLayoutActions {
   setActiveView: (view: ViewType) => void
   setViewportSlotView: (index: ViewportSlotIndex, view: SelectableViewType) => void
+  setHoveredViewportSlot: (index: ViewportSlotIndex | null) => void
   toggleMaximizedView: () => void
   setViewportColSplit: (ratio: number) => void
   setViewportRowSplit: (ratio: number) => void
@@ -33,7 +37,8 @@ export type ViewportSlice = ViewportLayoutState & ViewportLayoutActions
 
 export const viewportLayoutInitialState: ViewportLayoutState = {
   activeView: 'front',
-  maximizedView: null,
+  maximizedSlot: null,
+  hoveredViewportSlot: null,
   viewportSlotViews: [...DEFAULT_VIEWPORT_SLOT_VIEWS],
   viewportColSplit: 0.5,
   viewportRowSplit: 0.5,
@@ -57,10 +62,23 @@ export function createViewportSlice<T extends ViewportLayoutState>(
         return { viewportSlotViews } as Partial<T>
       }),
 
+    setHoveredViewportSlot: (index) =>
+      set((s) =>
+        s.hoveredViewportSlot === index ? s : ({ hoveredViewportSlot: index } as Partial<T>)
+      ),
+
     toggleMaximizedView: () =>
-      set((s) => ({
-        maximizedView: s.maximizedView ? null : s.activeView,
-      }) as Partial<T>),
+      set((s) => {
+        if (s.maximizedSlot !== null) {
+          return { maximizedSlot: null } as Partial<T>
+        }
+        const slot =
+          s.hoveredViewportSlot ?? findActiveSlotForView(s.activeView, s.viewportSlotViews)
+        return {
+          maximizedSlot: slot,
+          activeView: s.viewportSlotViews[slot]!,
+        } as Partial<T>
+      }),
 
     setViewportColSplit: (ratio) =>
       set({ viewportColSplit: Math.min(0.82, Math.max(0.18, ratio)) } as Partial<T>),
@@ -95,4 +113,9 @@ export function createViewportSlice<T extends ViewportLayoutState>(
         return { viewMoveBasis: basis } as Partial<T>
       }),
   }
+}
+
+function findActiveSlotForView(view: ViewType, slots: ViewType[]): ViewportSlotIndex {
+  const index = slots.findIndex((slotView) => slotView === view)
+  return (index >= 0 ? index : 0) as ViewportSlotIndex
 }

@@ -14,6 +14,7 @@ import { MeshSelectionGizmo } from './MeshSelectionGizmo'
 import { PrimitiveBoxCanvas } from './PrimitiveBoxCanvas'
 import { PolyDrawVisuals } from './PolyDrawVisuals'
 import { KnifeVisuals } from './KnifeVisuals'
+import { BendVisuals } from './BendVisuals'
 import { LoopCutVisuals } from './LoopCutVisuals'
 import { DrawVertexOverlay } from './DrawVertexOverlay'
 import { StrokeCanvas } from './StrokeCanvas'
@@ -38,6 +39,7 @@ import { getCameraSetup } from '../scene/viewTypes'
 import { ViewportViewPicker } from './ViewportViewPicker'
 import { useViewportPointerHandlers } from '../hooks/useViewportPointerHandlers'
 import {
+  DEFORM_TOOLS,
   MESH_EDIT_TOOLS,
   MESH_SELECT_TOOLS,
   SCULPT_TOOLS,
@@ -88,6 +90,7 @@ interface QuadViewportProps {
   view: ViewType
   slotIndex: ViewportSlotIndex
   isActive: boolean
+  isHovered: boolean
   onActivate: () => void
   /** False when hidden during maximize; canvas stays mounted either way. */
   layoutVisible: boolean
@@ -211,7 +214,7 @@ function ViewportControls({
   )
 }
 
-export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisible }: QuadViewportProps) {
+export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate, layoutVisible }: QuadViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
   const [interactionDom, setInteractionDom] = useState<HTMLElement | null>(null)
@@ -236,7 +239,6 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
     showGrid,
     defaultDepth,
     primitiveBoxDraft,
-    activePrimitiveKind,
     roundedBoxRoundness,
     roundedBoxSubdivisions,
     imageDropMode,
@@ -261,7 +263,6 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
       showGrid: s.showGrid,
       defaultDepth: s.defaultDepth,
       primitiveBoxDraft: s.primitiveBoxDraft,
-      activePrimitiveKind: s.activePrimitiveKind,
       roundedBoxRoundness: s.roundedBoxRoundness,
       roundedBoxSubdivisions: s.roundedBoxSubdivisions,
       imageDropMode: s.imageDropMode,
@@ -286,6 +287,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
       isDrawing: s.isDrawing,
       currentStrokePreview: s.currentStrokePreview,
       knifeDraft: s.knifeDraft,
+      bendDraft: s.bendDraft,
       loopCutDraft: s.loopCutDraft,
       extrudeDragAnchor: s.extrudeDragAnchor,
       meshModal: s.meshModal,
@@ -302,6 +304,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
     cadPreview.isDrawing ||
     cadPreview.currentStrokePreview != null ||
     cadPreview.knifeDraft != null ||
+    cadPreview.bendDraft != null ||
     cadPreview.loopCutDraft != null ||
     cadPreview.extrudeDragAnchor != null ||
     cadPreview.meshModal != null ||
@@ -397,7 +400,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
           ? 'cursor-transform'
           : VECTOR_TOOLS.includes(activeTool)
             ? 'cursor-crosshair'
-            : MESH_EDIT_TOOLS.includes(activeTool)
+            : MESH_EDIT_TOOLS.includes(activeTool) || DEFORM_TOOLS.includes(activeTool)
               ? 'cursor-crosshair'
               : SCULPT_TOOLS.includes(activeTool)
               ? 'cursor-sculpt'
@@ -406,7 +409,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
   return (
     <div
       ref={bindContainerRef}
-      className={`viewport-panel ${isActive ? 'active' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}`}
+      className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}`}
       onClick={viewportGizmoActive ? undefined : onActivate}
       onPointerDown={viewportGizmoActive ? undefined : handlePointerDown}
       onPointerMove={viewportGizmoActive ? undefined : handlePointerMove}
@@ -419,9 +422,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
       <ViewportViewPicker view={view} onSelect={handleSelectView} />
       <span className="viewport-stats">
         {perspectivePrimitiveScrollHeight
-          ? activePrimitiveKind === 'roundedBox'
-            ? `Scroll height (${(primitiveBoxDraft?.scrollHeight ?? 4).toFixed(1)}) · Shift+scroll roundness · middle-click to place`
-            : `Scroll to set height (${(primitiveBoxDraft?.scrollHeight ?? 4).toFixed(1)}) · middle-click to place`
+          ? `Drag or scroll height (${(primitiveBoxDraft?.scrollHeight ?? 4).toFixed(1)}) · double-click to place`
           : roundedBoxParamWheel
             ? `Rounded box · sub ${roundedBoxSubdivisions} · round ${Math.round(roundedBoxRoundness * 100)}% · scroll / Shift+scroll`
             : selectedObj
@@ -520,6 +521,7 @@ export function QuadViewport({ view, slotIndex, isActive, onActivate, layoutVisi
         <PrimitiveBoxCanvas />
         <PolyDrawVisuals />
         <KnifeVisuals />
+        <BendVisuals />
         <LoopCutVisuals />
         <DrawVertexOverlay />
         <BillboardImages />

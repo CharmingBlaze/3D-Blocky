@@ -18,6 +18,8 @@ import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 import type { Vec3 } from '../utils/math'
 import { axisComponent, type Axis } from './viewAxes'
 import { boxCenterSize, type WorldBox } from './primitiveBoxMath'
+import { createCadShapePrimitive, type CadShapePrimitiveOptions } from './cadShapePrimitives'
+import type { ViewType } from '../scene/viewTypes'
 
 function mapLocal(lx: number, ly: number, lz: number, heightAxis: Axis, center: Vec3): Vec3 {
   let x = lx
@@ -373,12 +375,21 @@ export type PrimitiveBoxType =
   | 'cylinder'
   | 'capsule'
   | 'pyramid'
+  | 'doughnut'
+  | 'ring'
+  | 'stairs'
+  | 'star'
+  | 'dome'
+  | 'halfCircle'
+
+export type { CadShapePrimitiveOptions }
 
 export function createPrimitiveInBox(
   type: PrimitiveBoxType,
   box: WorldBox,
   heightAxis: Axis,
-  segments = primitiveSegmentsForBudget(128)
+  segments = primitiveSegmentsForBudget(128),
+  options?: CadShapePrimitiveOptions & { baseView?: ViewType | null }
 ): MeshData {
   const { center, size } = boxCenterSize(box)
   switch (type) {
@@ -398,6 +409,13 @@ export function createPrimitiveInBox(
       return createInscribedCone(center, size, heightAxis, segments)
     case 'pyramid':
       return createInscribedPyramid(center, size, heightAxis)
+    case 'doughnut':
+    case 'ring':
+    case 'stairs':
+    case 'star':
+    case 'dome':
+    case 'halfCircle':
+      return createCadShapePrimitive(type, box, heightAxis, segments, options)
     default:
       return emptyMeshData()
   }
@@ -408,9 +426,10 @@ export function worldBoxToMeshData(
   min: Vec3,
   max: Vec3,
   heightAxis: Axis,
-  segments = 8
+  segments = 8,
+  options?: CadShapePrimitiveOptions & { baseView?: ViewType | null }
 ): MeshData {
-  return createPrimitiveInBox(type, { min, max }, heightAxis, segments)
+  return createPrimitiveInBox(type, { min, max }, heightAxis, segments, options)
 }
 
 export function toTuple(v: Vec3): [number, number, number] {

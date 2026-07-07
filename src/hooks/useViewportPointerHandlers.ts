@@ -49,9 +49,11 @@ import {
   normalizedViewportPoint,
   worldPointFromViewDrop,
 } from '../images/imageDropPlacement'
+import { PERSPECTIVE_PRIMITIVE_HEIGHT_DRAG_SCALE } from '../primitives/primitiveBoxMath'
 import type { ActiveTool } from '../store/appStore'
 import {
   DRAW_TOOLS,
+  DEFORM_TOOLS,
   MESH_EDIT_TOOLS,
   MESH_SELECT_TOOLS,
   SCULPT_TOOLS,
@@ -117,6 +119,9 @@ export function useViewportPointerHandlers({
   const vectorGestureViewRef = useRef<ViewType | null>(null)
   const strokeGestureViewRef = useRef<ViewType | null>(null)
   const primitiveGestureViewRef = useRef<ViewType | null>(null)
+  const perspectiveHeightDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
+  const perspectiveHeightClickRef = useRef({ t: 0, x: 0, y: 0 })
+  const bendClickRef = useRef({ t: 0, x: 0, y: 0 })
   const selectDragRef = useRef<ObjectDragState | null>(null)
   const componentDragRef = useRef<ComponentDragState | null>(null)
   const hoverPickRafRef = useRef<number | null>(null)
@@ -163,6 +168,7 @@ export function useViewportPointerHandlers({
     primitiveBoxPointerMove,
     primitiveBoxPointerUp,
     adjustPrimitiveBoxWheel,
+    setPrimitiveBoxScrollHeight,
     commitPrimitiveBox,
     primitiveBoxDraft,
     activePrimitiveKind,
@@ -179,6 +185,12 @@ export function useViewportPointerHandlers({
     knifePointerDown,
     knifePointerMove,
     knifeCommit,
+    bendBegin,
+    bendPointerMove,
+    bendPointerUp,
+    bendStartAngleDrag,
+    bendCommit,
+    bendCancel,
     imageDropMode,
     dropImageInView,
     selectReferenceImage,
@@ -219,6 +231,7 @@ export function useViewportPointerHandlers({
       primitiveBoxPointerMove: s.primitiveBoxPointerMove,
       primitiveBoxPointerUp: s.primitiveBoxPointerUp,
       adjustPrimitiveBoxWheel: s.adjustPrimitiveBoxWheel,
+      setPrimitiveBoxScrollHeight: s.setPrimitiveBoxScrollHeight,
       commitPrimitiveBox: s.commitPrimitiveBox,
       primitiveBoxDraft: s.primitiveBoxDraft,
       activePrimitiveKind: s.activePrimitiveKind,
@@ -235,6 +248,12 @@ export function useViewportPointerHandlers({
       knifePointerDown: s.knifePointerDown,
       knifePointerMove: s.knifePointerMove,
       knifeCommit: s.knifeCommit,
+      bendBegin: s.bendBegin,
+      bendPointerMove: s.bendPointerMove,
+      bendPointerUp: s.bendPointerUp,
+      bendStartAngleDrag: s.bendStartAngleDrag,
+      bendCommit: s.bendCommit,
+      bendCancel: s.bendCancel,
       imageDropMode: s.imageDropMode,
       dropImageInView: s.dropImageInView,
       selectReferenceImage: s.selectReferenceImage,
@@ -254,7 +273,9 @@ export function useViewportPointerHandlers({
 
         const store = useAppStore.getState()
         const meshEditHover =
-          store.activeTool === 'loop-cut' || store.activeTool === 'knife'
+          store.activeTool === 'loop-cut' ||
+          store.activeTool === 'knife' ||
+          store.activeTool === 'bend'
         if (!isComponentSelectionMode(store.selectionMode) && !meshEditHover) {
           store.setMeshHover(null)
           return
@@ -890,6 +911,44 @@ export function useViewportPointerHandlers({
         return
       }
 
+      if (activeTool === 'bend' && e.button === 0 && rect && camera) {
+        const store = useAppStore.getState()
+        const draft = store.bendDraft
+
+        if (draft?.axisLocked) {
+          const now = performance.now()
+          const last = bendClickRef.current
+          if (
+            now - last.t < 350 &&
+            Math.hypot(e.clientX - last.x, e.clientY - last.y) < 10
+          ) {
+            bendClickRef.current = { t: 0, x: 0, y: 0 }
+            e.preventDefault()
+            e.stopPropagation()
+            bendCommit()
+            return
+          }
+          bendClickRef.current = { t: now, x: e.clientX, y: e.clientY }
+          e.currentTarget.setPointerCapture(e.pointerId)
+          bendStartAngleDrag(e.clientX, e.clientY)
+          return
+        }
+
+        const preferred =
+          draft?.objectId ??
+          store.selectedObjectId ??
+          (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
+        const resolved = resolveKnifeWorld(e.clientX, e.clientY, preferred)
+        if (!resolved) return
+        e.currentTarget.setPointerCapture(e.pointerId)
+        selectObject(resolved.objectId)
+        if (!draft) {
+          bendBegin(resolved.objectId, resolved.world, view, e.clientX, e.clientY)
+        }
+        bendPointerMove(resolved.world, e.clientX, e.clientY)
+        return
+      }
+
       if (activeTool === 'poly-draw' && e.button === 0) {
         const store = useAppStore.getState()
         const draftLen = store.polyDrawDraft?.points.length ?? 0
@@ -918,6 +977,28 @@ export function useViewportPointerHandlers({
         const groundY = draft?.groundY ?? defaultDepth
 
         if (draft?.phase === 'scrollHeight' && draft.baseView === 'perspective') {
+          const now = performance.now()
+          const last = perspectiveHeightClickRef.current
+          if (
+            now - last.t < 350 &&
+            Math.hypot(e.clientX - last.x, e.clientY - last.y) < 10
+          ) {
+            perspectiveHeightClickRef.current = { t: 0, x: 0, y: 0 }
+            e.preventDefault()
+            e.stopPropagation()
+            commitPrimitiveBox()
+            return
+          }
+          perspectiveHeightClickRef.current = { t: now, x: e.clientX, y: e.clientY }
+
+          e.currentTarget.setPointerCapture(e.pointerId)
+          e.preventDefault()
+          e.stopPropagation()
+          beginPointerInteraction()
+          perspectiveHeightDragRef.current = {
+            startY: e.clientY,
+            startHeight: draft.scrollHeight ?? 4,
+          }
           return
         }
 
@@ -1133,7 +1214,8 @@ export function useViewportPointerHandlers({
         !marqueeStartRef.current &&
         ((isComponentSelectionMode(selectionMode) &&
           (MESH_SELECT_TOOLS.includes(activeTool) || activeTool === 'move')) ||
-          MESH_EDIT_TOOLS.includes(activeTool))
+          MESH_EDIT_TOOLS.includes(activeTool) ||
+          DEFORM_TOOLS.includes(activeTool))
       ) {
         scheduleMeshHoverPick(e.clientX, e.clientY)
       }
@@ -1146,6 +1228,24 @@ export function useViewportPointerHandlers({
         if (resolved) {
           knifePointerMove(resolved.world)
         }
+        return
+      }
+
+      if (store.activeTool === 'bend' && store.bendDraft && (e.buttons & 1) === 1) {
+        const preferred = store.bendDraft.objectId ?? store.selectedObjectId
+        const resolved = store.bendDraft.axisLocked
+          ? null
+          : resolveKnifeWorld(e.clientX, e.clientY, preferred, e.shiftKey)
+        bendPointerMove(resolved?.world ?? null, e.clientX, e.clientY)
+        return
+      }
+
+      if (perspectiveHeightDragRef.current && (e.buttons & 1) === 1) {
+        const drag = perspectiveHeightDragRef.current
+        const deltaPx = drag.startY - e.clientY
+        setPrimitiveBoxScrollHeight(
+          drag.startHeight + deltaPx * PERSPECTIVE_PRIMITIVE_HEIGHT_DRAG_SCALE
+        )
         return
       }
 
@@ -1163,7 +1263,8 @@ export function useViewportPointerHandlers({
         store.activeTool === 'primitive-box' &&
         view === 'perspective' &&
         (e.buttons & 1) === 1 &&
-        primitiveGestureViewRef.current === view
+        primitiveGestureViewRef.current === view &&
+        store.primitiveBoxDraft?.phase === 'drawingBase'
       ) {
         const groundY = store.primitiveBoxDraft?.groundY ?? defaultDepth
         const ground = getGroundPoint(e.clientX, e.clientY, groundY)
@@ -1244,7 +1345,7 @@ export function useViewportPointerHandlers({
         return
       }
     },
-    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, knifePointerMove]
+    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, knifePointerMove, setPrimitiveBoxScrollHeight]
   )
 
   const handlePointerUp = useCallback(
@@ -1290,6 +1391,26 @@ export function useViewportPointerHandlers({
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId)
         }
+        return
+      }
+
+      if (store.activeTool === 'bend' && store.bendDraft) {
+        if (!store.bendDraft.axisLocked) {
+          store.bendPointerUp()
+        }
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+        endPointerInteraction()
+        return
+      }
+
+      if (perspectiveHeightDragRef.current && e.button === 0) {
+        perspectiveHeightDragRef.current = null
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+        endPointerInteraction()
         return
       }
 
@@ -1492,13 +1613,17 @@ export function useViewportPointerHandlers({
 
   const handlePointerLeave = useCallback(
     (e: React.PointerEvent) => {
+      if (perspectiveHeightDragRef.current) {
+        perspectiveHeightDragRef.current = null
+        endPointerInteraction()
+      }
       handlePointerUp(e)
       setMeshHover(null)
       if (useAppStore.getState().activeTool === 'poly-draw') {
         clearPolyDrawHover()
       }
     },
-    [handlePointerUp, setMeshHover, clearPolyDrawHover]
+    [handlePointerUp, setMeshHover, clearPolyDrawHover, endPointerInteraction]
   )
 
   const handleWheel = useCallback(

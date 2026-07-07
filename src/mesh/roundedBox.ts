@@ -23,39 +23,133 @@ export function clampRoundedBoxSubdivisions(value: number): number {
   return clampSubdLevels(value)
 }
 
-function sdfRoundedBox(p: Vec3, hx: number, hy: number, hz: number, r: number): number {
-  const qx = Math.abs(p.x) - hx + r
-  const qy = Math.abs(p.y) - hy + r
-  const qz = Math.abs(p.z) - hz + r
-  return (
-    Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) +
-    Math.min(Math.max(qx, qy, qz), 0) -
-    r
-  )
+/** Catmull-Clark levels required before SDF rounding reads as a rounded box (not spiky corners). */
+export const MIN_ROUNDED_BOX_SUBDIVISIONS = 2
+
+function resolveRoundedBoxSubdivisions(
+  params: RoundedBoxParams,
+  polyBudget: number | undefined,
+  vertexCount: number
+): number {
+  let subs = clampRoundedBoxSubdivisions(params.subdivisions)
+  if (clampRoundness(params.roundness) > 0) {
+    const budgetLevels =
+      polyBudget != null ? maxSubdLevelsForBudget(polyBudget, vertexCount) : MIN_ROUNDED_BOX_SUBDIVISIONS
+    subs = Math.max(subs, Math.min(MIN_ROUNDED_BOX_SUBDIVISIONS, budgetLevels))
+  }
+  if (polyBudget != null) {
+    subs = Math.min(subs, maxRoundedBoxSubdivisionsForBudget(polyBudget))
+  }
+  if (subs > 0) {
+    subs = Math.min(subs, maxSubdLevelsForBudget(polyBudget ?? 48, vertexCount))
+  }
+  return subs
 }
 
-function roundedBoxSurfaceAlongDir(
-  dx: number,
-  dy: number,
-  dz: number,
+function buildRoundedBoxObject(
+  obj: SceneObject,
+  targetCenter: Vec3,
+  targetHalf: Vec3,
+  params: RoundedBoxParams,
+  polyBudget?: number
+): SceneObject {
+  let out = obj
+  const subs = resolveRoundedBoxSubdivisions(params, polyBudget, out.positions.length)
+  if (subs > 0) {
+    out = subdivideSurfaceLevels(out, subs)
+  }
+  if (clampRoundness(params.roundness) > 0) {
+    applyRoundedBoxDeform(out, targetCenter, targetHalf, params.roundness)
+  }
+  out.smoothShading = false
+  return out
+}
+
+/** Scale a point onto the axis-aligned box shell (avoids radial SDF hub spikes on faces). */
+export function projectToBoxShell(
+  lx: number,
+  ly: number,
+  lz: number,
+  hx: number,
+  hy: number,
+  hz: number
+): Vec3 {
+  const t = Math.max(Math.abs(lx) / hx, Math.abs(ly) / hy, Math.abs(lz) / hz, 1e-8)
+  return { x: lx / t, y: ly / t, z: lz / t }
+}
+
+/** Symmetric shell point → rounded-box surface (identical fillets on all eight corners). */
+export function shellToRoundedBox(
+  shell: Vec3,
   hx: number,
   hy: number,
   hz: number,
   r: number
 ): Vec3 {
-  const len = Math.hypot(dx, dy, dz)
-  if (len < 1e-8) return { x: 0, y: 0, z: 0 }
-  const nd = { x: dx / len, y: dy / len, z: dz / len }
-  let lo = 0
-  let hi = Math.hypot(hx, hy, hz) * 2 + r * 2
-  for (let i = 0; i < 28; i++) {
-    const mid = (lo + hi) * 0.5
-    const p = { x: nd.x * mid, y: nd.y * mid, z: nd.z * mid }
-    if (sdfRoundedBox(p, hx, hy, hz, r) > 0) hi = mid
-    else lo = mid
+  const sx = shell.x >= 0 ? 1 : -1
+  const sy = shell.y >= 0 ? 1 : -1
+  const sz = shell.z >= 0 ? 1 : -1
+  const ax = Math.abs(shell.x)
+  const ay = Math.abs(shell.y)
+  const az = Math.abs(shell.z)
+
+  const bx = Math.max(hx - r, 0)
+  const by = Math.max(hy - r, 0)
+  const bz = Math.max(hz - r, 0)
+
+  const qx = ax - bx
+  const qy = ay - by
+  const qz = az - bz
+
+  if (qx > 0 && qy > 0 && qz > 0) {
+    const ox = sx * bx
+    const oy = sy * by
+    const oz = sz * bz
+    const dx = sx * hx - ox
+    const dy = sy * hy - oy
+    const dz = sz * hz - oz
+    const len = Math.hypot(dx, dy, dz)
+    return { x: ox + (dx / len) * r, y: oy + (dy / len) * r, z: oz + (dz / len) * r }
   }
-  const t = lo
-  return { x: nd.x * t, y: nd.y * t, z: nd.z * t }
+
+  if (qx > 0 && qy > 0 && qz <= 0) {
+    const ox = sx * bx
+    const oy = sy * by
+    const dx = sx * hx - ox
+    const dy = sy * hy - oy
+    const len = Math.hypot(dx, dy)
+    return { x: ox + (dx / len) * r, y: oy + (dy / len) * r, z: shell.z }
+  }
+
+  if (qx > 0 && qy <= 0 && qz > 0) {
+    const ox = sx * bx
+    const oz = sz * bz
+    const dx = sx * hx - ox
+    const dz = sz * hz - oz
+    const len = Math.hypot(dx, dz)
+    return { x: ox + (dx / len) * r, y: shell.y, z: oz + (dz / len) * r }
+  }
+
+  if (qx <= 0 && qy > 0 && qz > 0) {
+    const oy = sy * by
+    const oz = sz * bz
+    const dy = sy * hy - oy
+    const dz = sz * hz - oz
+    const len = Math.hypot(dy, dz)
+    return { x: shell.x, y: oy + (dy / len) * r, z: oz + (dz / len) * r }
+  }
+
+  if (qx > 0 && qy <= 0 && qz <= 0) {
+    return { x: sx * hx, y: shell.y, z: shell.z }
+  }
+  if (qx <= 0 && qy > 0 && qz <= 0) {
+    return { x: shell.x, y: sy * hy, z: shell.z }
+  }
+  if (qx <= 0 && qy <= 0 && qz > 0) {
+    return { x: shell.x, y: shell.y, z: sz * hz }
+  }
+
+  return shell
 }
 
 export function boundsCenterHalf(obj: SceneObject): { center: Vec3; half: Vec3 } {
@@ -100,7 +194,8 @@ export function applyRoundedBoxDeform(
     const lx = p.x - center.x
     const ly = p.y - center.y
     const lz = p.z - center.z
-    const surf = roundedBoxSurfaceAlongDir(lx, ly, lz, half.x, half.y, half.z, r)
+    const shell = projectToBoxShell(lx, ly, lz, half.x, half.y, half.z)
+    const surf = shellToRoundedBox(shell, half.x, half.y, half.z, r)
     p.x = center.x + surf.x
     p.y = center.y + surf.y
     p.z = center.z + surf.z
@@ -112,19 +207,8 @@ export function applyRoundedBoxParams(
   params: RoundedBoxParams,
   polyBudget?: number
 ): SceneObject {
-  let out = obj
-  let subs = clampRoundedBoxSubdivisions(params.subdivisions)
-  if (polyBudget != null) {
-    subs = Math.min(subs, maxRoundedBoxSubdivisionsForBudget(polyBudget))
-  }
-  if (subs > 0) {
-    subs = Math.min(subs, maxSubdLevelsForBudget(polyBudget ?? 48, out.positions.length))
-    out = subdivideSurfaceLevels(out, subs)
-  }
-  const { center, half } = boundsCenterHalf(out)
-  applyRoundedBoxDeform(out, center, half, params.roundness)
-  out.smoothShading = false
-  return out
+  const { center, half } = boundsCenterHalf(obj)
+  return buildRoundedBoxObject(obj, center, half, params, polyBudget)
 }
 
 export function roundedBoxFromMeshData(
@@ -136,24 +220,13 @@ export function roundedBoxFromMeshData(
   polyBudget?: number
 ): SceneObject {
   const mesh = meshDataToHalfEdgeMesh(data, color)
-  let obj = mesh.toObject('temp', 'RoundedBox', {
+  const obj = mesh.toObject('temp', 'RoundedBox', {
     color,
     polyBudget: polyBudget ?? 48,
     polyBudgetMode: 'strict',
     smoothShading: false,
   })
-
-  let subs = clampRoundedBoxSubdivisions(params.subdivisions)
-  if (polyBudget != null) {
-    subs = Math.min(subs, maxRoundedBoxSubdivisionsForBudget(polyBudget))
-  }
-  if (subs > 0) {
-    subs = Math.min(subs, maxSubdLevelsForBudget(polyBudget ?? 48, obj.positions.length))
-    obj = subdivideSurfaceLevels(obj, subs)
-  }
-
-  applyRoundedBoxDeform(obj, center, half, params.roundness)
-  return obj
+  return buildRoundedBoxObject(obj, center, half, params, polyBudget)
 }
 
 export function roundedBoxFromWorldBox(

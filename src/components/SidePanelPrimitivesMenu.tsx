@@ -3,13 +3,18 @@ import { SideButtonDropdown } from './SideButtonDropdown'
 
 const PRIMITIVE_OPTIONS: { id: PrimitiveKind; label: string }[] = [
   { id: 'box', label: 'Box' },
-  { id: 'roundedBox', label: 'Rounded Box' },
   { id: 'icosphere', label: 'Icosphere' },
   { id: 'sphere', label: 'Sphere' },
   { id: 'cone', label: 'Cone' },
   { id: 'cylinder', label: 'Cylinder' },
   { id: 'capsule', label: 'Capsule' },
   { id: 'pyramid', label: 'Pyramid' },
+  { id: 'doughnut', label: 'Doughnut' },
+  { id: 'ring', label: 'Ring' },
+  { id: 'stairs', label: 'Stairs' },
+  { id: 'star', label: 'Star' },
+  { id: 'dome', label: 'Dome' },
+  { id: 'halfCircle', label: 'Half Circle' },
 ]
 
 interface SidePanelPrimitivesMenuProps {
@@ -31,7 +36,7 @@ export function SidePanelPrimitivesMenu({
       active={primitiveToolActive && !!activePrimitiveKind}
       options={PRIMITIVE_OPTIONS.map((p) => ({ value: p.id, label: p.label }))}
       onSelect={(value) => onSelect(value as PrimitiveKind)}
-      title="Ortho: drag base in Front/Side/Top, extrude in another view. Perspective: drag footprint, scroll height, middle-click to place."
+      title="Ortho: drag base in Front/Side/Top, extrude in another view. Ring, star & half circle follow the view you start in; dome & stairs sit on the ground and rise up. Perspective: drag footprint, drag up/down or scroll height, double-click to place."
     />
   )
 }

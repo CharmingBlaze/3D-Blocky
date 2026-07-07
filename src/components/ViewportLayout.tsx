@@ -84,7 +84,10 @@ function ViewportSlot({
   slotIndex,
   view,
   isActive,
+  isHovered,
   onActivate,
+  onHover,
+  onHoverEnd,
   flex,
   layoutVisible,
   maximizedMode,
@@ -92,7 +95,10 @@ function ViewportSlot({
   slotIndex: ViewportSlotIndex
   view: ViewType
   isActive: boolean
+  isHovered: boolean
   onActivate: () => void
+  onHover: () => void
+  onHoverEnd: () => void
   flex?: number
   layoutVisible: boolean
   maximizedMode: boolean
@@ -107,11 +113,18 @@ function ViewportSlot({
             : undefined
           : { flex: flex ?? 1 }
       }
+      onPointerEnter={onHover}
+      onPointerLeave={(e) => {
+        const next = e.relatedTarget
+        if (next instanceof Element && next.closest('.viewport-slot')) return
+        onHoverEnd()
+      }}
     >
       <QuadViewport
         view={view}
         slotIndex={slotIndex}
         isActive={isActive}
+        isHovered={isHovered}
         onActivate={onActivate}
         layoutVisible={layoutVisible}
       />
@@ -123,7 +136,9 @@ export function ViewportLayout() {
   const {
     activeView,
     setActiveView,
-    maximizedView,
+    maximizedSlot,
+    hoveredViewportSlot,
+    setHoveredViewportSlot,
     viewportSlotViews,
     viewportColSplit,
     viewportRowSplit,
@@ -133,7 +148,9 @@ export function ViewportLayout() {
     useShallow((s) => ({
       activeView: s.activeView,
       setActiveView: s.setActiveView,
-      maximizedView: s.maximizedView,
+      maximizedSlot: s.maximizedSlot,
+      hoveredViewportSlot: s.hoveredViewportSlot,
+      setHoveredViewportSlot: s.setHoveredViewportSlot,
       viewportSlotViews: s.viewportSlotViews,
       viewportColSplit: s.viewportColSplit,
       viewportRowSplit: s.viewportRowSplit,
@@ -144,14 +161,20 @@ export function ViewportLayout() {
 
   const rowB = 1 - viewportRowSplit
   const colB = 1 - viewportColSplit
-  const maximizedSlot = maximizedView
-    ? findActiveSlot(maximizedView, viewportSlotViews)
-    : null
   const maximizedMode = maximizedSlot !== null
   const row0Visible = !maximizedMode || maximizedSlot === 0 || maximizedSlot === 1
   const row1Visible = !maximizedMode || maximizedSlot === 2 || maximizedSlot === 3
   const slotLayoutVisible = (index: ViewportSlotIndex) =>
     !maximizedMode || maximizedSlot === index
+
+  const hoverSlot = useCallback(
+    (index: ViewportSlotIndex) => setHoveredViewportSlot(index),
+    [setHoveredViewportSlot]
+  )
+  const clearHoverSlot = useCallback(
+    () => setHoveredViewportSlot(null),
+    [setHoveredViewportSlot]
+  )
 
   return (
     <div className={`viewport-layout${maximizedMode ? ' maximized' : ''}`}>
@@ -166,7 +189,10 @@ export function ViewportLayout() {
           slotIndex={0}
           view={viewportSlotViews[0]!}
           isActive={activeView === viewportSlotViews[0]}
+          isHovered={hoveredViewportSlot === 0}
           onActivate={() => setActiveView(viewportSlotViews[0]!)}
+          onHover={() => hoverSlot(0)}
+          onHoverEnd={clearHoverSlot}
           flex={viewportColSplit}
           layoutVisible={slotLayoutVisible(0)}
           maximizedMode={maximizedMode}
@@ -176,7 +202,10 @@ export function ViewportLayout() {
           slotIndex={1}
           view={viewportSlotViews[1]!}
           isActive={activeView === viewportSlotViews[1]}
+          isHovered={hoveredViewportSlot === 1}
           onActivate={() => setActiveView(viewportSlotViews[1]!)}
+          onHover={() => hoverSlot(1)}
+          onHoverEnd={clearHoverSlot}
           flex={colB}
           layoutVisible={slotLayoutVisible(1)}
           maximizedMode={maximizedMode}
@@ -196,7 +225,10 @@ export function ViewportLayout() {
           slotIndex={2}
           view={viewportSlotViews[2]!}
           isActive={activeView === viewportSlotViews[2]}
+          isHovered={hoveredViewportSlot === 2}
           onActivate={() => setActiveView(viewportSlotViews[2]!)}
+          onHover={() => hoverSlot(2)}
+          onHoverEnd={clearHoverSlot}
           flex={viewportColSplit}
           layoutVisible={slotLayoutVisible(2)}
           maximizedMode={maximizedMode}
@@ -206,7 +238,10 @@ export function ViewportLayout() {
           slotIndex={3}
           view={viewportSlotViews[3]!}
           isActive={activeView === viewportSlotViews[3]}
+          isHovered={hoveredViewportSlot === 3}
           onActivate={() => setActiveView(viewportSlotViews[3]!)}
+          onHover={() => hoverSlot(3)}
+          onHoverEnd={clearHoverSlot}
           flex={colB}
           layoutVisible={slotLayoutVisible(3)}
           maximizedMode={maximizedMode}
@@ -214,9 +249,4 @@ export function ViewportLayout() {
       </div>
     </div>
   )
-}
-
-function findActiveSlot(view: ViewType, slots: ViewType[]): ViewportSlotIndex {
-  const index = slots.findIndex((slotView) => slotView === view)
-  return (index >= 0 ? index : 0) as ViewportSlotIndex
 }

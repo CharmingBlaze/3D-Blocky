@@ -37,6 +37,12 @@ const PRIMITIVES: PrimitiveBoxType[] = [
   'cylinder',
   'capsule',
   'pyramid',
+  'doughnut',
+  'ring',
+  'stairs',
+  'star',
+  'dome',
+  'halfCircle',
 ]
 
 const dragA = { x: -20, y: -20 }
@@ -118,7 +124,8 @@ for (const view of VIEWS) {
       heightAxisForView(view),
       0xffffff,
       64,
-      { roundness: 0.25, subdivisions: 1 }
+      type === 'roundedBox' ? { roundness: 0.25, subdivisions: 1 } : undefined,
+      view
     )
     checkClosed(label, obj, false)
   }

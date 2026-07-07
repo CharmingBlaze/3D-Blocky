@@ -405,7 +405,7 @@ export function generateShapeMesh(
         a,
         b,
         color,
-        roundedBoxParams ?? { roundness: 0.25, subdivisions: 1 },
+        roundedBoxParams ?? { roundness: 0.25, subdivisions: 2 },
         polyBudget
       )
       break

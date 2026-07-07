@@ -3,6 +3,12 @@ import { localPointFromWorld, worldDeltaToLocal } from '../mesh/objectTransform'
 import { knifeCutObject } from '../mesh/meshKnife'
 import { knifeSegmentLongEnough } from '../mesh/knifeUtils'
 import {
+  applyBendToObject,
+  bendAngleFromScreenDelta,
+  bendAxisDirection,
+} from '../mesh/bendDeform'
+import { cloneSceneObject } from '../mesh/meshOps'
+import {
   findEdgeLoop,
   insertEdgeLoop,
   isValidLoopSeed,
@@ -56,6 +62,19 @@ export interface KnifeDraft {
   view: ViewType
 }
 
+export interface BendDraft {
+  objectId: string
+  axisOrigin: Vec3
+  axisEnd: Vec3 | null
+  angle: number
+  axisLocked: boolean
+  baseObject: SceneObject
+  view: ViewType
+  startClientX: number
+  startClientY: number
+  startAngle: number
+}
+
 export interface CadMeshToolsLayoutState {
   polyDrawMode: PolyDrawMode
   polyDrawDraft: PolyDrawDraft | null
@@ -65,6 +84,7 @@ export interface CadMeshToolsLayoutState {
   lastPolyDrawClickAt: number
   loopCutDraft: LoopCutDraft | null
   knifeDraft: KnifeDraft | null
+  bendDraft: BendDraft | null
 }
 
 export interface CadMeshToolsLayoutActions {
@@ -89,6 +109,12 @@ export interface CadMeshToolsLayoutActions {
   knifePointerMove: (world: Vec3) => void
   knifeCommit: (viewForward: Vec3) => void
   knifeCancel: () => void
+  bendBegin: (objectId: string, origin: Vec3, view: ViewType, clientX: number, clientY: number) => void
+  bendPointerMove: (world: Vec3 | null, clientX: number, clientY: number) => void
+  bendPointerUp: () => void
+  bendStartAngleDrag: (clientX: number, clientY: number) => void
+  bendCommit: () => void
+  bendCancel: () => void
 }
 
 export type CadMeshToolsSlice = CadMeshToolsLayoutState & CadMeshToolsLayoutActions
@@ -102,6 +128,7 @@ export const cadMeshToolsInitialState: CadMeshToolsLayoutState = {
   lastPolyDrawClickAt: 0,
   loopCutDraft: null,
   knifeDraft: null,
+  bendDraft: null,
 }
 
 type CadMeshToolsHost = CadMeshToolsLayoutState & {
@@ -112,6 +139,11 @@ type CadMeshToolsHost = CadMeshToolsLayoutState & {
   symmetryPlane: number
   updateObject: (id: string, updates: Partial<SceneObject>) => void
   commitHistory: (label: string) => boolean
+  captureUndoPoint: (label?: string) => boolean
+  replaceHistoryHead: (label?: string) => void
+  pauseHistory: () => void
+  undo: () => void
+  resumeHistory: () => void
   selectedObjectId: string | null
   selectionObjectIds: string[]
 }
@@ -396,5 +428,97 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
     },
 
     knifeCancel: () => set({ knifeDraft: null } as unknown as Partial<S>),
+
+    bendBegin: (objectId, origin, view, clientX, clientY) => {
+      const obj = get().objects.find((o) => o.id === objectId)
+      if (!obj || obj.topologyLocked) return
+      get().captureUndoPoint('Bend')
+      set({
+        bendDraft: {
+          objectId,
+          axisOrigin: { ...origin },
+          axisEnd: null,
+          angle: 0,
+          axisLocked: false,
+          baseObject: cloneSceneObject(obj),
+          view,
+          startClientX: clientX,
+          startClientY: clientY,
+          startAngle: 0,
+        },
+        activeTool: 'bend',
+      } as unknown as Partial<S>)
+    },
+
+    bendPointerMove: (world, clientX, clientY) => {
+      const { bendDraft } = get()
+      if (!bendDraft) return
+
+      const axisEnd = world ? { ...world } : bendDraft.axisEnd
+      const angle = bendDraft.axisLocked
+        ? bendDraft.startAngle + bendAngleFromScreenDelta(bendDraft.startClientY, clientY)
+        : bendAngleFromScreenDelta(bendDraft.startClientY, clientY)
+
+      const next: BendDraft = {
+        ...bendDraft,
+        axisEnd,
+        angle,
+      }
+      set({ bendDraft: next } as unknown as Partial<S>)
+
+      const obj = get().objects.find((o) => o.id === next.objectId)
+      if (!obj) return
+      const fallback = { x: 1, y: 0, z: 0 }
+      const axisDirection = bendAxisDirection(next.axisOrigin, next.axisEnd, fallback)
+      const positions = applyBendToObject(next.baseObject, {
+        axisOrigin: next.axisOrigin,
+        axisDirection,
+        angle: next.angle,
+      })
+      get().updateObject(obj.id, { positions })
+    },
+
+    bendPointerUp: () => {
+      const { bendDraft } = get()
+      if (!bendDraft || bendDraft.axisLocked) return
+      set({
+        bendDraft: {
+          ...bendDraft,
+          axisLocked: true,
+          startClientX: bendDraft.startClientX,
+          startClientY: bendDraft.startClientY,
+          startAngle: bendDraft.angle,
+        },
+      } as unknown as Partial<S>)
+    },
+
+    bendStartAngleDrag: (clientX, clientY) => {
+      const { bendDraft } = get()
+      if (!bendDraft?.axisLocked) return
+      set({
+        bendDraft: {
+          ...bendDraft,
+          startClientX: clientX,
+          startClientY: clientY,
+          startAngle: bendDraft.angle,
+        },
+      } as unknown as Partial<S>)
+    },
+
+    bendCommit: () => {
+      const { bendDraft } = get()
+      if (!bendDraft) return
+      get().replaceHistoryHead('Bend')
+      set({ bendDraft: null } as unknown as Partial<S>)
+    },
+
+    bendCancel: () => {
+      const { bendDraft } = get()
+      if (!bendDraft) return
+      get().pauseHistory()
+      get().undo()
+      get().resumeHistory()
+      set({ bendDraft: null } as unknown as Partial<S>)
+    },
   }
 }
