@@ -47,7 +47,6 @@ import { type UvUnwrapMethod } from '../uv/uvUnwrap'
 import type { Uv2 } from '../uv/uvTypes'
 import { UvEditorToolbar } from './uv/UvEditorToolbar'
 
-const CHECKER = 16
 const HANDLE_SIZE = 7
 const ROTATE_HANDLE_RADIUS = 7
 const ROTATE_HANDLE_OFFSET = 28
@@ -82,6 +81,9 @@ type UvDragKind = 'pan' | 'marquee' | 'handle' | 'faceDrag' | 'faceRotate' | 'fa
 
 import { useTheme } from '../theme/useTheme'
 
+let checkerPattern: CanvasPattern | null = null
+let checkerPatternColors = ''
+
 function drawChecker(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -89,12 +91,29 @@ function drawChecker(
   gridA: string,
   gridB: string
 ) {
-  for (let y = 0; y < h; y += CHECKER) {
-    for (let x = 0; x < w; x += CHECKER) {
-      const odd = ((x / CHECKER) | 0) + ((y / CHECKER) | 0)
-      ctx.fillStyle = odd % 2 === 0 ? gridA : gridB
-      ctx.fillRect(x, y, CHECKER, CHECKER)
+  const colorKey = `${gridA}-${gridB}`
+  if (!checkerPattern || checkerPatternColors !== colorKey) {
+    const offscreen = document.createElement('canvas')
+    offscreen.width = 32
+    offscreen.height = 32
+    const octx = offscreen.getContext('2d')
+    if (octx) {
+      octx.fillStyle = gridA
+      octx.fillRect(0, 0, 32, 32)
+      octx.fillStyle = gridB
+      octx.fillRect(0, 0, 16, 16)
+      octx.fillRect(16, 16, 16, 16)
+      checkerPattern = ctx.createPattern(offscreen, 'repeat')
+      checkerPatternColors = colorKey
     }
+  }
+
+  if (checkerPattern) {
+    ctx.fillStyle = checkerPattern
+    ctx.fillRect(0, 0, w, h)
+  } else {
+    ctx.fillStyle = gridA
+    ctx.fillRect(0, 0, w, h)
   }
 }
 
@@ -850,20 +869,19 @@ export function UVEditorPanel() {
     if (resolveUvMappingMode(ensured) === 'perFace') {
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'
       ctx.lineWidth = 1.25 / viewZoom
+      ctx.beginPath()
       for (let c = 1; c < BLOCKBENCH_ATLAS_COLS; c++) {
         const x = (c * texW) / BLOCKBENCH_ATLAS_COLS
-        ctx.beginPath()
         ctx.moveTo(x, 0)
         ctx.lineTo(x, texH)
-        ctx.stroke()
       }
       for (let r = 1; r < BLOCKBENCH_ATLAS_ROWS; r++) {
         const y = (r * texH) / BLOCKBENCH_ATLAS_ROWS
-        ctx.beginPath()
         ctx.moveTo(0, y)
         ctx.lineTo(texW, y)
-        ctx.stroke()
       }
+      ctx.stroke()
+
       ctx.fillStyle = 'rgba(255,255,255,0.28)'
       ctx.font = `${Math.max(9, 11 / viewZoom)}px system-ui, sans-serif`
       ctx.textAlign = 'center'
@@ -879,16 +897,14 @@ export function UVEditorPanel() {
       ctx.lineWidth = 1 / viewZoom
       const stepX = texW / uvEditorGridDivisions
       const stepY = texH / uvEditorGridDivisions
+      ctx.beginPath()
       for (let i = 0; i <= uvEditorGridDivisions; i++) {
-        ctx.beginPath()
         ctx.moveTo(i * stepX, 0)
         ctx.lineTo(i * stepX, texH)
-        ctx.stroke()
-        ctx.beginPath()
         ctx.moveTo(0, i * stepY)
         ctx.lineTo(texW, i * stepY)
-        ctx.stroke()
       }
+      ctx.stroke()
     }
 
     ctx.strokeStyle = theme.accent
@@ -946,32 +962,32 @@ export function UVEditorPanel() {
           drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
         }
       } else {
+        ctx.beginPath()
         for (const fi of visibleFaceIndices) {
           const pts = getFacePixels(fi)
           if (pts.length < 3) continue
-          ctx.beginPath()
           ctx.moveTo(pts[0].x, pts[0].y)
           for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
           ctx.closePath()
-          ctx.fillStyle = 'rgba(255,255,255,0.03)'
-          ctx.fill()
-          ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-          ctx.stroke()
         }
-      }
-    } else {
-      for (const fi of visibleFaceIndices) {
-        const pts = getFacePixels(fi)
-        if (pts.length < 3) continue
-        ctx.beginPath()
-        ctx.moveTo(pts[0].x, pts[0].y)
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
-        ctx.closePath()
         ctx.fillStyle = 'rgba(255,255,255,0.03)'
         ctx.fill()
         ctx.strokeStyle = 'rgba(255,255,255,0.18)'
         ctx.stroke()
       }
+    } else {
+      ctx.beginPath()
+      for (const fi of visibleFaceIndices) {
+        const pts = getFacePixels(fi)
+        if (pts.length < 3) continue
+        ctx.moveTo(pts[0].x, pts[0].y)
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+        ctx.closePath()
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.03)'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+      ctx.stroke()
     }
 
     if (uvEditorMode === 'points') {
@@ -2157,6 +2173,9 @@ export function UVEditorPanel() {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onMouseDown={(e) => {
+              if (e.button === 1) e.preventDefault()
+            }}
             onPointerLeave={(e) => {
               if (dragRef.current?.kind === 'pan') {
                 onPointerUp(e)
