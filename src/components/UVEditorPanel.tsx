@@ -195,9 +195,10 @@ function drawRegionBoundary(
   strokeStyle: string,
   lineWidth: number,
   texW: number,
-  texH: number
+  texH: number,
+  precomputedEdges?: [number, number][]
 ) {
-  const edges = boundaryEdgesForFacesSpatial(obj, faceIndices)
+  const edges = precomputedEdges ?? boundaryEdgesForFacesSpatial(obj, faceIndices)
   if (edges.length === 0) return
   ctx.beginPath()
   for (const [va, vb] of edges) {
@@ -486,6 +487,20 @@ export function UVEditorPanel() {
     }
     return regionFacesForEdit
   }, [ensured, uvEditorViewAll, regionFacesForEdit])
+
+  const groupBoundaryEdges = useMemo(() => {
+    const map = new Map<number, [number, number][]>()
+    if (!obj || !faceGroupMap) return map
+    for (const group of faceGroupMap.groups) {
+      map.set(group.id, boundaryEdgesForFacesSpatial(obj, group.faceIndices))
+    }
+    return map
+  }, [obj, faceGroupMap])
+
+  const isolatedBoundaryEdges = useMemo(() => {
+    if (!obj || !isolatedFaceView) return null
+    return boundaryEdgesForFacesSpatial(obj, regionFacesForEdit)
+  }, [obj, isolatedFaceView, regionFacesForEdit])
 
   const clearAllUvSelection = useCallback(() => {
     setUvEditorSelectedPoints([])
@@ -935,7 +950,8 @@ export function UVEditorPanel() {
           theme.accent,
           2.25 / viewZoom,
           texW,
-          texH
+          texH,
+          isolatedBoundaryEdges ?? undefined
         )
       } else if (faceGroupMap) {
         for (const group of faceGroupMap.groups) {
@@ -959,7 +975,17 @@ export function UVEditorPanel() {
           }
 
           drawRegionFill(ctx, ensured, uvs, group.faceIndices, fill, texW, texH)
-          drawRegionBoundary(ctx, ensured, uvs, group.faceIndices, stroke, strokeW, texW, texH)
+          drawRegionBoundary(
+            ctx,
+            ensured,
+            uvs,
+            group.faceIndices,
+            stroke,
+            strokeW,
+            texW,
+            texH,
+            groupBoundaryEdges.get(group.id)
+          )
         }
       } else {
         ctx.beginPath()
