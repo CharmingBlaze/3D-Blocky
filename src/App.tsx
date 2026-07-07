@@ -352,6 +352,14 @@ export default function App() {
         }
       }
 
+      if ((e.key === 'a' || e.key === 'A') && !ctrlOrMeta && !e.altKey && !e.shiftKey) {
+        if (!useAppStore.getState().uvEditorOpen) {
+          e.preventDefault()
+          useAppStore.getState().toggleSelectAll()
+          return
+        }
+      }
+
       if (e.key === 'q' || e.key === 'Q') setSelectionMode('object')
       if (e.key === 'w' || e.key === 'W') setActiveTool('move')
       if (e.key === 'e' || e.key === 'E') setActiveTool('rotate')

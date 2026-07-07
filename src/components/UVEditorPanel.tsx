@@ -1893,9 +1893,30 @@ export function UVEditorPanel() {
           e.preventDefault()
           unwrapSelectedUvFaces(unwrapMethod)
         }
-        if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey) && objectId && uvEditorMode === 'faces') {
+        if (e.code === 'KeyA' && !e.altKey && !e.shiftKey) {
           e.preventDefault()
-          selectUvFaces(objectId, allFaceIndices)
+          if (e.ctrlKey || e.metaKey) {
+            if (objectId) {
+              if (uvEditorMode === 'faces') selectUvFaces(objectId, allFaceIndices)
+              else setUvEditorSelectedPoints(getUvs().map((_, i) => i))
+            }
+          } else {
+            if (objectId) {
+              if (uvEditorMode === 'faces') {
+                if (uvEditorSelectedFaces.length > 0) {
+                  selectUvFaces(objectId, [])
+                } else {
+                  selectUvFaces(objectId, allFaceIndices)
+                }
+              } else {
+                if (uvEditorSelectedPoints.length > 0) {
+                  setUvEditorSelectedPoints([])
+                } else {
+                  setUvEditorSelectedPoints(getUvs().map((_, i) => i))
+                }
+              }
+            }
+          }
         }
         if (
           objectId &&
@@ -1934,6 +1955,8 @@ export function UVEditorPanel() {
     selectUvFaces,
     unwrapSelectedUvFaces,
     unwrapMethod,
+    getUvs,
+    setUvEditorSelectedPoints,
   ])
 
   const onImport = async () => {

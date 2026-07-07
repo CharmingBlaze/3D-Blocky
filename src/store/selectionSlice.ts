@@ -61,6 +61,7 @@ export interface SelectionLayoutActions {
   clearMeshSelection: () => void
   selectAllInMode: () => void
   deselectAllInMode: () => void
+  toggleSelectAll: () => void
   deleteSelection: () => void
   setMeshHover: (hit: MeshPickHit | null) => void
   translateMeshSelection: (deltaWorld: Vec3, basePositions: Record<number, Vec3>) => void
@@ -436,6 +437,22 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
         get().clearSelection()
       } else {
         get().clearMeshSelection()
+      }
+    },
+
+    toggleSelectAll: () => {
+      const { selectionMode, selectionObjectIds, meshSelection } = get()
+      let hasSelection = false
+      if (selectionMode === 'object') {
+        hasSelection = selectionObjectIds.length > 0
+      } else {
+        hasSelection = meshSelection !== null && selectionHasComponents(meshSelection)
+      }
+
+      if (hasSelection) {
+        get().deselectAllInMode()
+      } else {
+        get().selectAllInMode()
       }
     },
 
