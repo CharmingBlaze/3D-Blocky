@@ -363,17 +363,20 @@ export function extrudeValueFromScreenDelta(
 export function modalValueFromMouseDelta(
   op: MeshModalOpKind,
   dx: number,
-  dy: number
+  dy: number,
+  shiftKey = false
 ): number {
+  const sensitivityScale = shiftKey ? 0.15 : 1.0
   switch (op) {
     case 'extrude':
-      return extrudeValueFromScreenDelta(dx, dy)
+      return extrudeValueFromScreenDelta(dx, dy, 0.15 * sensitivityScale)
     case 'bevel':
-      return dy * 0.04
+      return dy * 0.04 * sensitivityScale
     case 'rotate':
-      return dx * 0.012
+      return dx * 0.012 * sensitivityScale
     case 'scale':
-      return Math.max(0.01, 1 + dy * 0.008)
+      const dyScaled = dy * 0.008 * sensitivityScale
+      return Math.max(0.01, 1 + dyScaled)
   }
 }
 

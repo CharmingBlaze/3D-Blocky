@@ -33,9 +33,10 @@ export function MeshModalController() {
     if (!activeModal) return
 
     const onMove = (e: PointerEvent) => {
-      if (meshModal) updateMeshModalFromPointer(e.clientX, e.clientY)
-      else if (objectTransformModal) {
-        updateObjectTransformModalFromPointer(e.clientX, e.clientY)
+      if (meshModal) {
+        updateMeshModalFromPointer(e.clientX, e.clientY, e.shiftKey, e.ctrlKey)
+      } else if (objectTransformModal) {
+        updateObjectTransformModalFromPointer(e.clientX, e.clientY, e.shiftKey, e.ctrlKey)
       }
     }
 

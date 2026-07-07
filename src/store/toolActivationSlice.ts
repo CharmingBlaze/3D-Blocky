@@ -94,13 +94,13 @@ export interface ToolActivationLayoutActions {
   activateSelectTool: () => void
   setToolCategory: (cat: ToolCategory) => void
   beginMeshModal: (op: MeshModalOp, clientX: number, clientY: number) => void
-  updateMeshModalFromPointer: (clientX: number, clientY: number) => void
+  updateMeshModalFromPointer: (clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   adjustMeshModalWheel: (deltaY: number) => void
   confirmMeshModal: () => void
   cancelMeshModal: () => void
   applyMeshModalPreview: () => void
   beginObjectTransformModal: (op: ObjectTransformModalOp, clientX: number, clientY: number) => void
-  updateObjectTransformModalFromPointer: (clientX: number, clientY: number) => void
+  updateObjectTransformModalFromPointer: (clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   adjustObjectTransformModalWheel: (deltaY: number) => void
   confirmObjectTransformModal: () => void
   cancelObjectTransformModal: () => void
@@ -392,15 +392,25 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       store().applyMeshModalPreview()
     },
 
-    updateMeshModalFromPointer: (clientX, clientY) => {
+    updateMeshModalFromPointer: (clientX, clientY, shiftKey = false, ctrlKey = false) => {
       const modal = store().meshModal
       if (!modal) return
 
-      const value = modalValueFromMouseDelta(
-        modal.op,
-        clientX - modal.startClientX,
-        modal.startClientY - clientY
-      )
+      const dx = clientX - modal.startClientX
+      const dy = modal.startClientY - clientY
+
+      let value = modalValueFromMouseDelta(modal.op, dx, dy, shiftKey)
+
+      if (ctrlKey) {
+        if (modal.op === 'extrude' || modal.op === 'bevel') {
+          value = Math.round(value / 0.25) * 0.25
+        } else if (modal.op === 'rotate') {
+          const step = 15 * Math.PI / 180
+          value = Math.round(value / step) * step
+        } else if (modal.op === 'scale') {
+          value = Math.round(value / 0.1) * 0.1
+        }
+      }
 
       setPartial({ meshModal: { ...modal, value } })
       store().applyMeshModalPreview()
@@ -484,15 +494,23 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       store().applyObjectTransformModalPreview()
     },
 
-    updateObjectTransformModalFromPointer: (clientX, clientY) => {
+    updateObjectTransformModalFromPointer: (clientX, clientY, shiftKey = false, ctrlKey = false) => {
       const modal = store().objectTransformModal
       if (!modal) return
 
-      const value = modalValueFromMouseDelta(
-        modal.op,
-        clientX - modal.startClientX,
-        modal.startClientY - clientY
-      )
+      const dx = clientX - modal.startClientX
+      const dy = modal.startClientY - clientY
+
+      let value = modalValueFromMouseDelta(modal.op, dx, dy, shiftKey)
+
+      if (ctrlKey) {
+        if (modal.op === 'rotate') {
+          const step = 15 * Math.PI / 180
+          value = Math.round(value / step) * step
+        } else if (modal.op === 'scale') {
+          value = Math.round(value / 0.1) * 0.1
+        }
+      }
 
       setPartial({ objectTransformModal: { ...modal, value } })
       store().applyObjectTransformModalPreview()
