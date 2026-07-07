@@ -116,7 +116,7 @@ export function PixelEditorPanel() {
   const obj = useAppStore((s) => (objectId ? s.objects.find((o) => o.id === objectId) : null))
   const mat = obj ? resolveEffectiveMaterial(obj) : null
   const canPaintOnModel = Boolean(
-    mat?.mode === 'texture' && store.docId && mat.textureId === store.docId
+    mat?.mode === 'texture' && store.docId && (mat.textureId ?? obj?.id) === store.docId
   )
 
   const canvasRef = useRef<HTMLCanvasElement>(null)

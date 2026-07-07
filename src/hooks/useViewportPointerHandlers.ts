@@ -673,7 +673,7 @@ export function useViewportPointerHandlers({
         if (hit) {
           const hitObj = objects.find((o) => o.id === hit.objectId)
           const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
-          const docId = mat?.textureId
+          const docId = mat?.textureId ?? hitObj?.id
           const doc = docId ? store.pixelDocuments[docId] : undefined
           if (mat?.mode === 'texture' && docId && doc && store.pixelEditorDocId && docId === store.pixelEditorDocId) {
             e.currentTarget.setPointerCapture(e.pointerId)
@@ -1177,7 +1177,8 @@ export function useViewportPointerHandlers({
               if (!h) continue
               const hitObj = objects.find((o) => o.id === h.objectId)
               const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
-              if (mat?.textureId !== paint.docId) continue
+              const docId = mat?.textureId ?? hitObj?.id
+              if (docId !== paint.docId) continue
               points.push(uvToPixelCoords(h.uv, doc.width, doc.height))
             }
             if (points.length >= 2) store.paintOnModelStroke(paint.docId, points)

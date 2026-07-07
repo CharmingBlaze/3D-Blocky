@@ -165,6 +165,26 @@ function dedupeConsecutivePoints(points: Vec2[], epsilon = 0.01): Vec2[] {
   return out
 }
 
+function cleanupDrawnPoints(points: Vec2[], minDistance = 2.0): Vec2[] {
+  if (points.length < 2) return points
+  const result: Vec2[] = [points[0]!]
+  for (let i = 1; i < points.length - 1; i++) {
+    const p = points[i]!
+    const last = result[result.length - 1]!
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= minDistance) {
+      result.push(p)
+    }
+  }
+  const lastRaw = points[points.length - 1]!
+  const lastResult = result[result.length - 1]!
+  if (Math.hypot(lastRaw.x - lastResult.x, lastRaw.y - lastResult.y) >= 0.5) {
+    result.push(lastRaw)
+  } else {
+    result[result.length - 1] = lastRaw
+  }
+  return result
+}
+
 export interface PrepareSketchStrokeOptions {
   preserveDetail?: boolean
   pathClosed?: boolean
@@ -182,8 +202,12 @@ export function prepareSketchStroke(
 ): PreparedSketch | null {
   if (points.length < 2) return null
 
+  const minCleanDist = options.preserveDetail ? 0.8 : 2.0
+  const cleaned = cleanupDrawnPoints(points, minCleanDist)
+  if (cleaned.length < 2) return null
+
   if (options.preserveDetail) {
-    let work = dedupeConsecutivePoints(points)
+    let work = dedupeConsecutivePoints(cleaned)
     const threshold = closeThreshold * 2.5
     let isClosed = options.pathClosed === true || classifyStroke(work, threshold) === 'closed'
     if (isClosed && work.length >= 3) {
@@ -203,7 +227,7 @@ export function prepareSketchStroke(
     }
   }
 
-  const snapped = snapSketchStrokeClosed(points, closeThreshold)
+  const snapped = snapSketchStrokeClosed(cleaned, closeThreshold)
   const threshold = effectiveCloseThreshold(snapped, closeThreshold) * 2.5
   let isClosed = classifyStroke(snapped, threshold) === 'closed'
 

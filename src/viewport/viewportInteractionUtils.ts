@@ -145,7 +145,8 @@ export function pickPixelOnTexturedMesh(
   if (!hit) return null
   const hitObj = objects.find((o) => o.id === hit.objectId)
   const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
-  if (mat?.textureId !== docId) return null
+  const effectiveDocId = mat?.textureId ?? hitObj?.id
+  if (effectiveDocId !== docId) return null
   return uvToPixelCoords(hit.uv, docW, docH)
 }
 

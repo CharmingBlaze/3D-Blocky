@@ -43,34 +43,43 @@ export function resampleUniformClosed(points: Vec2[], spacing: number): Vec2[] {
   }
   if (perimeter < minSpacing) return verts
 
-  const sampleCount = Math.max(n, Math.ceil(perimeter / minSpacing))
+  const sampleCount = Math.max(8, Math.round(perimeter / minSpacing))
+  const stepLen = perimeter / sampleCount
   const result: Vec2[] = []
 
-  for (let s = 0; s < sampleCount; s++) {
-    const target = (s * perimeter) / sampleCount
-    let accum = 0
-    for (let i = 0; i < n; i++) {
-      const len = edgeLen[i]!
-      if (accum + len >= target - 1e-9 || i === n - 1) {
-        const t = len > 1e-8 ? clamp01((target - accum) / len) : 0
-        const a = verts[i]!
-        const b = verts[(i + 1) % n]!
-        result.push({
-          x: a.x + (b.x - a.x) * t,
-          y: a.y + (b.y - a.y) * t,
-        })
-        break
-      }
-      accum += len
-    }
-  }
+  let currEdgeIdx = 0
+  let currEdgePos = 0
 
-  if (result.length > 2) {
-    const first = result[0]!
-    const last = result[result.length - 1]!
-    if (dist2(first, last) < minSpacing * 0.25) {
-      result.pop()
+  for (let s = 0; s < sampleCount; s++) {
+    const targetDist = s * stepLen
+    let accum = 0
+    for (let j = 0; j < currEdgeIdx; j++) {
+      accum += edgeLen[j]!
     }
+    accum += currEdgePos
+
+    let needed = targetDist - accum
+    while (needed > 1e-9) {
+      const len = edgeLen[currEdgeIdx]!
+      const remainingOnEdge = len - currEdgePos
+      if (needed <= remainingOnEdge) {
+        currEdgePos += needed
+        needed = 0
+      } else {
+        needed -= remainingOnEdge
+        currEdgeIdx = (currEdgeIdx + 1) % n
+        currEdgePos = 0
+      }
+    }
+
+    const a = verts[currEdgeIdx]!
+    const b = verts[(currEdgeIdx + 1) % n]!
+    const len = edgeLen[currEdgeIdx]!
+    const t = len > 1e-8 ? clamp01(currEdgePos / len) : 0
+    result.push({
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+    })
   }
 
   return result
