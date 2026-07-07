@@ -804,6 +804,92 @@ export function UVEditorPanel() {
     })
   }, [texW, texH, setPan, setZoom])
 
+  // Custom Overlay Scrollbar calculations
+  const cw = canvasSizeRef.current.w || 600
+  const ch = canvasSizeRef.current.h || 600
+
+  const xMinVisible = -pan.x / zoom
+  const xMaxVisible = (cw - pan.x) / zoom
+  const yMinVisible = -pan.y / zoom
+  const yMaxVisible = (ch - pan.y) / zoom
+
+  const docX0 = -texW * 0.5
+  const docX1 = texW * 1.5
+  const docY0 = -texH * 0.5
+  const docY1 = texH * 1.5
+
+  const minDocX = Math.min(docX0, xMinVisible)
+  const maxDocX = Math.max(docX1, xMaxVisible)
+  const minDocY = Math.min(docY0, yMinVisible)
+  const maxDocY = Math.max(docY1, yMaxVisible)
+
+  const spanX = Math.max(maxDocX - minDocX, 1)
+  const spanY = Math.max(maxDocY - minDocY, 1)
+  const viewW = cw / zoom
+  const viewH = ch / zoom
+
+  const trackW = cw - 16
+  const thumbRatioX = Math.min(1, viewW / spanX)
+  const thumbW = Math.max(24, trackW * thumbRatioX)
+  const posRatioX = spanX - viewW > 0 ? (xMinVisible - minDocX) / (spanX - viewW) : 0
+  const thumbX = (trackW - thumbW) * posRatioX
+
+  const trackH = ch - 16
+  const thumbRatioY = Math.min(1, viewH / spanY)
+  const thumbHSize = Math.max(24, trackH * thumbRatioY)
+  const posRatioY = spanY - viewH > 0 ? (yMinVisible - minDocY) / (spanY - viewH) : 0
+  const thumbY = (trackH - thumbHSize) * posRatioY
+
+  const handleScrollHMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startClientX = e.clientX
+    const startPanX = pan.x
+
+    const currentZoom = zoom
+    const currentPanY = pan.y
+    const ratio = (spanX - viewW) / Math.max(1, trackW - thumbW)
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startClientX
+      const nextPanX = startPanX - dx * ratio * currentZoom
+      setUvEditorView(currentZoom, nextPanX, currentPanY)
+    }
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [pan.x, pan.y, zoom, spanX, viewW, trackW, thumbW, setUvEditorView])
+
+  const handleScrollVMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startClientY = e.clientY
+    const startPanY = pan.y
+
+    const currentZoom = zoom
+    const currentPanX = pan.x
+    const ratio = (spanY - viewH) / Math.max(1, trackH - thumbHSize)
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const dy = moveEvent.clientY - startClientY
+      const nextPanY = startPanY - dy * ratio * currentZoom
+      setUvEditorView(currentZoom, currentPanX, nextPanY)
+    }
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [pan.x, pan.y, zoom, spanY, viewH, trackH, thumbHSize, setUvEditorView])
+
   const getViewPanZoom = useCallback(() => {
     const live = liveViewRef.current
     if (live) return live
@@ -1562,46 +1648,6 @@ export function UVEditorPanel() {
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || e.button === 2) {
       e.preventDefault()
-      const dragButton = e.button
-      liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
-      dragRef.current = {
-        kind: 'pan',
-        panX: pan.x,
-        panY: pan.y,
-        startClientX: e.clientX,
-        startClientY: e.clientY,
-      }
-      setHoverCursor('grabbing')
-
-      const onWindowMouseMove = (moveEvent: MouseEvent) => {
-        const d = dragRef.current
-        if (d && d.kind === 'pan' && d.panX !== undefined && d.startClientX !== undefined) {
-          const dx = moveEvent.clientX - d.startClientX
-          const dy = moveEvent.clientY - (d.startClientY ?? 0)
-          liveViewRef.current = {
-            panX: d.panX + dx,
-            panY: (d.panY ?? 0) + dy,
-            zoom,
-          }
-          applyPanPreview()
-        }
-      }
-
-      const onWindowMouseUp = (upEvent: MouseEvent) => {
-        if (upEvent.button === dragButton) {
-          window.removeEventListener('mousemove', onWindowMouseMove)
-          window.removeEventListener('mouseup', onWindowMouseUp)
-          commitLiveView()
-          setHoverCursor('crosshair')
-          if (dragRef.current?.kind === 'pan') {
-            dragRef.current = null
-          }
-          scheduleRedraw()
-        }
-      }
-
-      window.addEventListener('mousemove', onWindowMouseMove)
-      window.addEventListener('mouseup', onWindowMouseUp)
     }
   }
 
@@ -1630,7 +1676,7 @@ export function UVEditorPanel() {
       return
     }
 
-    if (e.button === 1 || (e.button === 0 && spacePan)) {
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && spacePan)) {
       e.preventDefault()
       liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
       dragRef.current = {
@@ -2325,6 +2371,84 @@ export function UVEditorPanel() {
           >
             <canvas ref={canvasRef} className="uv-editor-canvas" />
             {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
+
+            {/* Horizontal Scrollbar */}
+            {thumbRatioX < 1 && (
+              <div
+                className="uv-scrollbar uv-scrollbar-horizontal"
+                style={{
+                  position: 'absolute',
+                  left: '2px',
+                  bottom: '2px',
+                  width: `${trackW}px`,
+                  height: '8px',
+                  background: 'rgba(0, 0, 0, 0.15)',
+                  borderRadius: '4px',
+                  zIndex: 10,
+                }}
+              >
+                <div
+                  className="uv-scrollbar-thumb"
+                  onMouseDown={handleScrollHMouseDown}
+                  style={{
+                    position: 'absolute',
+                    left: `${thumbX}px`,
+                    top: '1px',
+                    width: `${thumbW}px`,
+                    height: '6px',
+                    background: 'rgba(255, 255, 255, 0.25)',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.45)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Vertical Scrollbar */}
+            {thumbRatioY < 1 && (
+              <div
+                className="uv-scrollbar uv-scrollbar-vertical"
+                style={{
+                  position: 'absolute',
+                  right: '2px',
+                  top: '2px',
+                  width: '8px',
+                  height: `${trackH}px`,
+                  background: 'rgba(0, 0, 0, 0.15)',
+                  borderRadius: '4px',
+                  zIndex: 10,
+                }}
+              >
+                <div
+                  className="uv-scrollbar-thumb"
+                  onMouseDown={handleScrollVMouseDown}
+                  style={{
+                    position: 'absolute',
+                    top: `${thumbY}px`,
+                    left: '1px',
+                    width: '6px',
+                    height: `${thumbHSize}px`,
+                    background: 'rgba(255, 255, 255, 0.25)',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.45)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="uv-editor-precision">
