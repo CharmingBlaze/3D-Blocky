@@ -53,7 +53,7 @@ const ROTATE_HANDLE_OFFSET = 28
 const RESIZE_HANDLE_SIZE = 6
 const MIN_ZOOM = 0.06
 const MAX_ZOOM = 32
-const DRAG_THRESHOLD_PX = 4
+const DRAG_THRESHOLD_PX = 1
 const AUTO_FIT_MIN_VISIBLE_PX = 8
 
 function isBboxVisibleInViewport(
@@ -291,6 +291,7 @@ export function UVEditorPanel() {
     panY?: number
     marquee?: { x0: number; y0: number; x1: number; y1: number }
     additive?: boolean
+    faces?: number[]
   } | null>(null)
 
   const draftUvsRef = useRef<Uv2[] | null>(null)
@@ -1453,7 +1454,7 @@ export function UVEditorPanel() {
     d.kind = d.activeKind
     captureUndoPoint('Edit UV')
 
-    const editFaces = regionFacesForEditRef.current
+    const editFaces = d.faces ?? regionFacesForEditRef.current
     const transformMesh =
       d.activeKind === 'faceDrag' ||
       d.activeKind === 'faceRotate' ||
@@ -1559,8 +1560,9 @@ export function UVEditorPanel() {
   )
 
   const onMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1) {
+    if (e.button === 1 || e.button === 2) {
       e.preventDefault()
+      const dragButton = e.button
       liveViewRef.current = { panX: pan.x, panY: pan.y, zoom }
       dragRef.current = {
         kind: 'pan',
@@ -1586,7 +1588,7 @@ export function UVEditorPanel() {
       }
 
       const onWindowMouseUp = (upEvent: MouseEvent) => {
-        if (upEvent.button === 1) {
+        if (upEvent.button === dragButton) {
           window.removeEventListener('mousemove', onWindowMouseMove)
           window.removeEventListener('mouseup', onWindowMouseUp)
           commitLiveView()
@@ -1728,7 +1730,8 @@ export function UVEditorPanel() {
           px.x,
           px.y,
           e.clientX,
-          e.clientY
+          e.clientY,
+          { faces: [...regionFacesForEdit] }
         )
         capturePointer = true
       }
@@ -1747,7 +1750,8 @@ export function UVEditorPanel() {
           px.x,
           px.y,
           e.clientX,
-          e.clientY
+          e.clientY,
+          { faces: nextFaces }
         )
         capturePointer = true
       } else if (!e.shiftKey) {
@@ -2054,20 +2058,16 @@ export function UVEditorPanel() {
       e.preventDefault()
       const factor = e.deltaY > 0 ? 0.9 : 1.1
       const px = screenToUvPixel(e.clientX, e.clientY)
-      setZoom((z) => {
-        const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor))
-        const rect = canvasRef.current!.getBoundingClientRect()
-        setPan({
-          x: e.clientX - rect.left - px.x * nz,
-          y: e.clientY - rect.top - px.y * nz,
-        })
-        return nz
-      })
+      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor))
+      const rect = canvasRef.current!.getBoundingClientRect()
+      const nx = e.clientX - rect.left - px.x * nz
+      const ny = e.clientY - rect.top - px.y * nz
+      setUvEditorView(nz, nx, ny)
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [uvEditorOpen, screenToUvPixel, setZoom, setPan])
+  }, [uvEditorOpen, screenToUvPixel, zoom, setUvEditorView])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2297,6 +2297,7 @@ export function UVEditorPanel() {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onMouseDown={onMouseDown}
+            onContextMenu={(e) => e.preventDefault()}
             onPointerLeave={(e) => {
               if (dragRef.current?.kind === 'pan') {
                 onPointerUp(e)
