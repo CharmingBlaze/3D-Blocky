@@ -167,7 +167,9 @@ export function extrudeMeshSelection(
   }
 
   for (const fi of faceSet) {
-    faces[fi] = faces[fi].map((vi) => oldToNew.get(vi)!)
+    const topFace = faces[fi].map((vi) => oldToNew.get(vi)!)
+    faces.push(topFace)
+    faceColors.push(faceColors[fi] ?? obj.color)
   }
 
   const sideColor = faceColors[[...faceSet][0]] ?? obj.color
