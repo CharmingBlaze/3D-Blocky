@@ -1,4 +1,4 @@
-import { useEffect, useCallback, lazy, Suspense, useState } from 'react'
+import { useEffect, useCallback, lazy, Suspense, useState, useRef } from 'react'
 import './App.css'
 import { subscribeGraphicsNotice } from './rendering/webglContextNotice'
 import { ViewportLayout } from './components/ViewportLayout'
@@ -78,6 +78,16 @@ export default function App() {
   const [graphicsNotice, setGraphicsNotice] = useState<string | null>(null)
 
   useEffect(() => subscribeGraphicsNotice(setGraphicsNotice), [])
+
+  const lastMousePosRef = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY }
+    }
+    window.addEventListener('mousemove', handleMouseMove, true)
+    return () => window.removeEventListener('mousemove', handleMouseMove, true)
+  }, [])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -302,8 +312,8 @@ export default function App() {
             e.preventDefault()
             state.beginObjectTransformModal(
               'rotate',
-              window.innerWidth / 2,
-              window.innerHeight / 2
+              lastMousePosRef.current.x,
+              lastMousePosRef.current.y
             )
             return
           }
@@ -311,8 +321,8 @@ export default function App() {
             e.preventDefault()
             state.beginObjectTransformModal(
               'scale',
-              window.innerWidth / 2,
-              window.innerHeight / 2
+              lastMousePosRef.current.x,
+              lastMousePosRef.current.y
             )
             return
           }
@@ -321,22 +331,22 @@ export default function App() {
         if (hasMeshComponents) {
           if (e.key === 'e' || e.key === 'E') {
             e.preventDefault()
-            state.beginMeshModal('extrude', window.innerWidth / 2, window.innerHeight / 2)
+            state.beginMeshModal('extrude', lastMousePosRef.current.x, lastMousePosRef.current.y)
             return
           }
           if (e.key === 'r' || e.key === 'R') {
             e.preventDefault()
-            state.beginMeshModal('rotate', window.innerWidth / 2, window.innerHeight / 2)
+            state.beginMeshModal('rotate', lastMousePosRef.current.x, lastMousePosRef.current.y)
             return
           }
           if (e.key === 's' || e.key === 'S') {
             e.preventDefault()
-            state.beginMeshModal('scale', window.innerWidth / 2, window.innerHeight / 2)
+            state.beginMeshModal('scale', lastMousePosRef.current.x, lastMousePosRef.current.y)
             return
           }
           if (e.key === 'b' || e.key === 'B') {
             e.preventDefault()
-            state.beginMeshModal('bevel', window.innerWidth / 2, window.innerHeight / 2)
+            state.beginMeshModal('bevel', lastMousePosRef.current.x, lastMousePosRef.current.y)
             return
           }
         }
