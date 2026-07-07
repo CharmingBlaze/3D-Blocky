@@ -190,7 +190,6 @@ export function useViewportPointerHandlers({
     bendPointerUp,
     bendStartAngleDrag,
     bendCommit,
-    bendCancel,
     imageDropMode,
     dropImageInView,
     selectReferenceImage,
@@ -253,7 +252,6 @@ export function useViewportPointerHandlers({
       bendPointerUp: s.bendPointerUp,
       bendStartAngleDrag: s.bendStartAngleDrag,
       bendCommit: s.bendCommit,
-      bendCancel: s.bendCancel,
       imageDropMode: s.imageDropMode,
       dropImageInView: s.dropImageInView,
       selectReferenceImage: s.selectReferenceImage,
@@ -1396,7 +1394,7 @@ export function useViewportPointerHandlers({
 
       if (store.activeTool === 'bend' && store.bendDraft) {
         if (!store.bendDraft.axisLocked) {
-          store.bendPointerUp()
+          bendPointerUp()
         }
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId)

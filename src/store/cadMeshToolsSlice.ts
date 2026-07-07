@@ -450,7 +450,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       } as unknown as Partial<S>)
     },
 
-    bendPointerMove: (world, clientX, clientY) => {
+    bendPointerMove: (world, _clientX, clientY) => {
       const { bendDraft } = get()
       if (!bendDraft) return
 
