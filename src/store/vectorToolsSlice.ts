@@ -245,16 +245,21 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         lastPenClickAt,
       } = store()
 
+      let pt = { ...point }
+      const draft = vectorPenDraft?.view === view ? vectorPenDraft : null
+
       const now = performance.now()
-      if (vectorPenDraft?.view === view && now - lastPenClickAt < 320) {
+      if (
+        draft &&
+        draft.anchors.length >= 1 &&
+        now - lastPenClickAt < 320 &&
+        isNearPoint(pt, draft.anchors[draft.anchors.length - 1].position, closeThreshold * 1.5)
+      ) {
         store().penFinishPath()
         setPartial({ lastPenClickAt: 0 })
         return
       }
       setPartial({ lastPenClickAt: now })
-
-      let pt = { ...point }
-      const draft = vectorPenDraft?.view === view ? vectorPenDraft : null
 
       if (draft && draft.anchors.length >= 3 && draft.pendingAnchorIndex === null) {
         const first = draft.anchors[0].position
