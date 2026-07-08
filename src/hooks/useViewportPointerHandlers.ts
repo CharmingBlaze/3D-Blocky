@@ -790,6 +790,7 @@ export function useViewportPointerHandlers({
 
         if (
           activeTool === 'move' &&
+          !e.shiftKey &&
           selectionHasComponents(store.meshSelection)
         ) {
           const obj = store.objects.find((o) => o.id === store.meshSelection!.objectId)
