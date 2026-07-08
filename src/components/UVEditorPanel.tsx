@@ -563,7 +563,7 @@ export function UVEditorPanel() {
   )
 
   const collectFaceUvIndices = useCallback(
-    (faceIndices: number[], source: SceneObjectWithUVs | null = ensured) => {
+    (faceIndices: number[], source: SceneObjectWithUVs | null = ensuredRef.current ?? ensured) => {
       if (!source) return []
       const set = new Set<number>()
       for (const fi of faceIndices) {
@@ -581,6 +581,7 @@ export function UVEditorPanel() {
       updateObject(objectId, {
         uvs: detached.uvs,
         faceUvIndices: detached.faceUvIndices,
+        uvAutoPacked: true,
       })
       ensuredRef.current = detached
       return detached
@@ -590,8 +591,9 @@ export function UVEditorPanel() {
 
   const getSelectionPivotUv = useCallback(
     (faceIndices: number[]) => {
-      if (!ensured) return { u: 0.5, v: 0.5 }
-      const uvIndices = collectFaceUvIndices(faceIndices)
+      const mesh = ensuredRef.current ?? ensured
+      if (!mesh) return { u: 0.5, v: 0.5 }
+      const uvIndices = collectFaceUvIndices(faceIndices, mesh)
       if (uvIndices.length === 0) return { u: 0.5, v: 0.5 }
       return uvBoundsCenter(uvBoundsFromIndices(getUvs(), uvIndices))
     },
