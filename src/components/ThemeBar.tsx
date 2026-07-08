@@ -1,7 +1,7 @@
 import { useAppStore } from '../store/appStore'
 import { THEMES, getTheme, type ThemeGroup, type ThemeId } from '../theme/themes'
 
-const THEME_GROUPS: ThemeGroup[] = ['Classic', 'Game Systems']
+const THEME_GROUPS: ThemeGroup[] = ['Classic', 'Game Systems', 'Operating Systems']
 
 export function ThemePicker() {
   const themeId = useAppStore((s) => s.themeId)
