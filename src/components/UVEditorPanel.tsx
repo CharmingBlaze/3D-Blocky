@@ -1816,7 +1816,8 @@ export function UVEditorPanel() {
     } else if (!objectId || !ensured) {
       return
     } else {
-    const now = Date.now()
+      e.preventDefault()
+      const now = Date.now()
     if (
       e.button === 0 &&
       !e.ctrlKey &&
@@ -2044,6 +2045,7 @@ export function UVEditorPanel() {
       updateHoverAt(e.clientX, e.clientY)
       return
     }
+    e.preventDefault()
 
     if (d.kind === 'pending' && d.startClientX !== undefined && d.startClientY !== undefined) {
       const dist = Math.hypot(e.clientX - d.startClientX, e.clientY - d.startClientY)

@@ -498,3 +498,62 @@ export function mergeVertices(
     mergedVertexIndex,
   }
 }
+
+/** Duplicate selected faces with reversed winding to make them double-sided, sharing UVs. */
+export function makeSelectionDoubleSided(
+  obj: SceneObject,
+  selection: MeshComponentSelection | null,
+  mode: SelectionMode
+): SceneObject {
+  if (!selection) return cloneSceneObject(obj)
+
+  let faceSet: Set<number>
+  if (mode === 'face' && selection.faces.length > 0) {
+    faceSet = new Set(selection.faces)
+  } else if (mode === 'edge' && selection.edges.length > 0) {
+    faceSet = collectFacesForSelection(obj, selection, 'edge')
+  } else if (mode === 'vertex' && selection.vertices.length > 0) {
+    faceSet = collectFacesForSelection(obj, selection, 'vertex')
+  } else {
+    faceSet = new Set(obj.faces.map((_, i) => i))
+  }
+
+  if (faceSet.size === 0) return cloneSceneObject(obj)
+
+  const newFaces = [...obj.faces]
+  const newFaceUvIndices = obj.faceUvIndices ? [...obj.faceUvIndices] : undefined
+  const newFaceColors = obj.faceColors ? [...obj.faceColors] : undefined
+  const newFaceGroups = obj.faceGroups ? [...obj.faceGroups] : undefined
+
+  // For each face in the set, duplicate it with reversed winding
+  const n = obj.faces.length
+  for (let fi = 0; fi < n; fi++) {
+    if (faceSet.has(fi)) {
+      const origFace = obj.faces[fi]
+      const revFace = [...origFace].reverse()
+      newFaces.push(revFace)
+
+      if (newFaceColors && obj.faceColors?.[fi]) {
+        newFaceColors.push(obj.faceColors[fi])
+      }
+      if (newFaceGroups && obj.faceGroups?.[fi] !== undefined) {
+        newFaceGroups.push(obj.faceGroups[fi])
+      }
+
+      if (newFaceUvIndices && obj.faceUvIndices?.[fi]) {
+        const origUv = obj.faceUvIndices[fi]
+        const revUv = [...origUv].reverse()
+        newFaceUvIndices.push(revUv)
+      }
+    }
+  }
+
+  return {
+    ...obj,
+    faces: newFaces,
+    faceColors: newFaceColors ?? obj.faceColors,
+    faceGroups: newFaceGroups ?? obj.faceGroups,
+    faceUvIndices: newFaceUvIndices,
+  }
+}
+

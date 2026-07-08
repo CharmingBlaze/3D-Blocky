@@ -280,6 +280,7 @@ export function SidePanel() {
     polyDrawSnapAllScene,
     setPolyDrawSnapAllScene,
     flipSelectedNormals,
+    makeSelectedDoubleSided,
     transformSelectionInViewPlane,
     subdivideSelected,
     toggleSubDSelected,
@@ -391,6 +392,7 @@ export function SidePanel() {
       polyDrawSnapAllScene: s.polyDrawSnapAllScene,
       setPolyDrawSnapAllScene: s.setPolyDrawSnapAllScene,
       flipSelectedNormals: s.flipSelectedNormals,
+      makeSelectedDoubleSided: s.makeSelectedDoubleSided,
       transformSelectionInViewPlane: s.transformSelectionInViewPlane,
       subdivideSelected: s.subdivideSelected,
       toggleSubDSelected: s.toggleSubDSelected,
@@ -1059,6 +1061,18 @@ export function SidePanel() {
                 title="Flip normals on selected faces (F when not creating from vertices)"
               >
                 Flip Normals
+              </button>
+              <button
+                className="side-btn"
+                onClick={makeSelectedDoubleSided}
+                disabled={
+                  selectionMode === 'object' ||
+                  !selectionHasComponents(meshSelection) ||
+                  !!selectedObj?.topologyLocked
+                }
+                title="Duplicate selected faces with reversed normals and identical UV coordinates to make them double-sided"
+              >
+                Double Sided
               </button>
               <button
                 className="side-btn"

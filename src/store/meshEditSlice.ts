@@ -2,6 +2,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { appendFaceFromVertexIndices } from '../mesh/meshEdit'
 import {
   flipSelectionNormals,
+  makeSelectionDoubleSided,
   mergeVertices,
   subdivideObject,
 } from '../mesh/meshTopologyOps'
@@ -11,7 +12,6 @@ import {
 } from '../mesh/subdivisionSurface'
 import {
   enforceSceneObjectPolyBudget,
-  maxSubdLevelsForBudget,
 } from '../mesh/meshPolyBudget'
 import {
   getAffectedVertices,
@@ -37,6 +37,7 @@ export interface MeshEditLayoutActions {
   mergeSelectedVertices: (indices?: number[]) => void
   setVertexMergeModifierHeld: (held: boolean) => void
   flipSelectedNormals: () => void
+  makeSelectedDoubleSided: () => void
   transformSelectionInViewPlane: (op: SelectionPlaneTransformOp) => void
   subdivideSelected: () => void
   toggleSubDSelected: () => void
@@ -156,6 +157,21 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
       store().updateObject(obj.id, { faces: flipped.faces })
       store().commitHistory('Flip normals')
+    },
+
+    makeSelectedDoubleSided: () => {
+      const { meshSelection, objects, selectionMode } = store()
+      if (!meshSelection || selectionMode === 'object') return
+      const obj = objects.find((o) => o.id === meshSelection.objectId)
+      if (!obj || obj.topologyLocked) return
+      const updated = makeSelectionDoubleSided(obj, meshSelection, selectionMode)
+      store().updateObject(obj.id, {
+        faces: updated.faces,
+        faceUvIndices: updated.faceUvIndices,
+        faceColors: updated.faceColors,
+        faceGroups: updated.faceGroups,
+      })
+      store().commitHistory('Make double sided')
     },
 
     transformSelectionInViewPlane: (op) => {
@@ -312,12 +328,7 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
           const requested = o.subdEnabled ? (o.subdLevels ?? 0) : 0
           if (requested <= 0) return o
           const budget = o.polyBudget ?? polyBudget
-          const levels = Math.min(
-            requested,
-            maxSubdLevelsForBudget(budget, o.positions.length)
-          )
-          if (levels <= 0) return o
-          const baked = subdivideSurfaceLevels(o, levels)
+          const baked = subdivideSurfaceLevels(o, requested)
           return enforceSceneObjectPolyBudget(
             {
               ...baked,
