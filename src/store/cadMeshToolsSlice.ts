@@ -266,6 +266,17 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         result.removedIds.length === 0 && !objects.some((o) => o.id === result.primaryId)
       let nextObjects = result.objects
 
+      const facesToSelect = Array.from(
+        { length: result.newFaceCount },
+        (_, i) => result.newFaceStartIndex + i
+      )
+      const meshSelection = {
+        objectId: result.primaryId,
+        vertices: [],
+        edges: [],
+        faces: facesToSelect,
+      }
+
       if (symmetryEnabled && isNewObject) {
         const primary = nextObjects.find((o) => o.id === result.primaryId)
         if (primary) {
@@ -281,6 +292,10 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
               faceStartIndex: result.newFaceStartIndex,
               faceCount: result.newFaceCount,
             },
+            selectionMode: 'face',
+            activeTool: 'select-face',
+            toolCategory: 'select',
+            meshSelection,
           } as unknown as Partial<S>)
           get().commitHistory('Poly draw')
           return
@@ -297,6 +312,10 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           faceStartIndex: result.newFaceStartIndex,
           faceCount: result.newFaceCount,
         },
+        selectionMode: 'face',
+        activeTool: 'select-face',
+        toolCategory: 'select',
+        meshSelection,
       } as unknown as Partial<S>)
       get().commitHistory('Poly draw')
     },
