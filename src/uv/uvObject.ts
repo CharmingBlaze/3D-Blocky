@@ -50,6 +50,9 @@ export function autoUnwrapObject(obj: SceneObject): SceneObjectWithUVs {
 }
 
 export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
+  if (obj.uvAutoPacked && obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length) {
+    return obj as SceneObjectWithUVs
+  }
   if (needsDoodleUvRepack(obj)) {
     const base = ensureUvTopology(obj)
     const allFaces = base.faces.map((_, i) => i)
