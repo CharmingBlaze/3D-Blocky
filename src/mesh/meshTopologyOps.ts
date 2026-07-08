@@ -6,7 +6,7 @@ import {
 } from './meshSelection'
 import type { SelectionMode } from '../store/appStore'
 import { cloneSceneObject } from './meshOps'
-import type { Vec3 } from '../utils/math'
+import { type Vec3, faceNormal, sub3, dot3 } from '../utils/math'
 import { remapFaceGroupsAfterReplace, splitFaceGroupsAfterCut } from './faceGroups'
 
 export function removeUnreferencedVertices(obj: SceneObject): SceneObject {
@@ -78,7 +78,90 @@ export function flipSelectionNormals(
   }
 
   const faces = obj.faces.map((f, fi) => (faceSet.has(fi) ? [...f].reverse() : [...f]))
-  return { ...obj, faces }
+  let faceUvIndices = obj.faceUvIndices
+  if (faceUvIndices?.length === obj.faces.length) {
+    faceUvIndices = faceUvIndices.map((f, fi) => (faceSet.has(fi) ? [...f].reverse() : [...f]))
+  }
+  return { ...obj, faces, faceUvIndices }
+}
+
+/** Make all selected faces of the object face outward. If no selection, makes all faces of the object face outward. */
+export function makeSelectionOutward(
+  obj: SceneObject,
+  selection: MeshComponentSelection | null,
+  mode: SelectionMode
+): SceneObject {
+  if (obj.positions.length === 0) return cloneSceneObject(obj)
+
+  // 1. Calculate centroid of the object's vertices (reference point)
+  let cx = 0, cy = 0, cz = 0
+  for (const p of obj.positions) {
+    cx += p.x
+    cy += p.y
+    cz += p.z
+  }
+  const center = {
+    x: cx / obj.positions.length,
+    y: cy / obj.positions.length,
+    z: cz / obj.positions.length,
+  }
+
+  // 2. Identify which faces we are modifying
+  let faceSet: Set<number>
+  if (selection && selection.objectId === obj.id) {
+    if (mode === 'face' && selection.faces.length > 0) {
+      faceSet = new Set(selection.faces)
+    } else if (mode === 'edge' && selection.edges.length > 0) {
+      faceSet = collectFacesForSelection(obj, selection, 'edge')
+    } else if (mode === 'vertex' && selection.vertices.length > 0) {
+      faceSet = collectFacesForSelection(obj, selection, 'vertex')
+    } else {
+      faceSet = new Set(obj.faces.map((_, i) => i))
+    }
+  } else {
+    faceSet = new Set(obj.faces.map((_, i) => i))
+  }
+
+  // 3. For each face, if it is in our modify set, calculate normal and centroid.
+  // If dot(normal, faceCentroid - center) < 0, reverse the winding order!
+  const flippedFaces = new Set<number>()
+  const faces = obj.faces.map((face, fi) => {
+    if (!faceSet.has(fi) || face.length < 3) return [...face]
+
+    const a = obj.positions[face[0]]
+    const b = obj.positions[face[1]]
+    const c = obj.positions[face[2]]
+    const n = faceNormal(a, b, c)
+
+    let fx = 0, fy = 0, fz = 0
+    for (const vi of face) {
+      const p = obj.positions[vi]
+      fx += p.x
+      fy += p.y
+      fz += p.z
+    }
+    const faceCenter = {
+      x: fx / face.length,
+      y: fy / face.length,
+      z: fz / face.length,
+    }
+
+    const dir = sub3(faceCenter, center)
+    const dot = dot3(n, dir)
+
+    if (dot < -1e-5) {
+      flippedFaces.add(fi)
+      return [...face].reverse()
+    }
+    return [...face]
+  })
+
+  let faceUvIndices = obj.faceUvIndices
+  if (faceUvIndices?.length === obj.faces.length) {
+    faceUvIndices = faceUvIndices.map((f, fi) => (flippedFaces.has(fi) ? [...f].reverse() : [...f]))
+  }
+
+  return { ...obj, faces, faceUvIndices }
 }
 
 /** Split edge a-b at parameter t, inserting a new vertex into all incident face loops. */

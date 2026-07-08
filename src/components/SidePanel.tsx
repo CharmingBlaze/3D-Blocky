@@ -280,6 +280,7 @@ export function SidePanel() {
     polyDrawSnapAllScene,
     setPolyDrawSnapAllScene,
     flipSelectedNormals,
+    recalculateOutwardNormals,
     makeSelectedDoubleSided,
     transformSelectionInViewPlane,
     subdivideSelected,
@@ -392,6 +393,7 @@ export function SidePanel() {
       polyDrawSnapAllScene: s.polyDrawSnapAllScene,
       setPolyDrawSnapAllScene: s.setPolyDrawSnapAllScene,
       flipSelectedNormals: s.flipSelectedNormals,
+      recalculateOutwardNormals: s.recalculateOutwardNormals,
       makeSelectedDoubleSided: s.makeSelectedDoubleSided,
       transformSelectionInViewPlane: s.transformSelectionInViewPlane,
       subdivideSelected: s.subdivideSelected,
@@ -1061,6 +1063,14 @@ export function SidePanel() {
                 title="Flip normals on selected faces (F when not creating from vertices)"
               >
                 Flip Normals
+              </button>
+              <button
+                className="side-btn"
+                onClick={recalculateOutwardNormals}
+                disabled={!selectedObj || !!selectedObj.topologyLocked}
+                title="Recalculate winding order to make selected faces (or all faces if nothing selected) face outward"
+              >
+                Recalc Outward
               </button>
               <button
                 className="side-btn"

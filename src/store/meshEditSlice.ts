@@ -3,6 +3,7 @@ import { appendFaceFromVertexIndices } from '../mesh/meshEdit'
 import {
   flipSelectionNormals,
   makeSelectionDoubleSided,
+  makeSelectionOutward,
   mergeVertices,
   subdivideObject,
 } from '../mesh/meshTopologyOps'
@@ -37,6 +38,7 @@ export interface MeshEditLayoutActions {
   mergeSelectedVertices: (indices?: number[]) => void
   setVertexMergeModifierHeld: (held: boolean) => void
   flipSelectedNormals: () => void
+  recalculateOutwardNormals: () => void
   makeSelectedDoubleSided: () => void
   transformSelectionInViewPlane: (op: SelectionPlaneTransformOp) => void
   subdivideSelected: () => void
@@ -155,8 +157,34 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       const obj = objects.find((o) => o.id === meshSelection.objectId)
       if (!obj || obj.topologyLocked) return
       const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
-      store().updateObject(obj.id, { faces: flipped.faces })
+      store().updateObject(obj.id, { faces: flipped.faces, faceUvIndices: flipped.faceUvIndices })
       store().commitHistory('Flip normals')
+    },
+
+    recalculateOutwardNormals: () => {
+      const { meshSelection, objects, selectionMode, selectedObjectId } = store()
+      const targetId =
+        selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
+          ? meshSelection.objectId
+          : selectedObjectId
+
+      if (!targetId) return
+      const obj = objects.find((o) => o.id === targetId)
+      if (!obj || obj.topologyLocked) return
+
+      const updated = makeSelectionOutward(
+        obj,
+        selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
+          ? meshSelection
+          : null,
+        selectionMode
+      )
+
+      store().updateObject(obj.id, {
+        faces: updated.faces,
+        faceUvIndices: updated.faceUvIndices,
+      })
+      store().commitHistory('Recalculate outward normals')
     },
 
     makeSelectedDoubleSided: () => {
