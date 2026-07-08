@@ -14,7 +14,6 @@ import { pickOpenFile } from '../io/fileDialogs'
 import { PROJECT_FILE_FILTERS } from '../io/download'
 import { importSceneFromFile } from '../io/sceneImport'
 import type { SceneSnapshot } from '../history/sceneHistory'
-import { emptySceneSnapshot } from './historySlice'
 import type {
   BillboardImage,
   ReferenceImage,
@@ -108,17 +107,7 @@ export function createProjectIoSlice<T extends object>(
     },
 
     newProject: () => {
-      const empty = emptySceneSnapshot()
-      deps.resetHistory(empty)
-      deps.restoreScene(empty, {
-        resetEditors: true,
-        extra: {
-          pixelDocuments: {},
-          objectTextures: {},
-          referenceImages: [],
-          billboardImages: [],
-        },
-      })
+      window.location.reload()
     },
 
     saveProject: async () => {
