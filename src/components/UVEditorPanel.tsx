@@ -577,7 +577,6 @@ export function UVEditorPanel() {
   const prepareFaceTransformMesh = useCallback(
     (faceIndices: number[]): SceneObjectWithUVs | null => {
       if (!obj || !objectId || !ensured) return null
-      if (uvEditorSticky) return ensured
       const detached = detachFacesUvTopology(obj, faceIndices)
       updateObject(objectId, {
         uvs: detached.uvs,
@@ -586,7 +585,7 @@ export function UVEditorPanel() {
       ensuredRef.current = detached
       return detached
     },
-    [obj, objectId, ensured, uvEditorSticky, updateObject]
+    [obj, objectId, ensured, updateObject]
   )
 
   const getSelectionPivotUv = useCallback(
@@ -627,14 +626,6 @@ export function UVEditorPanel() {
       return { x: box.cx, y: box.minY - offset }
     },
     [getSelectionBBoxPx, zoom]
-  )
-
-  const getSelectionBoundsUv = useCallback(
-    (faceIndices: number[]) => {
-      const uvIndices = collectFaceUvIndices(faceIndices)
-      return uvBoundsFromIndices(getUvs(), uvIndices)
-    },
-    [collectFaceUvIndices, getUvs]
   )
 
   const pickResizeHandle = useCallback(
@@ -1876,7 +1867,7 @@ export function UVEditorPanel() {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
-        const startBounds = getSelectionBoundsUv(regionFacesForEdit)
+        const startBounds = uvBoundsFromIndices(mesh.uvs, uvIndices)
         const pivotUv = getScalePivotForHandle(startBounds, resize)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
         ensuredRef.current = mesh
@@ -1897,7 +1888,7 @@ export function UVEditorPanel() {
         captureUndoPoint('Edit UV')
         const mesh = prepareFaceTransformMesh(regionFacesForEdit) ?? ensured
         const uvIndices = collectFaceUvIndices(regionFacesForEdit, mesh)
-        const pivotUv = getSelectionPivotUv(regionFacesForEdit)
+        const pivotUv = uvBoundsCenter(uvBoundsFromIndices(mesh.uvs, uvIndices))
         const startUv = pixelToUv(px.x, px.y, texW, texH)
         const startAngle = Math.atan2(startUv.v - pivotUv.v, startUv.u - pivotUv.u)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
