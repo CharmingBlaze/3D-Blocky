@@ -226,6 +226,8 @@ export function useViewportPointerHandlers({
       penPointerDown: s.penPointerDown,
       penPointerMove: s.penPointerMove,
       penPointerUp: s.penPointerUp,
+      penFinishPath: s.penFinishPath,
+      vectorPenDraft: s.vectorPenDraft,
       primitiveBoxPointerDown: s.primitiveBoxPointerDown,
       primitiveBoxPointerMove: s.primitiveBoxPointerMove,
       primitiveBoxPointerUp: s.primitiveBoxPointerUp,
@@ -639,6 +641,17 @@ export function useViewportPointerHandlers({
       if (e.button === 0) beginPointerInteraction()
 
       const store = useAppStore.getState()
+      if (
+        e.button === 1 &&
+        store.activeTool === 'vector-pen' &&
+        store.vectorPenDraft
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        store.penFinishPath()
+        return
+      }
+
       if (
         e.button === 1 &&
         store.activeTool === 'primitive-box' &&
@@ -1326,7 +1339,7 @@ export function useViewportPointerHandlers({
         store.vectorPenDraft?.view === view
       ) {
         const pt = getPlanePoint(e)
-        if (pt) penPointerMove(pt)
+        if (pt) penPointerMove(pt, { altKey: e.altKey })
         return
       }
 

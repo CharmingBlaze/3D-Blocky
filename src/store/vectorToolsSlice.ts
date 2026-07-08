@@ -11,6 +11,7 @@ import {
   finalizePendingAnchor,
   applySmoothHandles,
   isNearPoint,
+  mirrorHandle,
 } from '../vector/penTool'
 import { vectorShapeToObject } from '../mesh/lowPolyPrimitives'
 import {
@@ -70,6 +71,11 @@ export interface VectorPenDraft {
   pendingAnchorIndex: number | null
   continuePathId: string | null
   closeTargetActive: boolean
+  editDrag?: {
+    type: 'anchor' | 'inHandle' | 'outHandle'
+    index: number
+    startPoint: { x: number; y: number }
+  }
 }
 
 export interface VectorToolsLayoutState {
@@ -92,7 +98,7 @@ export interface VectorToolsLayoutActions {
   continueVectorStroke: (point: { x: number; y: number }) => void
   endVectorStroke: (view: ViewType) => void
   penPointerDown: (point: { x: number; y: number }, view: ViewType) => void
-  penPointerMove: (point: { x: number; y: number }) => void
+  penPointerMove: (point: { x: number; y: number }, options?: { altKey?: boolean }) => void
   penPointerUp: (point: { x: number; y: number }, options?: { altKey?: boolean }) => void
   penFinishPath: () => void
   penCancelPath: () => void
@@ -258,6 +264,46 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         }
       }
 
+      if (draft) {
+        const threshold = closeThreshold * 1.5
+        // Check handles of all anchors
+        for (let i = 0; i < draft.anchors.length; i++) {
+          const a = draft.anchors[i]
+          if (a.inHandle && isNearPoint(pt, a.inHandle, threshold)) {
+            setPartial({
+              vectorPenDraft: {
+                ...draft,
+                editDrag: { type: 'inHandle', index: i, startPoint: { ...pt } },
+              },
+            })
+            return
+          }
+          if (a.outHandle && isNearPoint(pt, a.outHandle, threshold)) {
+            setPartial({
+              vectorPenDraft: {
+                ...draft,
+                editDrag: { type: 'outHandle', index: i, startPoint: { ...pt } },
+              },
+            })
+            return
+          }
+        }
+        // Check positions of all anchors (index 0 is already handled by close check above if length >= 3)
+        for (let i = 0; i < draft.anchors.length; i++) {
+          if (draft.anchors.length >= 3 && i === 0) continue
+          const a = draft.anchors[i]
+          if (isNearPoint(pt, a.position, threshold)) {
+            setPartial({
+              vectorPenDraft: {
+                ...draft,
+                editDrag: { type: 'anchor', index: i, startPoint: { ...pt } },
+              },
+            })
+            return
+          }
+        }
+      }
+
       if (!draft) {
         let anchors = [createAnchor(pt, generateId())]
         let continuePathId: string | null = null
@@ -354,9 +400,54 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       })
     },
 
-    penPointerMove: (point) => {
+    penPointerMove: (point, options) => {
       const { vectorPenDraft, closeThreshold } = store()
       if (!vectorPenDraft) return
+
+      if (vectorPenDraft.editDrag) {
+        const { type, index } = vectorPenDraft.editDrag
+        const anchors = vectorPenDraft.anchors.map((a) => ({
+          ...a,
+          position: { ...a.position },
+          inHandle: a.inHandle ? { ...a.inHandle } : null,
+          outHandle: a.outHandle ? { ...a.outHandle } : null,
+        }))
+        const anchor = anchors[index]
+        if (anchor) {
+          if (type === 'anchor') {
+            const dx = point.x - anchor.position.x
+            const dy = point.y - anchor.position.y
+            anchor.position.x = point.x
+            anchor.position.y = point.y
+            if (anchor.inHandle) {
+              anchor.inHandle.x += dx
+              anchor.inHandle.y += dy
+            }
+            if (anchor.outHandle) {
+              anchor.outHandle.x += dx
+              anchor.outHandle.y += dy
+            }
+          } else if (type === 'inHandle') {
+            anchor.inHandle = { ...point }
+            if (!options?.altKey && anchor.outHandle) {
+              anchor.outHandle = mirrorHandle(anchor.position, point)
+            }
+          } else if (type === 'outHandle') {
+            anchor.outHandle = { ...point }
+            if (!options?.altKey && anchor.inHandle) {
+              anchor.inHandle = mirrorHandle(anchor.position, point)
+            }
+          }
+        }
+        setPartial({
+          vectorPenDraft: {
+            ...vectorPenDraft,
+            anchors,
+            previewPoint: point,
+          },
+        })
+        return
+      }
 
       const closeTargetActive =
         vectorPenDraft.anchors.length >= 3 &&
@@ -386,7 +477,19 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
 
     penPointerUp: (point, options) => {
       const { vectorPenDraft } = store()
-      if (!vectorPenDraft || vectorPenDraft.pendingAnchorIndex === null) {
+      if (!vectorPenDraft) return
+
+      if (vectorPenDraft.editDrag) {
+        setPartial({
+          vectorPenDraft: {
+            ...vectorPenDraft,
+            editDrag: undefined,
+          },
+        })
+        return
+      }
+
+      if (vectorPenDraft.pendingAnchorIndex === null) {
         if (vectorPenDraft) {
           setPartial({ vectorPenDraft: { ...vectorPenDraft, previewPoint: point } })
         }
