@@ -6,7 +6,6 @@ import { planeToStroke3D } from '../utils/screenToWorld'
 import { sampleAnchors, handleSegments } from '../vector/bezier'
 import type { VectorAnchor } from '../vector/types'
 import type { VectorPenDraft } from '../store/appStore'
-import { ExtrudePreviewMesh } from './ExtrudePreviewMesh'
 import { useTheme } from '../theme/useTheme'
 
 interface PenThemeColors {
@@ -64,11 +63,11 @@ function AnchorSquare({
         <meshBasicMaterial
           color={closeTarget ? colors.closeTargetFill : colors.anchorFill}
           transparent
-          opacity={closeTarget ? 0.85 : 0.95}
+          opacity={closeTarget ? 0.35 : 0.95}
         />
       </mesh>
       <lineSegments geometry={edgesGeo}>
-        <lineBasicMaterial color={color} />
+        <lineBasicMaterial color={color} linewidth={closeTarget ? 2 : 1} />
       </lineSegments>
     </Billboard>
   )
@@ -180,54 +179,56 @@ export function PenVisuals({
     handleDot: theme.accent,
     closeRing: theme.accentGreen,
     fillPreview: theme.accent,
-    closeTargetFill: theme.bgDark,
+    // Light green fill — black looked like the path broke
+    closeTargetFill: theme.accentGreen,
   }
 
   const curvePoints = useMemo(() => {
-    const pts = sampleAnchors(draft.anchors, false, 0.35, draft.previewPoint)
+    // While hovering the start point, keep an OPEN sample with preview snapped to
+    // first so the rubber-band stays visible. Straight closed segments were getting
+    // popped in sampleAnchors, which made the connect line vanish.
+    const closed = draft.closed
+    const preview = closed
+      ? null
+      : draft.closeTargetActive && draft.anchors[0]
+        ? draft.anchors[0].position
+        : draft.previewPoint
+    const pts = sampleAnchors(draft.anchors, closed, 0.35, preview)
+    if (closed && pts.length >= 2) {
+      const first = pts[0]!
+      const last = pts[pts.length - 1]!
+      if (Math.hypot(first.x - last.x, first.y - last.y) > 0.01) {
+        pts.push({ ...first })
+      }
+    }
     return pts.map((p) => {
       const w = planeToStroke3D(p.x, p.y, view, depth)
       return [w.x, w.y, w.z] as [number, number, number]
     })
   }, [draft, view, depth])
 
-  const previewPath = useMemo(() => {
-    if (draft.anchors.length < 2) return []
-    return sampleAnchors(
-      draft.anchors,
-      draft.closeTargetActive,
-      0.35,
-      draft.previewPoint
-    )
-  }, [draft.anchors, draft.closeTargetActive, draft.previewPoint])
-
   const handleLines = useMemo(() => handleSegments(draft.anchors), [draft.anchors])
   const pendingIndex = draft.pendingAnchorIndex
 
-  const previewClosed =
-    draft.closeTargetActive || (strokeMode === 'outline' && draft.anchors.length >= 3)
-  const showExtrudePreview =
-    previewPath.length >= 2 &&
-    (extrudeMode || strokeMode === 'outline' || strokeMode === 'centerline')
+  // Keep draft 2D-only until Enter commits — no live 3D extrude mesh.
+  const showFillPreviewBlob =
+    showFillPreview && strokeMode === 'blob' && !extrudeMode && draft.anchors.length >= 3
 
   return (
     <group>
-      {showExtrudePreview && (
-        <ExtrudePreviewMesh points={previewPath} view={view} closed={previewClosed} />
-      )}
-
-      {showFillPreview && strokeMode === 'blob' && !extrudeMode && draft.anchors.length >= 3 && (
+      {showFillPreviewBlob && (
         <FillPreview
           anchors={draft.anchors}
           view={view}
           depth={depth}
-          closed={draft.closeTargetActive}
+          closed={draft.closed || draft.closeTargetActive}
           fillColor={colors.fillPreview}
         />
       )}
 
       {curvePoints.length >= 2 && (
         <Line
+          key={draft.closed ? 'pen-closed' : draft.closeTargetActive ? 'pen-closing' : 'pen-open'}
           points={curvePoints}
           color={colors.stroke}
           lineWidth={1.75}
@@ -267,7 +268,9 @@ export function PenVisuals({
             view={view}
             depth={depth}
             highlight={pendingIndex === i}
-            closeTarget={draft.closeTargetActive && i === 0 && draft.anchors.length >= 3}
+            closeTarget={
+              (draft.closed || draft.closeTargetActive) && i === 0 && draft.anchors.length >= 3
+            }
             colors={colors}
           />
         </group>

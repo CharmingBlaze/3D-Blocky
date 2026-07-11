@@ -210,12 +210,19 @@ export default function App() {
           state.confirmObjectTransformModal()
           return
         }
-        penFinishPath()
-        if (useAppStore.getState().activeTool === 'poly-draw') {
-          useAppStore.getState().polyDrawFinish()
+        if (state.vectorPenDraft) {
+          e.preventDefault()
+          penFinishPath()
+          return
         }
-        if (useAppStore.getState().loopCutDraft) {
-          useAppStore.getState().loopCutCommit()
+        if (state.activeTool === 'poly-draw') {
+          e.preventDefault()
+          state.polyDrawFinish()
+          return
+        }
+        if (state.loopCutDraft) {
+          e.preventDefault()
+          state.loopCutCommit()
         }
       }
       if (e.key === 'f' || e.key === 'F') {

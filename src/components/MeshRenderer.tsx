@@ -171,7 +171,13 @@ export const MeshRenderer = memo(function MeshRenderer({
   showDensityHeatmap,
   displayMode,
 }: MeshRendererProps) {
-  const { meshOutline, meshOutlineSecondary, accentOrange } = useTheme()
+  const {
+    meshOutline,
+    meshOutlineSecondary,
+    objectSelectOutline,
+    objectSelectOutlineSecondary,
+    accentOrange,
+  } = useTheme()
   const meshRef = useRef<THREE.Mesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const uvPatchRef = useRef({
@@ -355,7 +361,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         )}
         {objectSelectionOutline && (
           <Outlines
-            color={isPrimary ? meshOutline : meshOutlineSecondary}
+            color={isPrimary ? objectSelectOutline : objectSelectOutlineSecondary}
             thickness={2}
             screenspace
             transparent

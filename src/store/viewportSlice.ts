@@ -2,10 +2,16 @@ import type { ViewMoveBasis } from '../utils/viewNavigation'
 import type { ViewportDisplayMode } from '../rendering/viewportDisplay'
 import { DEFAULT_VIEWPORT_SLOT_VIEWS } from '../scene/viewTypes'
 import type { SelectableViewType, ViewType, ViewportSlotIndex } from '../scene/viewTypes'
+import type { ViewportFitFrame } from '../viewport/fitViewports'
 
 export interface FloatingToolbarPosition {
   x: number
   y: number
+}
+
+export interface ViewportFitRequest extends ViewportFitFrame {
+  /** Monotonic id so every viewport applies even if center/radius match a prior fit. */
+  nonce: number
 }
 
 export interface ViewportLayoutState {
@@ -27,6 +33,8 @@ export interface ViewportLayoutState {
   transformBarPosition: FloatingToolbarPosition
   showPrimitivesBar: boolean
   primitivesBarPosition: FloatingToolbarPosition
+  /** When set, each viewport resets orientation and frames this sphere. */
+  viewportFitRequest: ViewportFitRequest | null
 }
 
 export interface ViewportLayoutActions {
@@ -46,6 +54,7 @@ export interface ViewportLayoutActions {
   setTransformBarPosition: (position: FloatingToolbarPosition) => void
   setShowPrimitivesBar: (show: boolean) => void
   setPrimitivesBarPosition: (position: FloatingToolbarPosition) => void
+  requestViewportFit: (frame: ViewportFitFrame) => void
 }
 
 export type ViewportSlice = ViewportLayoutState & ViewportLayoutActions
@@ -70,6 +79,7 @@ export const viewportLayoutInitialState: ViewportLayoutState = {
   transformBarPosition: { x: 20, y: 20 },
   showPrimitivesBar: true,
   primitivesBarPosition: { x: 20, y: 72 },
+  viewportFitRequest: null,
 }
 
 export function createViewportSlice<T extends ViewportLayoutState>(
@@ -171,6 +181,18 @@ export function createViewportSlice<T extends ViewportLayoutState>(
           return s as T
         }
         return { viewMoveBasis: basis } as Partial<T>
+      }),
+
+    requestViewportFit: (frame) =>
+      set((s) => {
+        const nonce = (s.viewportFitRequest?.nonce ?? 0) + 1
+        return {
+          viewportFitRequest: {
+            nonce,
+            center: { ...frame.center },
+            radius: frame.radius,
+          },
+        } as Partial<T>
       }),
   }
 }

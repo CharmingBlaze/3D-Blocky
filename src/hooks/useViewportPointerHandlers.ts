@@ -647,17 +647,6 @@ export function useViewportPointerHandlers({
       const store = useAppStore.getState()
       if (
         e.button === 1 &&
-        store.activeTool === 'vector-pen' &&
-        store.vectorPenDraft
-      ) {
-        e.preventDefault()
-        e.stopPropagation()
-        store.penFinishPath()
-        return
-      }
-
-      if (
-        e.button === 1 &&
         store.activeTool === 'primitive-box' &&
         view === 'perspective' &&
         store.primitiveBoxDraft?.phase === 'scrollHeight' &&

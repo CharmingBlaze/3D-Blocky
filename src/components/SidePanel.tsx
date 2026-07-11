@@ -24,6 +24,8 @@ import { PrimitivesToolbarToggle } from './PrimitivesToolbar'
 import { activeExtrudeMode, activeLatheMode, activeLatheCaps } from '../stroke/drawExtrudeMode'
 import { getLatheViewHint } from '../stroke/latheProfile'
 import { SidePanelPixelEditorMenu } from './SidePanelPixelEditorMenu'
+import { resolveTargetObjectIds } from '../material/materialEditorSlice'
+import { computeSelectionFitFrame } from '../viewport/fitViewports'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
@@ -99,7 +101,9 @@ function SideSection({
           aria-controls={contentId}
         >
           <span>{title}</span>
-          <span aria-hidden>{collapsed ? '›' : '⌄'}</span>
+          <span className="side-section-chevron" aria-hidden>
+            {collapsed ? '▸' : '▾'}
+          </span>
         </button>
       ) : (
         <h2 className="side-section-title">{title}</h2>
@@ -282,6 +286,7 @@ export function SidePanel() {
     setViewportDisplayMode,
     viewportXRay,
     setViewportXRay,
+    requestViewportFit,
     setSelectionSmoothShading,
     toggleTopologyLock,
     simplifySelected,
@@ -397,6 +402,7 @@ export function SidePanel() {
       setViewportDisplayMode: s.setViewportDisplayMode,
       viewportXRay: s.viewportXRay,
       setViewportXRay: s.setViewportXRay,
+      requestViewportFit: s.requestViewportFit,
       setSelectionSmoothShading: s.setSelectionSmoothShading,
       toggleTopologyLock: s.toggleTopologyLock,
       simplifySelected: s.simplifySelected,
@@ -507,8 +513,6 @@ export function SidePanel() {
   const selectedVectorDoodle = selectedObj?.vectorSource ?? null
   const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
 
-  const showExtrudeDepth = activeExtrudeOn || isSketchOrPen || !!selectedExtrudableDoodle
-
   const isSelectTool =
     activeTool === 'select-object' ||
     activeTool === 'select-vertex' ||
@@ -557,6 +561,18 @@ export function SidePanel() {
     selectionMode === 'object'
       ? selectionCount > 0
       : selectionHasComponents(meshSelection)
+
+  const canFitViews = resolveTargetObjectIds(selectedObjectId, selectionObjectIds).some((id) => {
+    const obj = objects.find((o) => o.id === id)
+    return !!obj && obj.positions.length > 0
+  })
+
+  const handleFitViews = useCallback(() => {
+    const ids = resolveTargetObjectIds(selectedObjectId, selectionObjectIds)
+    const frame = computeSelectionFitFrame(objects, ids)
+    if (!frame) return
+    requestViewportFit(frame)
+  }, [selectedObjectId, selectionObjectIds, objects, requestViewportFit])
 
   const canPlaneTransform = (() => {
     if (activeView === 'perspective' && !viewMoveBasis) return false
@@ -688,6 +704,15 @@ export function SidePanel() {
                 Heatmap
               </button>
             </SideBtnGroup>
+            <button
+              type="button"
+              className="side-btn side-btn-wide"
+              disabled={!canFitViews}
+              onClick={handleFitViews}
+              title="Reset all viewports to their default orientation and fit them to the selected object(s)"
+            >
+              Reset & Fit
+            </button>
           </SideSection>
 
           <SideSection title="Color" order={15}>
@@ -745,6 +770,12 @@ export function SidePanel() {
                 Vector Pen
               </button>
             </SideBtnGroup>
+            {drawInputMode === 'vector-pen' && (
+              <p className="side-color-hint muted">
+                Click to add points · drag for curves · click first point to close · edit
+                anchors/handles · Enter commits to 3D · Esc cancels
+              </p>
+            )}
             <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
                 <input
@@ -857,34 +888,10 @@ export function SidePanel() {
                 <p className="side-color-hint muted">{getLatheViewHint(activeView)}</p>
               </>
             )}
-            {(showExtrudeDepth) && (
-              <>
-                <SideSlider
-                  label="Extrude depth"
-                  value={extrudeAmount}
-                  display={String(Math.round(extrudeAmount))}
-                  min={-64}
-                  max={64}
-                  step={1}
-                  onChange={setExtrudeAmount}
-                  onCommit={selectedExtrudableDoodle ? commitExtrudeDepth : undefined}
-                />
-                {selectedExtrudableDoodle && (
-                  <p className="side-color-hint muted">
-                    Adjust depth for the selected doodle in real time.
-                  </p>
-                )}
-                {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
-                  <p className="side-color-hint muted">
-                    Drag up or right to extrude farther; left or down extrudes the opposite way.
-                  </p>
-                )}
-                {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'vector-pen' && (
-                  <p className="side-color-hint muted">
-                    Set extrude depth with the slider; drawing will not change it.
-                  </p>
-                )}
-              </>
+            {selectedObj?.topologyLocked && (
+              <div className="side-chips">
+                <span className="lock-indicator">Locked</span>
+              </div>
             )}
             {strokeMode === 'blob' && (
               <SideSlider
@@ -899,8 +906,60 @@ export function SidePanel() {
             )}
           </SideSection>
 
+          {isSketchOrPen && (
+            <SideSection title="Stroke" order={11} collapsible>
+              <SideSlider
+                label="Extrude depth"
+                value={extrudeAmount}
+                display={String(Math.round(extrudeAmount))}
+                min={-64}
+                max={64}
+                step={1}
+                onChange={setExtrudeAmount}
+                onCommit={selectedExtrudableDoodle ? commitExtrudeDepth : undefined}
+              />
+              {selectedExtrudableDoodle && (
+                <p className="side-color-hint muted">
+                  Adjust depth for the selected doodle in real time.
+                </p>
+              )}
+              {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
+                <p className="side-color-hint muted">
+                  Drag up or right to extrude farther; left or down extrudes the opposite way.
+                </p>
+              )}
+              {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'vector-pen' && (
+                <p className="side-color-hint muted">
+                  Set extrude depth with the slider; drawing will not change it.
+                </p>
+              )}
+              <SideSlider
+                label="Poly budget"
+                value={polyBudget}
+                display={String(polyBudget)}
+                min={24}
+                max={256}
+                step={4}
+                warn={!!overBudget}
+                onChange={setPolyBudget}
+              />
+              <SideSlider
+                label="Brush density"
+                value={brushDensity}
+                display={String(brushDensity)}
+                min={4}
+                max={24}
+                step={1}
+                onChange={setBrushDensity}
+              />
+              <p className="side-color-hint muted">
+                Poly budget caps mesh complexity. Brush density sets stroke thickness and default inflate depth.
+              </p>
+            </SideSection>
+          )}
+
           {activeTool === 'vector-shape' && (
-            <SideSection title="Vector" order={11}>
+            <SideSection title="Vector" order={12}>
               <p className="side-color-hint muted">Drag in an ortho view to place.</p>
               {activeShapeKind === 'roundedBox' && (
                 <>
@@ -931,7 +990,7 @@ export function SidePanel() {
           )}
 
           {isSculptTool && (
-            <SideSection title="Sculpt" order={12}>
+            <SideSection title="Sculpt" order={13}>
               <SideSlider
                 label="Brush strength"
                 value={brushStrength}
@@ -1334,39 +1393,6 @@ export function SidePanel() {
                 Drops a textured mesh you can move like any object.
               </p>
             )}
-          </SideSection>
-
-          <SideSection title="Quality" order={50} collapsible defaultCollapsed>
-            <SideSlider
-              label="Poly budget"
-              value={polyBudget}
-              display={String(polyBudget)}
-              min={24}
-              max={256}
-              step={4}
-              warn={!!overBudget}
-              onChange={setPolyBudget}
-            />
-            <SideSlider
-              label="Brush density"
-              value={brushDensity}
-              display={String(brushDensity)}
-              min={4}
-              max={24}
-              step={1}
-              onChange={setBrushDensity}
-            />
-            <p className="side-color-hint muted">
-              Poly budget caps mesh complexity. Brush density sets stroke thickness and default inflate depth.
-            </p>
-            <div className="side-chips">
-              {selectedObj?.topologyLocked && <span className="lock-indicator">Locked</span>}
-              {selectedObj && (
-                <span className={`side-chip ${overBudget ? 'warn' : ''}`}>
-                  {selectedObj.positions.length}/{polyBudget}v
-                </span>
-              )}
-            </div>
           </SideSection>
 
           <SideSection title="Object actions" columns={2} order={30} collapsible defaultCollapsed>

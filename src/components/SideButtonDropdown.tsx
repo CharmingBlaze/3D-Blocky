@@ -1,9 +1,18 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react'
 
 export type SideButtonDropdownOption = {
   value: string
   label: string
   disabled?: boolean
+  /** Optional section heading shown above this option when the group changes. */
+  group?: string
 }
 
 interface SideButtonDropdownProps {
@@ -16,7 +25,13 @@ interface SideButtonDropdownProps {
   active?: boolean
   /** Keep `label` visible when idle; show `label · option` when selected. */
   alwaysShowLabel?: boolean
+  /** Optional content before the label (e.g. color swatch). */
+  leading?: ReactNode
   footer?: ReactNode
+  /** Extra class on the floating menu (e.g. scrollable theme list). */
+  menuClassName?: string
+  /** Extra class on the root wrapper. */
+  className?: string
 }
 
 export function SideButtonDropdown({
@@ -28,7 +43,10 @@ export function SideButtonDropdown({
   disabled = false,
   active = false,
   alwaysShowLabel = false,
+  leading,
   footer,
+  menuClassName,
+  className,
 }: SideButtonDropdownProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -110,7 +128,7 @@ export function SideButtonDropdown({
   }
 
   return (
-    <div className="side-button-dropdown" ref={rootRef}>
+    <div className={`side-button-dropdown${className ? ` ${className}` : ''}`} ref={rootRef}>
       <button
         type="button"
         ref={triggerRef}
@@ -122,32 +140,47 @@ export function SideButtonDropdown({
         aria-haspopup="menu"
         onKeyDown={handleTriggerKeyDown}
       >
+        {leading}
         <span className="side-btn-dropdown-label">{triggerLabel}</span>
         <span className="side-btn-dropdown-chevron" aria-hidden>
           ▾
         </span>
       </button>
       {open && (
-        <div className="side-button-dropdown-menu" role="menu" onKeyDown={handleMenuKeyDown}>
-          {options.map((opt, index) => (
-            <button
-              key={opt.value}
-              type="button"
-              ref={(element) => {
-                itemRefs.current[index] = element
-              }}
-              role="menuitem"
-              className={`side-button-dropdown-item ${opt.value === value ? 'active' : ''}`}
-              disabled={opt.disabled}
-              onClick={() => {
-                if (opt.disabled) return
-                onSelect(opt.value)
-                setOpen(false)
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div
+          className={`side-button-dropdown-menu${menuClassName ? ` ${menuClassName}` : ''}`}
+          role="menu"
+          onKeyDown={handleMenuKeyDown}
+        >
+          {options.map((opt, index) => {
+            const prevGroup = options[index - 1]?.group
+            const showGroup = Boolean(opt.group && opt.group !== prevGroup)
+            return (
+              <Fragment key={opt.value}>
+                {showGroup && (
+                  <div className="side-button-dropdown-group" role="presentation">
+                    {opt.group}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  ref={(element) => {
+                    itemRefs.current[index] = element
+                  }}
+                  role="menuitem"
+                  className={`side-button-dropdown-item ${opt.value === value ? 'active' : ''}`}
+                  disabled={opt.disabled}
+                  onClick={() => {
+                    if (opt.disabled) return
+                    onSelect(opt.value)
+                    setOpen(false)
+                  }}
+                >
+                  {opt.label}
+                </button>
+              </Fragment>
+            )
+          })}
         </div>
       )}
       {footer}

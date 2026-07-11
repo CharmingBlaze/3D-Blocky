@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useAppStore, PALETTE } from '../store/appStore'
+import { PALETTE } from '../palette/drawPalette'
+import { useAppStore } from '../store/appStore'
 
 interface PaletteBarProps {
   variant?: 'bar' | 'side'
@@ -11,6 +12,8 @@ function colorToHex(color: number): string {
 }
 
 export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
+  const [collapsed, setCollapsed] = useState(false)
+  const contentId = useId()
   const {
     activeColor,
     setActiveColor,
@@ -32,11 +35,7 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
   )
 
   const displayColor = useMemo(() => {
-    if (
-      selectionMode === 'face' &&
-      meshSelection &&
-      meshSelection.faces.length > 0
-    ) {
+    if (selectionMode === 'face' && meshSelection && meshSelection.faces.length > 0) {
       const obj = objects.find((o) => o.id === meshSelection.objectId)
       if (obj) {
         const fi = meshSelection.faces[0]
@@ -51,17 +50,15 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
   }, [selectionMode, meshSelection, selectedObjectId, objects, activeColor])
 
   const faceRecoloring =
-    selectionMode === 'face' &&
-    meshSelection != null &&
-    meshSelection.faces.length > 0
+    selectionMode === 'face' && meshSelection != null && meshSelection.faces.length > 0
   const recoloring = selectionObjectIds.length > 0 || faceRecoloring
   const hex = colorToHex(displayColor)
 
-  return (
-    <div className={`palette-bar ${variant === 'side' ? 'palette-bar-side' : ''}`}>
-      {PALETTE.map((color) => (
+  const swatches = (
+    <div className="palette-swatches">
+      {PALETTE.map((color, index) => (
         <button
-          key={color}
+          key={`${color}-${index}`}
           type="button"
           className={`palette-swatch ${displayColor === color ? 'active' : ''}`}
           style={{ background: colorToHex(color) }}
@@ -69,23 +66,62 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
           title={colorToHex(color)}
         />
       ))}
-      <label
-        className={`palette-custom ${recoloring ? 'palette-custom-recolor' : ''}`}
-        title={
-          faceRecoloring
-            ? 'Custom color for selected faces'
-            : recoloring
-              ? 'Custom color for selection'
-              : 'Custom draw color'
-        }
+    </div>
+  )
+
+  const customPicker = (
+    <label
+      className={`palette-custom ${recoloring ? 'palette-custom-recolor' : ''}`}
+      title={
+        faceRecoloring
+          ? 'Custom color for selected faces'
+          : recoloring
+            ? 'Custom color for selection'
+            : 'Custom draw color'
+      }
+    >
+      <span className="palette-custom-preview" style={{ background: hex }} />
+      <input
+        type="color"
+        value={hex}
+        onChange={(e) => setActiveColor(parseInt(e.target.value.slice(1), 16))}
+      />
+    </label>
+  )
+
+  if (variant !== 'side') {
+    return (
+      <div className="palette-bar">
+        {swatches}
+        {customPicker}
+      </div>
+    )
+  }
+
+  return (
+    <div className="palette-bar palette-bar-side">
+      <button
+        type="button"
+        className="palette-minimize-toggle"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-expanded={!collapsed}
+        aria-controls={contentId}
+        title={collapsed ? 'Expand palette' : 'Minimize palette'}
       >
-        <span className="palette-custom-preview" style={{ background: hex }} />
-        <input
-          type="color"
-          value={hex}
-          onChange={(e) => setActiveColor(parseInt(e.target.value.slice(1), 16))}
-        />
-      </label>
+        <span className="palette-minimize-label">
+          <span className="palette-minimize-swatch" style={{ background: hex }} aria-hidden />
+          Palette
+        </span>
+        <span className="side-section-chevron" aria-hidden>
+          {collapsed ? '▸' : '▾'}
+        </span>
+      </button>
+      <div id={contentId} className="palette-minimize-body" hidden={collapsed}>
+        {swatches}
+        {customPicker}
+      </div>
     </div>
   )
 }
+
+export default PaletteBar

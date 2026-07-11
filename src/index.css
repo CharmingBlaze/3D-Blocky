@@ -59,7 +59,8 @@ button {
   color: inherit;
 }
 
-input[type='range'] {
+input[type='range'],
+input[type='checkbox'] {
   accent-color: var(--accent);
 }
 

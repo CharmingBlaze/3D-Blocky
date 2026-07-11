@@ -71,6 +71,8 @@ export interface VectorPenDraft {
   pendingAnchorIndex: number | null
   continuePathId: string | null
   closeTargetActive: boolean
+  /** Loop marked closed in 2D — mesh is not created until Enter commits. */
+  closed: boolean
   editDrag?: {
     type: 'anchor' | 'inHandle' | 'outHandle'
     index: number
@@ -238,41 +240,55 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       const {
         vectorPenDraft,
         closeThreshold,
-        commitPenPath,
         autoConnectPaths,
         vectorDocument,
         lastPenEndpoint,
-        lastPenClickAt,
       } = store()
 
       let pt = { ...point }
       const draft = vectorPenDraft?.view === view ? vectorPenDraft : null
+      // Generous close hit so first-point connect wins over handles / nearby nodes.
+      const closeHit = closeThreshold * 3
 
-      const now = performance.now()
-      if (
-        draft &&
-        draft.anchors.length >= 1 &&
-        now - lastPenClickAt < 320 &&
-        isNearPoint(pt, draft.anchors[draft.anchors.length - 1].position, closeThreshold * 1.5)
-      ) {
-        store().penFinishPath()
-        setPartial({ lastPenClickAt: 0 })
-        return
-      }
-      setPartial({ lastPenClickAt: now })
-
-      if (draft && draft.anchors.length >= 3 && draft.pendingAnchorIndex === null) {
+      // Click near first anchor: mark closed in 2D only — keep editing until Enter.
+      if (draft && draft.anchors.length >= 3 && !draft.closed) {
         const first = draft.anchors[0].position
-        if (isNearPoint(pt, first, closeThreshold * 1.5)) {
-          commitPenPath(true)
+        if (isNearPoint(pt, first, closeHit)) {
+          let anchors = draft.anchors.map((a) => ({
+            ...a,
+            position: { ...a.position },
+            inHandle: a.inHandle ? { ...a.inHandle } : null,
+            outHandle: a.outHandle ? { ...a.outHandle } : null,
+          }))
+          // Drop a dangling pending node sitting on the close target.
+          if (
+            draft.pendingAnchorIndex !== null &&
+            draft.pendingAnchorIndex === anchors.length - 1 &&
+            anchors.length > 3 &&
+            isNearPoint(anchors[draft.pendingAnchorIndex]!.position, first, closeHit)
+          ) {
+            anchors = anchors.slice(0, -1)
+          }
+          setPartial({
+            vectorPenDraft: {
+              ...draft,
+              anchors,
+              closed: true,
+              closeTargetActive: true,
+              previewPoint: { ...first },
+              pendingAnchorIndex: null,
+              editDrag: undefined,
+            },
+          })
           return
         }
       }
 
       if (draft) {
         const threshold = closeThreshold * 1.5
-        // Check handles of all anchors
+        // Check handles of all anchors (skip first while closable — handles steal close clicks)
         for (let i = 0; i < draft.anchors.length; i++) {
+          if (!draft.closed && draft.anchors.length >= 3 && i === 0) continue
           const a = draft.anchors[i]
           if (a.inHandle && isNearPoint(pt, a.inHandle, threshold)) {
             setPartial({
@@ -293,9 +309,9 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
             return
           }
         }
-        // Check positions of all anchors (index 0 is already handled by close check above if length >= 3)
+        // Check positions of all anchors
         for (let i = 0; i < draft.anchors.length; i++) {
-          if (draft.anchors.length >= 3 && i === 0) continue
+          if (!draft.closed && draft.anchors.length >= 3 && i === 0) continue
           const a = draft.anchors[i]
           if (isNearPoint(pt, a.position, threshold)) {
             setPartial({
@@ -307,6 +323,9 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
             return
           }
         }
+
+        // Closed drafts stay editable (handles/anchors) until Enter — no new points.
+        if (draft.closed) return
       }
 
       if (!draft) {
@@ -326,8 +345,9 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
               !hit.path.closed &&
               hit.isStart &&
               hit.path.anchors.length >= 3 &&
-              isNearPoint(pt, hit.path.anchors[0].position, closeThreshold * 1.5)
+              isNearPoint(pt, hit.path.anchors[0].position, closeThreshold * 3)
             ) {
+              // Resume as a closed 2D draft — commit only on Enter.
               setPartial({
                 vectorPenDraft: {
                   anchors: cloneAnchors(hit.path),
@@ -335,10 +355,10 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
                   previewPoint: pt,
                   pendingAnchorIndex: null,
                   continuePathId: hit.pathId,
-                  closeTargetActive: false,
+                  closeTargetActive: true,
+                  closed: true,
                 },
               })
-              store().commitPenPath(true)
               return
             }
             if (!hit.path.closed && hit.isEnd && hit.path.anchors.length >= 1) {
@@ -368,12 +388,33 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
             pendingAnchorIndex: null,
             continuePathId,
             closeTargetActive: false,
+            closed: false,
           },
         })
         return
       }
 
       if (draft.pendingAnchorIndex !== null) return
+
+      // Placing a node on the start point closes the loop instead of stacking a duplicate.
+      if (
+        !draft.closed &&
+        draft.anchors.length >= 3 &&
+        isNearPoint(pt, draft.anchors[0].position, closeThreshold * 3)
+      ) {
+        const first = draft.anchors[0].position
+        setPartial({
+          vectorPenDraft: {
+            ...draft,
+            closed: true,
+            closeTargetActive: true,
+            previewPoint: { ...first },
+            pendingAnchorIndex: null,
+            editDrag: undefined,
+          },
+        })
+        return
+      }
 
       if (autoConnectPaths) {
         const hit = findNearestPathEndpoint(
@@ -401,6 +442,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
           previewPoint: pt,
           pendingAnchorIndex: newIndex,
           closeTargetActive: false,
+          closed: false,
         },
       })
     },
@@ -454,10 +496,14 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         return
       }
 
+      const first = vectorPenDraft.anchors[0]?.position
+      const closeHit = closeThreshold * 3
       const closeTargetActive =
-        vectorPenDraft.anchors.length >= 3 &&
-        vectorPenDraft.pendingAnchorIndex === null &&
-        isNearPoint(point, vectorPenDraft.anchors[0].position, closeThreshold * 1.5)
+        vectorPenDraft.closed ||
+        (!!first &&
+          vectorPenDraft.anchors.length >= 3 &&
+          vectorPenDraft.pendingAnchorIndex === null &&
+          isNearPoint(point, first, closeHit))
 
       const anchors = vectorPenDraft.anchors.map((a) => ({
         ...a,
@@ -474,7 +520,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         vectorPenDraft: {
           ...vectorPenDraft,
           anchors,
-          previewPoint: point,
+          previewPoint: closeTargetActive && first ? { ...first } : point,
           closeTargetActive,
         },
       })
@@ -529,8 +575,8 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       const { vectorPenDraft, closeThreshold } = store()
       if (!vectorPenDraft) return
 
-      let closed = false
-      if (vectorPenDraft.anchors.length >= 3 && vectorPenDraft.pendingAnchorIndex === null) {
+      let closed = vectorPenDraft.closed
+      if (!closed && vectorPenDraft.anchors.length >= 3 && vectorPenDraft.pendingAnchorIndex === null) {
         const first = vectorPenDraft.anchors[0].position
         const last = vectorPenDraft.anchors[vectorPenDraft.anchors.length - 1].position
         closed =

@@ -429,7 +429,7 @@ describe('MeshBuilder', () => {
     expect(inward).toBe(0)
   })
 
-  it('export scales one grid cell of scene units to one glTF meter', () => {
+  it('export scales one grid cell of scene units to 10 cm (0.1 glTF meters)', () => {
     const half = SCENE_GRID_CELL / 2
     const box = {
       min: { x: -half, y: -half, z: -half },
@@ -443,9 +443,9 @@ describe('MeshBuilder', () => {
     const ys = baked.positions.map((p) => p.y)
     const zs = baked.positions.map((p) => p.z)
     const extent = (vals: number[]) => Math.max(...vals) - Math.min(...vals)
-    expect(extent(xs)).toBeCloseTo(1, 4)
-    expect(extent(ys)).toBeCloseTo(1, 4)
-    expect(extent(zs)).toBeCloseTo(1, 4)
+    expect(extent(xs)).toBeCloseTo(0.1, 4)
+    expect(extent(ys)).toBeCloseTo(0.1, 4)
+    expect(extent(zs)).toBeCloseTo(0.1, 4)
   })
 
   it('setFlatNormalsFromIndices matches triangle winding', () => {

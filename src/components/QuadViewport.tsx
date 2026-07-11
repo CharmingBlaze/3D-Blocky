@@ -48,6 +48,7 @@ import {
   VECTOR_TOOLS,
   isComponentSelectionMode,
 } from '../viewport/viewportInteractionUtils'
+import { applyViewportFit } from '../viewport/fitViewports'
 
 function ViewMoveBasisSync({ enabled }: { enabled: boolean }) {
   const setViewMoveBasis = useAppStore((s) => s.setViewMoveBasis)
@@ -155,6 +156,33 @@ function applyOrthoCamera(view: ViewType, camera: THREE.Camera): void {
   if ('updateProjectionMatrix' in camera && typeof camera.updateProjectionMatrix === 'function') {
     camera.updateProjectionMatrix()
   }
+}
+
+/** Applies store fit requests: reset each view’s orientation and frame the selection. */
+function ViewportFitController({ view }: { view: ViewType }) {
+  const fitRequest = useAppStore((s) => s.viewportFitRequest)
+  const camera = useThree((s) => s.camera)
+  const controls = useThree((s) => s.controls)
+  const size = useThree((s) => s.size)
+  const { layoutVisible, continuousFrames } = useViewportRender()
+  const invalidate = useThree((s) => s.invalidate)
+  const lastNonceRef = useRef(0)
+
+  useEffect(() => {
+    if (!fitRequest || fitRequest.nonce === lastNonceRef.current) return
+    lastNonceRef.current = fitRequest.nonce
+    const orbit =
+      controls &&
+      typeof controls === 'object' &&
+      'target' in controls &&
+      'update' in controls
+        ? (controls as { target: THREE.Vector3; update: () => void })
+        : null
+    applyViewportFit(camera, orbit, view, fitRequest, size)
+    requestViewportFrame(invalidate, layoutVisible, continuousFrames)
+  }, [fitRequest, camera, controls, view, size, invalidate, layoutVisible, continuousFrames])
+
+  return null
 }
 
 function ViewportControls({
@@ -542,7 +570,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           position: setup.position,
           zoom: setup.zoom,
           near: 0.1,
-          far: 2000,
+          far: 4000,
           up: setup.up,
         }}
         gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
@@ -582,6 +610,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           enableZoom={!perspectivePrimitiveScrollHeight}
           disableMiddlePan={perspectivePrimitiveScrollHeight}
         />
+        <ViewportFitController view={view} />
 
         {showGrid && <ViewportGrid view={view} depth={defaultDepth} />}
 

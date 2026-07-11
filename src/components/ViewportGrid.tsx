@@ -15,17 +15,18 @@ import { SCENE_GRID_CELL } from '../scene/units'
 const CELL = SCENE_GRID_CELL
 const SECTION = 40
 
+/** Soft grid fade — keep below camera.far so the horizon softens instead of hard-clipping. */
 const GRID_STYLE = {
   cellSize: CELL,
   sectionSize: SECTION,
   cellThickness: 0.5,
   sectionThickness: 1,
-  fadeDistance: 380,
-  fadeStrength: 1.25,
+  fadeDistance: 1400,
+  fadeStrength: 1.05,
   infiniteGrid: true as const,
 }
 
-const AXIS_LEN = SECTION * 2
+const AXIS_LEN = SECTION * 4
 
 function SharedFloorGrid({
   position = [0, -0.02, 0] as [number, number, number],
@@ -125,8 +126,8 @@ function FlatWorkplaneGrid({
       <SharedFloorGrid
         position={layout.position}
         rotation={layout.rotation}
-        fadeDistance={340}
-        fadeStrength={1.3}
+        fadeDistance={1200}
+        fadeStrength={1.1}
       />
       <AxisLines primary={layout.primary} secondary={layout.secondary} />
     </group>

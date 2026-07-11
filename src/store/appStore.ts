@@ -1407,9 +1407,5 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 }))
 
-export const PALETTE = [
-  0x6ecbf5, 0x7ecba1, 0xf5a66e, 0xf56e8c, 0xc56ef5,
-  0xf5e66e, 0xf58c6e, 0x6ef5d4, 0x8c6ef5, 0xe6e6e6,
-  0x333344, 0xff4444, 0x44ff44, 0x4444ff, 0xffaa00,
-  0xffffff,
-]
+export { PALETTE } from '../palette/drawPalette'
+

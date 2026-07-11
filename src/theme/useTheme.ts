@@ -90,8 +90,9 @@ export function useTheme(): ThemeColors {
       vertexSelectedBorder: darkenHex(css['--accent'], 0.36),
       vertexDraft: darkenHex(css['--accent'], 0.24),
       vertexDraftHover: darkenHex(css['--mesh-hover'], 0.28),
-      objectSelectOutline: darkenHex(css['--mesh-outline'], 0.2),
-      objectSelectOutlineSecondary: darkenHex(css['--mesh-outline-secondary'], 0.24),
+      // Object pick outline follows --mesh-selected (theme accent), not wireframe --mesh-outline
+      objectSelectOutline: css['--mesh-selected'],
+      objectSelectOutlineSecondary: darkenHex(css['--mesh-selected'], 0.28),
       edgeIdle: darkenHex(css['--mesh-outline-secondary'], 0.28),
       edgeHover: darkenHex(css['--accent-green'], 0.22),
       edgeSelected: darkenHex(css['--accent'], 0.24),
