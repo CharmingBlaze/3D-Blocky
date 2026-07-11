@@ -2,16 +2,23 @@ import { orthoViewFromLegacy, planePointToWorld } from '../primitives/viewAxes'
 import { isOrthoView, normalizeViewType } from '../scene/viewTypes'
 import type { OrthoViewType, ViewType } from '../scene/viewTypes'
 import type { Vec2, Vec3 } from '../utils/math'
-import { curvatureSampleProfile } from './rdp'
+import { curvatureSampleProfile, rdpSimplify } from './rdp'
 
-/** Hex-style lathe cross-section — chunky but readable. */
-export const LATHE_RADIAL_SEGMENTS = 6
-/** Drop collinear profile points; keep corners from the drawn stroke. */
-export const LATHE_MIN_ANGLE_DEG = 20
-/** Max rings along the profile height (low-poly budget). */
-export const LATHE_MAX_PROFILE_RINGS = 14
-/** Target vertex budget for lathe mesh commits. */
-export const LATHE_POLY_BUDGET = 96
+/**
+ * Octagonal lathe cross-section — rounder silhouette while staying mid-poly.
+ * 8 × ~16 rings ≈ 128 verts.
+ */
+export const LATHE_RADIAL_SEGMENTS = 8
+/** Keep gentle bends from the drawn profile (was 20° — too aggressive). */
+export const LATHE_MIN_ANGLE_DEG = 10
+/** Max rings along the profile height (low–mid poly). */
+export const LATHE_MAX_PROFILE_RINGS = 16
+/** RDP tolerance in plane units — follows the stroke silhouette before angle filter. */
+export const LATHE_PROFILE_RDP_TOLERANCE = 0.55
+/** Minimum spacing between consecutive profile samples before simplify. */
+export const LATHE_PROFILE_DEDUPE = 0.22
+/** Target vertex budget for lathe mesh commits (~ rings × radial). */
+export const LATHE_POLY_BUDGET = 128
 
 export interface LatheProfileResult {
   /** (radius, planeHeight) pairs in draw order. */
@@ -34,17 +41,20 @@ export function getLatheViewHint(view: ViewType): string {
   switch (ortho) {
     case 'top':
     case 'bottom':
-      return 'Draw an open profile in Top or Bottom view. The leftmost point is the rotation axis — the shape spins around the vertical axis seen from above.'
+      return 'Draw an open profile to the right of the leftmost point (rotation axis). Top/Bottom: spins around the vertical axis seen from above.'
     case 'front':
     case 'back':
-      return 'Draw an open profile in Front or Back view. The leftmost point is the rotation axis — the shape spins vertically (columns, vases, wheels).'
+      return 'Draw an open profile to the right of the leftmost point (rotation axis). Keep the outline on one side — it spins into a vase/column matching your curve.'
     case 'left':
     case 'right':
-      return 'Draw an open profile in a Side view. The leftmost point is the rotation axis — the shape spins vertically from the side plane.'
+      return 'Draw an open profile to the right of the leftmost point (rotation axis). Side view: spins vertically from that plane.'
   }
 }
 
-/** Drawn stroke → lathe profile, simplified for low-poly rings while keeping shape corners. */
+/**
+ * Drawn stroke → lathe profile that follows the silhouette.
+ * Uses RDP + mild curvature filter so gentle curves survive, then caps rings by importance.
+ */
 export function strokeToLatheProfile(points: Vec2[]): LatheProfileResult | null {
   if (points.length < 2) return null
 
@@ -52,16 +62,23 @@ export function strokeToLatheProfile(points: Vec2[]): LatheProfileResult | null 
   const raw: Vec2[] = []
 
   for (const p of points) {
-    const radius = Math.abs(p.x - axisH)
+    // Keep points on/near the drawn side of the axis (fold only tiny overshoots).
+    const radius = Math.max(0, p.x - axisH)
     const height = p.y
     const last = raw[raw.length - 1]
-    if (last && Math.hypot(radius - last.x, height - last.y) < 0.5) continue
+    if (last && Math.hypot(radius - last.x, height - last.y) < LATHE_PROFILE_DEDUPE) continue
     raw.push({ x: radius, y: height })
   }
 
   if (raw.length < 2) return null
 
-  const profile = curvatureSampleProfile(raw, LATHE_MIN_ANGLE_DEG, LATHE_MAX_PROFILE_RINGS)
+  // Follow the drawn polyline first (silhouette fidelity), then angle-filter + ring cap.
+  const silhouette = rdpSimplify(raw, LATHE_PROFILE_RDP_TOLERANCE)
+  const profile = curvatureSampleProfile(
+    silhouette.length >= 2 ? silhouette : raw,
+    LATHE_MIN_ANGLE_DEG,
+    LATHE_MAX_PROFILE_RINGS
+  )
   if (profile.length < 2) return null
 
   return { profile, axisH }

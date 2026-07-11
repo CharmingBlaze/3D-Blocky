@@ -35,6 +35,24 @@ describe('latheProfile', () => {
     expect(result.profile.length).toBeLessThanOrEqual(LATHE_MAX_PROFILE_RINGS)
   })
 
+  it('follows a curved silhouette instead of collapsing to a few chords', () => {
+    // Wide S-curve: radius changes smoothly along height
+    const curve = Array.from({ length: 40 }, (_, i) => {
+      const t = i / 39
+      return {
+        x: 12 + Math.sin(t * Math.PI * 2) * 10,
+        y: t * 60,
+      }
+    })
+    const result = strokeToLatheProfile(curve)!
+    expect(result.profile.length).toBeGreaterThanOrEqual(8)
+    const radii = result.profile.map((p) => p.x)
+    const minR = Math.min(...radii)
+    const maxR = Math.max(...radii)
+    // Should still show both the waist and the bulge from the drawn sine
+    expect(maxR - minR).toBeGreaterThan(8)
+  })
+
   it('supports all orthographic views', () => {
     expect(isLatheViewSupported('front')).toBe(true)
     expect(isLatheViewSupported('back')).toBe(true)

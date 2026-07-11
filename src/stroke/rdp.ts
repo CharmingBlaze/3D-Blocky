@@ -55,18 +55,45 @@ export function curvatureSampleProfile(
     }
   }
 
-  result.push(profile[profile.length - 1])
+  result.push(profile[profile.length - 1]!)
 
   if (maxPoints && result.length > maxPoints) {
-    const step = (result.length - 1) / (maxPoints - 1)
-    const reduced: Vec2[] = []
-    for (let i = 0; i < maxPoints; i++) {
-      reduced.push(result[Math.round(i * step)])
-    }
-    return reduced
+    return capOpenPolylineByCurvature(result, maxPoints)
   }
 
   return result
+}
+
+/** Keep first/last and the highest-curvature interior points (open polylines). */
+export function capOpenPolylineByCurvature(points: Vec2[], maxPoints: number): Vec2[] {
+  if (points.length <= maxPoints) return points.map((p) => ({ ...p }))
+  if (maxPoints < 2) return [{ ...points[0]! }, { ...points[points.length - 1]! }]
+
+  const interiorBudget = maxPoints - 2
+  const scored: { i: number; score: number }[] = []
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1]!
+    const curr = points[i]!
+    const next = points[i + 1]!
+    const v1 = { x: curr.x - prev.x, y: curr.y - prev.y }
+    const v2 = { x: next.x - curr.x, y: next.y - curr.y }
+    const len1 = Math.hypot(v1.x, v1.y)
+    const len2 = Math.hypot(v2.x, v2.y)
+    let score = 0
+    if (len1 > 1e-10 && len2 > 1e-10) {
+      const dot = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2)
+      score = Math.acos(Math.max(-1, Math.min(1, dot)))
+      // Prefer points that also span more distance (preserves long gentle bends).
+      score += 0.15 * Math.min(len1, len2)
+    }
+    scored.push({ i, score })
+  }
+  scored.sort((a, b) => b.score - a.score)
+
+  const keep = new Set<number>([0, points.length - 1])
+  for (const s of scored.slice(0, interiorBudget)) keep.add(s.i)
+
+  return points.filter((_, i) => keep.has(i)).map((p) => ({ ...p }))
 }
 
 /** Curvature sampling for closed loops (organic silhouettes) */

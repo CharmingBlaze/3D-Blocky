@@ -343,10 +343,15 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         return
       }
 
-      const stabilizedStroke = smoothDrawing
-        ? movingAverageSmoothStroke(currentStroke, 2)
-        : currentStroke
-      const snappedStroke = snapSketchStrokeClosed(stabilizedStroke, closeThreshold)
+      const stabilizedStroke =
+        sketchLatheMode
+          ? currentStroke
+          : smoothDrawing
+            ? movingAverageSmoothStroke(currentStroke, 2)
+            : currentStroke
+      const snappedStroke = sketchLatheMode
+        ? stabilizedStroke
+        : snapSketchStrokeClosed(stabilizedStroke, closeThreshold)
 
       const strokeInput = {
         points: snappedStroke,
