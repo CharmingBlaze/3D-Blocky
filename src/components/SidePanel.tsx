@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   useAppStore,
@@ -19,9 +19,11 @@ import { ThemePicker } from './ThemeBar'
 import { SidePanelFileMenu } from './SidePanelFileMenu'
 import { SidePanelPrimitivesMenu, PRIMITIVE_KINDS } from './SidePanelPrimitivesMenu'
 import { SidePanelVectorShapesMenu } from './SidePanelVectorShapesMenu'
+import { TransformToolbarToggle } from './TransformToolbar'
+import { PrimitivesToolbarToggle } from './PrimitivesToolbar'
 import { activeExtrudeMode, activeLatheMode, activeLatheCaps } from '../stroke/drawExtrudeMode'
 import { getLatheViewHint } from '../stroke/latheProfile'
-import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
+import { SidePanelPixelEditorMenu } from './SidePanelPixelEditorMenu'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
@@ -72,15 +74,41 @@ function SideSection({
   title,
   children,
   columns = 1,
+  order = 0,
+  collapsible = false,
+  defaultCollapsed = false,
 }: {
   title: string
   children: ReactNode
   columns?: 1 | 2
+  /** Visual workflow order without coupling the panel's source layout to its presentation. */
+  order?: number
+  collapsible?: boolean
+  defaultCollapsed?: boolean
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const contentId = useId()
   return (
-    <section className="side-section">
-      <h2 className="side-section-title">{title}</h2>
-      <div className={`side-section-body${columns === 2 ? ' side-section-cols-2' : ''}`}>
+    <section className="side-section" style={{ order }}>
+      {collapsible ? (
+        <button
+          type="button"
+          className="side-section-title side-section-toggle"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-expanded={!collapsed}
+          aria-controls={contentId}
+        >
+          <span>{title}</span>
+          <span aria-hidden>{collapsed ? '›' : '⌄'}</span>
+        </button>
+      ) : (
+        <h2 className="side-section-title">{title}</h2>
+      )}
+      <div
+        id={contentId}
+        hidden={collapsed}
+        className={`side-section-body${columns === 2 ? ' side-section-cols-2' : ''}`}
+      >
         {children}
       </div>
     </section>
@@ -127,7 +155,7 @@ function SideSlider({
   )
 }
 
-function PanelResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+function PanelResizeHandle({ onResize, width }: { onResize: (width: number) => void; width: number }) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const listenersRef = useRef<{ onMove: (ev: PointerEvent) => void; onUp: () => void } | null>(
     null
@@ -176,13 +204,35 @@ function PanelResizeHandle({ onResize }: { onResize: (width: number) => void }) 
     [onResize]
   )
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 48 : 16
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      onResize(width + step)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      onResize(width - step)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      onResize(176)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      onResize(420)
+    }
+  }
+
   return (
     <div
       className="side-panel-resizer"
       onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize side panel"
+      aria-valuemin={176}
+      aria-valuemax={420}
+      aria-valuenow={width}
+      tabIndex={0}
     />
   )
 }
@@ -235,7 +285,6 @@ export function SidePanel() {
     simplifySelected,
     deleteSelection,
     setShowToolRing,
-    setShowExportDialog,
     uvEditorOpen,
     uvEditorPanel,
     toggleUvEditor,
@@ -262,6 +311,7 @@ export function SidePanel() {
     viewMoveBasis,
     sidePanelWidth,
     setSidePanelWidth,
+    showSidePanel,
     canUndo,
     canRedo,
     undo,
@@ -348,7 +398,6 @@ export function SidePanel() {
       simplifySelected: s.simplifySelected,
       deleteSelection: s.deleteSelection,
       setShowToolRing: s.setShowToolRing,
-      setShowExportDialog: s.setShowExportDialog,
       uvEditorOpen: s.uvEditorOpen,
       uvEditorPanel: s.uvEditorPanel,
       toggleUvEditor: s.toggleUvEditor,
@@ -375,6 +424,7 @@ export function SidePanel() {
       viewMoveBasis: s.viewMoveBasis,
       sidePanelWidth: s.sidePanelWidth,
       setSidePanelWidth: s.setSidePanelWidth,
+      showSidePanel: s.showSidePanel,
       canUndo: s.canUndo,
       canRedo: s.canRedo,
       undo: s.undo,
@@ -557,9 +607,11 @@ export function SidePanel() {
     setActivePrimitiveKind(kind)
   }
 
+  if (!showSidePanel) return null
+
   return (
     <>
-      <PanelResizeHandle onResize={setSidePanelWidth} />
+      <PanelResizeHandle onResize={setSidePanelWidth} width={sidePanelWidth} />
       <aside className="side-panel" style={{ width: sidePanelWidth }}>
         <div className="side-panel-header">
           <SidePanelFileMenu />
@@ -587,11 +639,68 @@ export function SidePanel() {
         </div>
 
         <div className="side-panel-scroll themed-scroll">
-          <SideSection title="Color">
-            <PaletteBar variant="side" />
+          <SideSection title="Quick start" order={24} columns={2}>
+            <button
+              className="side-btn side-btn-wide"
+              onClick={() => setShowToolRing(true)}
+              title="Open tool ring (Tab to toggle)"
+            >
+              Tools (Tab)
+            </button>
+            <TransformToolbarToggle />
+            <PrimitivesToolbarToggle />
           </SideSection>
 
-          <SideSection title="Draw" columns={2}>
+          <SideSection title="View" columns={2} order={70}>
+            <select
+              className="shape-kind-select side-select"
+              value={viewportDisplayMode}
+              onChange={(e) =>
+                setViewportDisplayMode(e.target.value as ViewportDisplayMode)
+              }
+              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
+            >
+              {VIEWPORT_DISPLAY_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {VIEWPORT_DISPLAY_CONFIG[mode].label}
+                </option>
+              ))}
+            </select>
+            <p className="side-color-hint muted">
+              {VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
+            </p>
+            <SideBtnGroup cols={2}>
+              <button
+                className={`side-btn ${showGrid ? 'active' : ''}`}
+                onClick={() => setShowGrid(!showGrid)}
+                title="Toggle grid (G)"
+              >
+                Grid
+              </button>
+              <button
+                className={`side-btn ${showDensityHeatmap ? 'active' : ''}`}
+                onClick={() => setShowDensityHeatmap(!showDensityHeatmap)}
+              >
+                Heatmap
+              </button>
+            </SideBtnGroup>
+          </SideSection>
+
+          <SideSection title="Color" order={15}>
+            <PaletteBar variant="side" />
+            <SidePanelPixelEditorMenu
+              open={pixelEditorOpen}
+              minimized={pixelEditorPanel.minimized}
+              canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
+              onOpen={() => openPixelEditor()}
+              onClose={togglePixelEditor}
+              onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
+              onNewDocument={(width, height) => openPixelEditor({ width, height })}
+              onShowCanvas={togglePixelEditor}
+            />
+          </SideSection>
+
+          <SideSection title="Create" columns={2} order={10}>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${drawInputMode === 'regular' ? 'active' : ''}`}
@@ -750,7 +859,7 @@ export function SidePanel() {
           </SideSection>
 
           {activeTool === 'vector-shape' && (
-            <SideSection title="Vector">
+            <SideSection title="Vector" order={11}>
               <p className="side-color-hint muted">Drag in an ortho view to place.</p>
               {activeShapeKind === 'roundedBox' && (
                 <>
@@ -781,7 +890,7 @@ export function SidePanel() {
           )}
 
           {isSculptTool && (
-            <SideSection title="Sculpt">
+            <SideSection title="Sculpt" order={12}>
               <SideSlider
                 label="Brush strength"
                 value={brushStrength}
@@ -797,7 +906,7 @@ export function SidePanel() {
             </SideSection>
           )}
 
-          <SideSection title="Select" columns={2}>
+          <SideSection title="Selection" columns={2} order={20}>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${selectionMode === 'object' ? 'active' : ''}`}
@@ -875,7 +984,7 @@ export function SidePanel() {
             )}
           </SideSection>
 
-          <SideSection title="Transform" columns={2}>
+          <SideSection title="Transform" columns={2} order={21}>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${activeTool === 'move' ? 'active' : ''}`}
@@ -973,47 +1082,9 @@ export function SidePanel() {
             >
               Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
             </button>
-            <select
-              className="shape-kind-select side-select"
-              value=""
-              onChange={(e) => {
-                const action = e.target.value
-                if (!action) return
-                if (action === 'open') openPixelEditor()
-                else if (action === 'close') togglePixelEditor()
-                else if (action === 'paint') openPixelEditor({ paintOnModel: true })
-                else if (action.startsWith('new-')) {
-                  const [w, h] = action.slice(4).split('x').map(Number)
-                  openPixelEditor({ width: w, height: h })
-                }
-                e.target.value = ''
-              }}
-              title="Pixel Editor — layered pixel art and paint-on-model texturing"
-            >
-              <option value="">Pixel Editor…</option>
-              <option value="open">Open editor</option>
-              {PIXEL_SIZE_PRESETS.map((p) => (
-                <option key={p.label} value={`new-${p.width}x${p.height}`}>
-                  New {p.label} document
-                </option>
-              ))}
-              <option value="paint" disabled={selectionCount === 0 && !selectedObjectId}>
-                Paint on selected model
-              </option>
-              {pixelEditorOpen ? <option value="close">Close editor</option> : null}
-            </select>
-            {pixelEditorOpen && pixelEditorPanel.minimized && (
-              <button
-                className="side-btn side-btn-wide active"
-                onClick={togglePixelEditor}
-                title="Show Pixel Editor canvas"
-              >
-                Show canvas ▾
-              </button>
-            )}
           </SideSection>
 
-          <SideSection title="Symmetry">
+          <SideSection title="Symmetry" order={23} collapsible defaultCollapsed>
             <label className="side-checkbox" title="Mirror new geometry and sculpt strokes (Blockbench-style)">
               <input
                 type="checkbox"
@@ -1050,7 +1121,7 @@ export function SidePanel() {
             </p>
           </SideSection>
 
-          <SideSection title="Mesh Edit" columns={2}>
+          <SideSection title="Mesh editing" columns={2} order={22} collapsible defaultCollapsed>
             <SideBtnGroup cols={2}>
               <button
                 className="side-btn"
@@ -1163,7 +1234,7 @@ export function SidePanel() {
             )}
           </SideSection>
 
-          <SideSection title="Image drop">
+          <SideSection title="References & images" order={40} collapsible defaultCollapsed>
             <p className="side-color-hint muted">
               Pick one mode, then drag an image into any viewport.
             </p>
@@ -1256,7 +1327,7 @@ export function SidePanel() {
             )}
           </SideSection>
 
-          <SideSection title="Settings">
+          <SideSection title="Quality" order={50} collapsible defaultCollapsed>
             <SideSlider
               label="Poly budget"
               value={polyBudget}
@@ -1289,42 +1360,7 @@ export function SidePanel() {
             </div>
           </SideSection>
 
-          <SideSection title="View" columns={2}>
-            <select
-              className="shape-kind-select side-select"
-              value={viewportDisplayMode}
-              onChange={(e) =>
-                setViewportDisplayMode(e.target.value as ViewportDisplayMode)
-              }
-              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
-            >
-              {VIEWPORT_DISPLAY_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {VIEWPORT_DISPLAY_CONFIG[mode].label}
-                </option>
-              ))}
-            </select>
-            <p className="side-color-hint muted">
-              {VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
-            </p>
-            <SideBtnGroup cols={2}>
-              <button
-                className={`side-btn ${showGrid ? 'active' : ''}`}
-                onClick={() => setShowGrid(!showGrid)}
-                title="Toggle grid (G)"
-              >
-                Grid
-              </button>
-              <button
-                className={`side-btn ${showDensityHeatmap ? 'active' : ''}`}
-                onClick={() => setShowDensityHeatmap(!showDensityHeatmap)}
-              >
-                Heatmap
-              </button>
-            </SideBtnGroup>
-          </SideSection>
-
-          <SideSection title="Actions" columns={2}>
+          <SideSection title="Object actions" columns={2} order={30} collapsible defaultCollapsed>
             <SideBtnGroup cols={2}>
               <button className="side-btn" onClick={toggleTopologyLock} title="Lock topology (L)">
                 Lock
@@ -1373,23 +1409,9 @@ export function SidePanel() {
                 Paste
               </button>
             </SideBtnGroup>
-            <button
-              className="side-btn side-btn-wide"
-              onClick={() => setShowToolRing(true)}
-              title="Open tool ring (Tab to toggle)"
-            >
-              Tools (Tab)
-            </button>
-            <button
-              className="side-btn side-btn-wide"
-              onClick={() => setShowExportDialog(true)}
-              title="Import OBJ, GLB, GLTF, STL · export scene"
-            >
-              Import / Export
-            </button>
           </SideSection>
 
-          <SideSection title="Theme">
+          <SideSection title="Theme" order={60} collapsible defaultCollapsed>
             <ThemePicker />
           </SideSection>
         </div>

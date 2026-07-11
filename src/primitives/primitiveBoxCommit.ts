@@ -77,14 +77,6 @@ export function primitiveBoxToSceneObject(
   if (mesh.vertexCount() === 0) return null
   ensurePositiveVolume(mesh)
 
-  if (import.meta.env?.DEV && (type === 'icosphere' || type === 'sphere')) {
-    console.log('[CAD trace] primitiveBoxToSceneObject after adapter', {
-      type,
-      positions: mesh.positions.length,
-      faces: mesh.faces.length,
-    })
-  }
-
   const obj = mesh.toObject(generateId(), PRIMITIVE_NAMES[type], {
     polyBudget,
     color,

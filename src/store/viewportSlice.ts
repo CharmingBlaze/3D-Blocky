@@ -3,6 +3,11 @@ import type { ViewportDisplayMode } from '../rendering/viewportDisplay'
 import { DEFAULT_VIEWPORT_SLOT_VIEWS } from '../scene/viewTypes'
 import type { SelectableViewType, ViewType, ViewportSlotIndex } from '../scene/viewTypes'
 
+export interface FloatingToolbarPosition {
+  x: number
+  y: number
+}
+
 export interface ViewportLayoutState {
   activeView: ViewType
   /** Slot index (0–3) when quad layout is maximized to one pane. */
@@ -13,10 +18,15 @@ export interface ViewportLayoutState {
   viewportColSplit: number
   viewportRowSplit: number
   sidePanelWidth: number
+  showSidePanel: boolean
   showGrid: boolean
   viewportDisplayMode: ViewportDisplayMode
   viewportXRay: boolean
   viewMoveBasis: ViewMoveBasis | null
+  showTransformBar: boolean
+  transformBarPosition: FloatingToolbarPosition
+  showPrimitivesBar: boolean
+  primitivesBarPosition: FloatingToolbarPosition
 }
 
 export interface ViewportLayoutActions {
@@ -27,10 +37,15 @@ export interface ViewportLayoutActions {
   setViewportColSplit: (ratio: number) => void
   setViewportRowSplit: (ratio: number) => void
   setSidePanelWidth: (width: number) => void
+  setShowSidePanel: (show: boolean) => void
   setShowGrid: (show: boolean) => void
   setViewportDisplayMode: (mode: ViewportDisplayMode) => void
   setViewportXRay: (enabled: boolean) => void
   setViewMoveBasis: (basis: ViewMoveBasis | null) => void
+  setShowTransformBar: (show: boolean) => void
+  setTransformBarPosition: (position: FloatingToolbarPosition) => void
+  setShowPrimitivesBar: (show: boolean) => void
+  setPrimitivesBarPosition: (position: FloatingToolbarPosition) => void
 }
 
 export type ViewportSlice = ViewportLayoutState & ViewportLayoutActions
@@ -43,10 +58,15 @@ export const viewportLayoutInitialState: ViewportLayoutState = {
   viewportColSplit: 0.5,
   viewportRowSplit: 0.5,
   sidePanelWidth: 240,
+  showSidePanel: true,
   showGrid: true,
   viewportDisplayMode: 'model',
   viewportXRay: false,
   viewMoveBasis: null,
+  showTransformBar: true,
+  transformBarPosition: { x: 20, y: 20 },
+  showPrimitivesBar: true,
+  primitivesBarPosition: { x: 20, y: 72 },
 }
 
 export function createViewportSlice<T extends ViewportLayoutState>(
@@ -81,19 +101,56 @@ export function createViewportSlice<T extends ViewportLayoutState>(
       }),
 
     setViewportColSplit: (ratio) =>
-      set({ viewportColSplit: Math.min(0.82, Math.max(0.18, ratio)) } as Partial<T>),
+      set((s) => {
+        const next = Math.min(0.82, Math.max(0.18, ratio))
+        return Math.abs(s.viewportColSplit - next) < 0.0001
+          ? (s as T)
+          : ({ viewportColSplit: next } as Partial<T>)
+      }),
 
     setViewportRowSplit: (ratio) =>
-      set({ viewportRowSplit: Math.min(0.82, Math.max(0.18, ratio)) } as Partial<T>),
+      set((s) => {
+        const next = Math.min(0.82, Math.max(0.18, ratio))
+        return Math.abs(s.viewportRowSplit - next) < 0.0001
+          ? (s as T)
+          : ({ viewportRowSplit: next } as Partial<T>)
+      }),
 
     setSidePanelWidth: (width) =>
-      set({ sidePanelWidth: Math.min(420, Math.max(176, width)) } as Partial<T>),
+      set((s) => {
+        const next = Math.min(420, Math.max(176, width))
+        return Math.abs(s.sidePanelWidth - next) < 0.1
+          ? (s as T)
+          : ({ sidePanelWidth: next } as Partial<T>)
+      }),
+
+    setShowSidePanel: (show) => set({ showSidePanel: show } as Partial<T>),
 
     setShowGrid: (show) => set({ showGrid: show } as Partial<T>),
 
     setViewportDisplayMode: (mode) => set({ viewportDisplayMode: mode } as Partial<T>),
 
     setViewportXRay: (enabled) => set({ viewportXRay: enabled } as Partial<T>),
+
+    setShowTransformBar: (show) => set({ showTransformBar: show } as Partial<T>),
+
+    setTransformBarPosition: (position) =>
+      set((s) => {
+        const next = { x: Math.max(8, position.x), y: Math.max(8, position.y) }
+        return s.transformBarPosition.x === next.x && s.transformBarPosition.y === next.y
+          ? (s as T)
+          : ({ transformBarPosition: next } as Partial<T>)
+      }),
+
+    setShowPrimitivesBar: (show) => set({ showPrimitivesBar: show } as Partial<T>),
+
+    setPrimitivesBarPosition: (position) =>
+      set((s) => {
+        const next = { x: Math.max(8, position.x), y: Math.max(8, position.y) }
+        return s.primitivesBarPosition.x === next.x && s.primitivesBarPosition.y === next.y
+          ? (s as T)
+          : ({ primitivesBarPosition: next } as Partial<T>)
+      }),
 
     setViewMoveBasis: (basis) =>
       set((s) => {

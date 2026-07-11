@@ -6,6 +6,9 @@ import { SidePanel } from './components/SidePanel'
 import { ToolRing } from './components/ToolRing'
 import { ExportDialog } from './components/ExportDialog'
 import { MeshModalController } from './components/MeshModalController'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { TransformToolbar } from './components/TransformToolbar'
+import { PrimitivesToolbar } from './components/PrimitivesToolbar'
 import { useAppStore } from './store/appStore'
 import { selectionHasComponents } from './mesh/meshSelection'
 import type { NudgeDirection } from './utils/viewNavigation'
@@ -147,6 +150,12 @@ export default function App() {
       if (e.key === 'Tab') {
         e.preventDefault()
         setShowToolRing(!useAppStore.getState().showToolRing)
+      }
+      if (e.key === '\\' || e.code === 'Backslash') {
+        e.preventDefault()
+        const state = useAppStore.getState()
+        state.setShowSidePanel(!state.showSidePanel)
+        return
       }
       if (e.key === 'Escape') {
         const state = useAppStore.getState()
@@ -460,7 +469,8 @@ export default function App() {
   }, [])
 
   return (
-    <div className="app">
+    <AppErrorBoundary>
+      <div className="app">
       <div className="app-body">
         <div className="app-main">
           <ViewportLayout />
@@ -475,6 +485,8 @@ export default function App() {
       )}
 
       {showToolRing && <ToolRing onClose={() => setShowToolRing(false)} />}
+      <TransformToolbar />
+      <PrimitivesToolbar />
       {showExportDialog && <ExportDialog onClose={() => setShowExportDialog(false)} />}
       <MeshModalController />
       <Suspense fallback={null}>
@@ -482,6 +494,7 @@ export default function App() {
         {materialEditorOpen && <MaterialEditorPanel />}
         {pixelEditorOpen && <PixelEditorPanel />}
       </Suspense>
-    </div>
+      </div>
+    </AppErrorBoundary>
   )
 }

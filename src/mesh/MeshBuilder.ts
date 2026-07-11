@@ -378,22 +378,8 @@ export function finalizeIndexedMesh(
   const shouldFacet = options.facet ?? true
 
   let next = options.skipOutwardWinding ? mesh : ensureOutwardWinding(mesh, outwardCenter)
-  if (import.meta.env?.DEV) {
-    console.log('[CAD trace] ensureOutwardWinding', {
-      faces: next.faces.length,
-      positions: next.positions.length,
-    })
-  }
   if (shouldValidate) {
     const result = validateMesh(next, outwardCenter)
-    if (import.meta.env?.DEV) {
-      const inward = result.issues.filter((i) => i.code === 'inward_face').length
-      console.log('[CAD trace] validateMesh', {
-        ok: result.ok,
-        inward,
-        issues: result.issues.length,
-      })
-    }
     if (!result.ok && import.meta.env?.DEV) {
       console.warn('[MeshBuilder] validateMesh:', result.issues.slice(0, 8))
     }
@@ -431,13 +417,6 @@ export function finalizeIndexedMesh(
   }
 
   const out = shouldFacet ? facetMesh(base) : base
-  if (import.meta.env?.DEV) {
-    console.log('[CAD trace] finalizeIndexedMesh', {
-      facet: shouldFacet,
-      positions: out.positions.length / 3,
-      tris: out.indices.length / 3,
-    })
-  }
   return out
 }
 

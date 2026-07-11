@@ -5,6 +5,10 @@ import { SideButtonDropdown } from './SideButtonDropdown'
 import { PixelColorSection } from './material/PixelColorSection'
 import { useAppStore } from '../store/appStore'
 import { compositeLayers } from '../pixel/compositeLayers'
+import {
+  getPixelCompositeCache,
+  subscribePixelCompositeCache,
+} from '../pixel/pixelCompositeCache'
 import type { PixelBlendMode, PixelTool } from '../pixel/pixelTypes'
 import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
 import { resolveEffectiveMaterial } from '../material/materials'
@@ -157,17 +161,41 @@ export function PixelEditorPanel() {
     [doc, store.panX, store.panY, store.zoom]
   )
 
-  const redraw = useCallback(() => {
+  const canvasSizeRef = useRef({ w: 0, h: 0 })
+  const docRef = useRef(doc)
+  docRef.current = doc
+
+  const paintCanvasPixels = useCallback((pixels: Uint8ClampedArray, width: number, height: number) => {
     const canvas = canvasRef.current
-    if (!canvas || !doc) return
-    canvas.width = doc.width
-    canvas.height = doc.height
+    if (!canvas) return
+    if (canvasSizeRef.current.w !== width || canvasSizeRef.current.h !== height) {
+      canvas.width = width
+      canvas.height = height
+      canvasSizeRef.current = { w: width, h: height }
+    }
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const composite = compositeLayers(doc)
-    const imageData = new ImageData(new Uint8ClampedArray(composite), doc.width, doc.height)
-    ctx.putImageData(imageData, 0, 0)
-  }, [doc])
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0)
+  }, [])
+
+  // Shared composite cache keeps 2D canvas synced with 3D paint without double-flattening every pointer move.
+  useEffect(() => {
+    if (!store.open || !store.docId) return
+
+    const drawFromCacheOrDoc = () => {
+      const current = docRef.current
+      if (!current) return
+      const cached = getPixelCompositeCache(store.docId!)
+      if (cached && cached.width === current.width && cached.height === current.height) {
+        paintCanvasPixels(cached.pixels, current.width, current.height)
+        return
+      }
+      paintCanvasPixels(compositeLayers(current), current.width, current.height)
+    }
+
+    drawFromCacheOrDoc()
+    return subscribePixelCompositeCache(store.docId, drawFromCacheOrDoc)
+  }, [store.open, store.docId, doc?.id, doc?.width, doc?.height, paintCanvasPixels])
 
   const redrawOverlay = useCallback(() => {
     const overlay = overlayRef.current
@@ -219,10 +247,6 @@ export function PixelEditorPanel() {
       }
     }
   }, [doc, shapePreview, store.selection, store.shapeFilled, store.tool])
-
-  useEffect(() => {
-    redraw()
-  }, [redraw])
 
   useEffect(() => {
     redrawOverlay()

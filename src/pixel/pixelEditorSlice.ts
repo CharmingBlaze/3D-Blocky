@@ -24,6 +24,10 @@ import {
   rgbaToBytes,
 } from './pixelTools'
 import { uploadPixelDocumentTexture } from '../rendering/textureCache'
+import {
+  clearPixelCompositeCache,
+  setPixelCompositeCache,
+} from './pixelCompositeCache'
 
 export interface PixelEditorState {
   pixelEditorOpen: boolean
@@ -85,23 +89,66 @@ export function syncPixelDocumentGpu(
   const doc = docs[docId]
   if (!doc) return
   const composite = compositeLayers(doc)
+  setPixelCompositeCache(docId, composite, doc.width, doc.height)
   uploadPixelDocumentTexture(docId, composite, doc.width, doc.height)
 }
 
+/** Coalesce rapid stroke updates into one composite+GPU upload per animation frame. */
+let pendingSyncDocs: Record<string, PixelDocument> | null = null
+const pendingSyncIds = new Set<string>()
+let pendingSyncRaf = 0
+
+function flushPendingPixelGpuSync(): void {
+  if (pendingSyncRaf) {
+    cancelAnimationFrame(pendingSyncRaf)
+    pendingSyncRaf = 0
+  }
+  const docs = pendingSyncDocs
+  const ids = [...pendingSyncIds]
+  pendingSyncDocs = null
+  pendingSyncIds.clear()
+  if (!docs) return
+  for (const id of ids) syncPixelDocumentGpu(docs, id)
+}
+
+export function schedulePixelDocumentGpuSync(
+  docs: Record<string, PixelDocument>,
+  docId: string
+): void {
+  pendingSyncDocs = docs
+  pendingSyncIds.add(docId)
+  if (pendingSyncRaf) return
+  pendingSyncRaf = requestAnimationFrame(() => {
+    pendingSyncRaf = 0
+    flushPendingPixelGpuSync()
+  })
+}
+
+export function flushPixelDocumentGpuSync(): void {
+  flushPendingPixelGpuSync()
+}
+
 export function resyncAllPixelDocuments(docs: Record<string, PixelDocument>): void {
+  flushPixelDocumentGpuSync()
   for (const id of Object.keys(docs)) syncPixelDocumentGpu(docs, id)
 }
 
 export function updatePixelDocument(
   docs: Record<string, PixelDocument>,
   docId: string,
-  updater: (doc: PixelDocument) => PixelDocument
+  updater: (doc: PixelDocument) => PixelDocument,
+  options?: { sync?: 'immediate' | 'raf' }
 ): Record<string, PixelDocument> {
   const doc = docs[docId]
   if (!doc) return docs
   const next = { ...docs, [docId]: updater(clonePixelDocument(doc)) }
-  syncPixelDocumentGpu(next, docId)
+  if (options?.sync === 'raf') schedulePixelDocumentGpuSync(next, docId)
+  else syncPixelDocumentGpu(next, docId)
   return next
+}
+
+export function releasePixelDocumentResources(docId: string): void {
+  clearPixelCompositeCache(docId)
 }
 
 export function paintAtPixel(
@@ -113,22 +160,28 @@ export function paintAtPixel(
   brushSize: number,
   tool: 'pencil' | 'eraser',
   symH: boolean,
-  symV: boolean
+  symV: boolean,
+  options?: { sync?: 'immediate' | 'raf' }
 ): Record<string, PixelDocument> {
-  return updatePixelDocument(docs, docId, (doc) => {
-    const layer = getActiveLayer(doc)
-    if (!layer) return doc
-    const px = Math.floor(x)
-    const py = Math.floor(y)
-    const bytes =
-      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-    const pixels = clonePixelLayer(layer).pixels
-    paintWithSymmetry(pixels, doc.width, doc.height, px, py, brushSize, bytes, symH, symV)
-    return {
-      ...doc,
-      layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
-    }
-  })
+  return updatePixelDocument(
+    docs,
+    docId,
+    (doc) => {
+      const layer = getActiveLayer(doc)
+      if (!layer) return doc
+      const px = Math.floor(x)
+      const py = Math.floor(y)
+      const bytes =
+        tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
+      const pixels = clonePixelLayer(layer).pixels
+      paintWithSymmetry(pixels, doc.width, doc.height, px, py, brushSize, bytes, symH, symV)
+      return {
+        ...doc,
+        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
+      }
+    },
+    options
+  )
 }
 
 export function paintStrokeOnDocument(
@@ -140,31 +193,37 @@ export function paintStrokeOnDocument(
   tool: 'pencil' | 'eraser',
   pixelPerfect: boolean,
   symH: boolean,
-  symV: boolean
+  symV: boolean,
+  options?: { sync?: 'immediate' | 'raf' }
 ): Record<string, PixelDocument> {
   if (points.length === 0) return docs
-  return updatePixelDocument(docs, docId, (doc) => {
-    const layer = getActiveLayer(doc)
-    if (!layer) return doc
-    const bytes =
-      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-    const pixels = clonePixelLayer(layer).pixels
-    drawStrokeWithSymmetry(
-      pixels,
-      doc.width,
-      doc.height,
-      points.map((p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })),
-      brushSize,
-      bytes,
-      pixelPerfect,
-      symH,
-      symV
-    )
-    return {
-      ...doc,
-      layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
-    }
-  })
+  return updatePixelDocument(
+    docs,
+    docId,
+    (doc) => {
+      const layer = getActiveLayer(doc)
+      if (!layer) return doc
+      const bytes =
+        tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
+      const pixels = clonePixelLayer(layer).pixels
+      drawStrokeWithSymmetry(
+        pixels,
+        doc.width,
+        doc.height,
+        points.map((p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })),
+        brushSize,
+        bytes,
+        pixelPerfect,
+        symH,
+        symV
+      )
+      return {
+        ...doc,
+        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
+      }
+    },
+    options
+  )
 }
 
 export function applyShapeToDocument(

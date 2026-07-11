@@ -16,6 +16,7 @@ export function SidePanelFileMenu() {
   const newProject = useAppStore((s) => s.newProject)
   const saveProject = useAppStore((s) => s.saveProject)
   const loadProjectFromDialog = useAppStore((s) => s.loadProjectFromDialog)
+  const setShowExportDialog = useAppStore((s) => s.setShowExportDialog)
 
   const confirmDiscard = useCallback(() => {
     if (!hasContent) return true
@@ -63,8 +64,9 @@ export function SidePanelFileMenu() {
       if (action === 'new') runNew()
       else if (action === 'save') void runSave()
       else if (action === 'load') void runLoad()
+      else if (action === 'import' || action === 'export') setShowExportDialog(true)
     },
-    [busy, runLoad, runNew, runSave]
+    [busy, runLoad, runNew, runSave, setShowExportDialog]
   )
 
   return (
@@ -74,10 +76,12 @@ export function SidePanelFileMenu() {
         { value: 'new', label: 'New' },
         { value: 'save', label: 'Save…' },
         { value: 'load', label: 'Open…' },
+        { value: 'import', label: 'Import…' },
+        { value: 'export', label: 'Export…' },
       ]}
       onSelect={handleSelect}
       disabled={busy}
-      title="New, save, or open a project"
+      title="New, save, open, import, or export"
       footer={message ? <p className="side-color-hint muted side-file-status">{message}</p> : null}
     />
   )

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { clearPixelCompositeCache } from '../pixel/pixelCompositeCache'
 
 const cache = new Map<string, THREE.Texture>()
 const pixelDocCache = new Map<string, THREE.DataTexture>()
@@ -67,6 +68,7 @@ export function releasePixelDocumentTexture(docId: string): void {
     pixelDocCache.delete(docId)
   }
   pixelListeners.delete(docId)
+  clearPixelCompositeCache(docId)
 }
 
 /** Drop GPU textures for pixel docs no longer in app state or undo history. */

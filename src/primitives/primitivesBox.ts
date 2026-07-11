@@ -120,9 +120,6 @@ function icosphereSubdivisions(segments: number): number {
 
 /** Icosphere ellipsoid inscribed in the box — chunky gem-like topology. */
 export function createInscribedIcosphere(center: Vec3, size: Vec3, segments = 8): MeshData {
-  if (import.meta.env?.DEV) {
-    console.log('[CAD trace] createInscribedIcosphere', { center, size, segments })
-  }
   const rx = size.x / 2
   const ry = size.y / 2
   const rz = size.z / 2

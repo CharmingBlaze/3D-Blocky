@@ -107,6 +107,10 @@ export function useViewportPointerHandlers({
     lastX: number
     lastY: number
   } | null>(null)
+  const pixelPaintPendingRef = useRef<{ docId: string; points: { x: number; y: number }[] } | null>(
+    null
+  )
+  const pixelPaintFlushRafRef = useRef<number | null>(null)
   const pixelShapeRef = useRef<{
     docId: string
     objectId: string
@@ -1195,8 +1199,29 @@ export function useViewportPointerHandlers({
               if (docId !== paint.docId) continue
               points.push(uvToPixelCoords(h.uv, doc.width, doc.height))
             }
-            if (points.length >= 2) store.paintOnModelStroke(paint.docId, points)
-            else if (points.length === 1) store.paintOnModelPixel(paint.docId, points[0].x, points[0].y)
+            if (points.length > 0) {
+              const pending = pixelPaintPendingRef.current
+              if (pending && pending.docId === paint.docId) {
+                // Keep stroke continuous: drop duplicate of last queued point if it matches.
+                const last = pending.points[pending.points.length - 1]
+                const startIdx =
+                  last && last.x === points[0]!.x && last.y === points[0]!.y ? 1 : 0
+                for (let i = startIdx; i < points.length; i++) pending.points.push(points[i]!)
+              } else {
+                pixelPaintPendingRef.current = { docId: paint.docId, points: [...points] }
+              }
+              if (pixelPaintFlushRafRef.current == null) {
+                pixelPaintFlushRafRef.current = requestAnimationFrame(() => {
+                  pixelPaintFlushRafRef.current = null
+                  const batch = pixelPaintPendingRef.current
+                  pixelPaintPendingRef.current = null
+                  if (!batch || batch.points.length === 0) return
+                  const s = useAppStore.getState()
+                  if (batch.points.length >= 2) s.paintOnModelStroke(batch.docId, batch.points)
+                  else s.paintOnModelPixel(batch.docId, batch.points[0]!.x, batch.points[0]!.y)
+                })
+              }
+            }
             pixelPaintRef.current = { ...paint, lastX: e.clientX, lastY: e.clientY }
           }
         }
@@ -1420,6 +1445,16 @@ export function useViewportPointerHandlers({
         return
       }
       if (pixelPaintRef.current) {
+        if (pixelPaintFlushRafRef.current != null) {
+          cancelAnimationFrame(pixelPaintFlushRafRef.current)
+          pixelPaintFlushRafRef.current = null
+        }
+        const batch = pixelPaintPendingRef.current
+        pixelPaintPendingRef.current = null
+        if (batch && batch.points.length > 0) {
+          if (batch.points.length >= 2) store.paintOnModelStroke(batch.docId, batch.points)
+          else store.paintOnModelPixel(batch.docId, batch.points[0]!.x, batch.points[0]!.y)
+        }
         store.commitPixelEdit()
         pixelPaintRef.current = null
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {

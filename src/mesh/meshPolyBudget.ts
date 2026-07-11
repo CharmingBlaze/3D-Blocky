@@ -52,15 +52,6 @@ export function enforceSceneObjectPolyBudget(
   const mesh = HalfEdgeMesh.fromObject(obj)
   if (mesh.vertexCount() <= budget) return obj
 
-  if (import.meta.env?.DEV) {
-    console.log('[CAD trace] enforceSceneObjectPolyBudget simplifying', {
-      name: obj.name,
-      fromVerts: mesh.vertexCount(),
-      fromFaces: mesh.faces.length,
-      budget,
-    })
-  }
-
   const simplified = options?.organic
     ? remeshOrganic(mesh, budget)
     : simplifyMesh(mesh, budget)

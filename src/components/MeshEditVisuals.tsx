@@ -46,6 +46,17 @@ const VERTEX_PIXEL_SIZE = {
   selected: 11,
 } as const
 
+/** Slightly smaller on-screen handles in perspective so they don't dominate the view. */
+const PERSPECTIVE_VERTEX_SCALE = 0.82
+
+function vertexPixelSizeForCamera(
+  state: keyof typeof VERTEX_PIXEL_SIZE,
+  camera: THREE.Camera
+): number {
+  const base = VERTEX_PIXEL_SIZE[state]
+  return camera instanceof THREE.PerspectiveCamera ? base * PERSPECTIVE_VERTEX_SCALE : base
+}
+
 function vertexColors(theme: ReturnType<typeof useTheme>) {
   return {
     idleFill: theme.vertexIdle,
@@ -99,7 +110,7 @@ function VertexHandle({
   const { camera, size } = useThree()
   const rootRef = useRef<THREE.Group>(null)
   const scaleRef = useRef<THREE.Group>(null)
-  const pixelSize = VERTEX_PIXEL_SIZE[state]
+  const pixelSize = vertexPixelSizeForCamera(state, camera)
   const depthTest = cullBackfaces
   const VERTEX = vertexColors(theme)
   const fill =

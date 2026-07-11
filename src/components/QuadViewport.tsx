@@ -171,6 +171,9 @@ function ViewportControls({
   const { layoutVisible, continuousFrames } = useViewportRender()
   const invalidate = useThree((s) => s.invalidate)
   const [domElement, setDomElement] = useState<HTMLElement | null>(null)
+  const [primaryOrbitModifier, setPrimaryOrbitModifier] = useState(false)
+  const interactionHeldRef = useRef(false)
+  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPerspective = view === 'perspective'
 
   useLayoutEffect(() => {
@@ -178,19 +181,58 @@ function ViewportControls({
   }, [rootRef])
 
   useEffect(() => {
-    return () => setDomElement(null)
+    return () => {
+      if (releaseTimerRef.current !== null) clearTimeout(releaseTimerRef.current)
+      if (interactionHeldRef.current) popViewportInteraction()
+      setDomElement(null)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!isPerspective) {
+      setPrimaryOrbitModifier(false)
+      return
+    }
+    const setOrbitOnKey = (event: KeyboardEvent) => {
+      if (event.key === 'Shift' || event.key === 'Alt') {
+        setPrimaryOrbitModifier(event.shiftKey || event.altKey)
+      }
+    }
+    const clearOrbit = () => setPrimaryOrbitModifier(false)
+    window.addEventListener('keydown', setOrbitOnKey)
+    window.addEventListener('keyup', setOrbitOnKey)
+    window.addEventListener('blur', clearOrbit)
+    return () => {
+      window.removeEventListener('keydown', setOrbitOnKey)
+      window.removeEventListener('keyup', setOrbitOnKey)
+      window.removeEventListener('blur', clearOrbit)
+    }
+  }, [isPerspective])
 
   const handleControlsChange = useCallback(() => {
     requestViewportFrame(invalidate, layoutVisible, continuousFrames)
   }, [invalidate, layoutVisible, continuousFrames])
 
   const handleControlsStart = useCallback(() => {
-    pushViewportInteraction()
+    if (releaseTimerRef.current !== null) {
+      clearTimeout(releaseTimerRef.current)
+      releaseTimerRef.current = null
+    }
+    if (!interactionHeldRef.current) {
+      interactionHeldRef.current = true
+      pushViewportInteraction()
+    }
   }, [])
 
   const handleControlsEnd = useCallback(() => {
-    popViewportInteraction()
+    if (releaseTimerRef.current !== null) clearTimeout(releaseTimerRef.current)
+    // Keep a few frames alive after the gesture so damping can settle naturally.
+    releaseTimerRef.current = setTimeout(() => {
+      releaseTimerRef.current = null
+      if (!interactionHeldRef.current) return
+      interactionHeldRef.current = false
+      popViewportInteraction()
+    }, 260)
   }, [])
 
   if (!domElement) return null
@@ -199,15 +241,20 @@ function ViewportControls({
     <OrbitControls
       domElement={domElement}
       makeDefault
-      enableDamping={false}
+      enableDamping
+      dampingFactor={0.12}
       enableRotate={isPerspective}
       enablePan
       enableZoom={enableZoom}
+      zoomSpeed={0.75}
+      panSpeed={0.9}
+      rotateSpeed={0.75}
       onChange={handleControlsChange}
       onStart={handleControlsStart}
       onEnd={handleControlsEnd}
       mouseButtons={{
-        LEFT: undefined,
+        // Laptop-friendly orbit: hold Shift or Alt while dragging with the primary button.
+        LEFT: primaryOrbitModifier && isPerspective ? MOUSE.ROTATE : undefined,
         MIDDLE: disableMiddlePan ? undefined : MOUSE.PAN,
         RIGHT: isPerspective ? MOUSE.ROTATE : undefined,
       }}
@@ -218,6 +265,7 @@ function ViewportControls({
 export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate, layoutVisible }: QuadViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
+  const shiftOrbitGestureRef = useRef(false)
   const [interactionDom, setInteractionDom] = useState<HTMLElement | null>(null)
 
   const bindContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -414,33 +462,67 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
               ? 'cursor-sculpt'
               : ''
 
+  const isOrbitModifierGesture = (e: React.PointerEvent) =>
+    view === 'perspective' && (e.shiftKey || e.altKey) && e.button === 0
+
+  const handleViewportPointerDown = (e: React.PointerEvent) => {
+    if (isOrbitModifierGesture(e)) {
+      shiftOrbitGestureRef.current = true
+      return
+    }
+    handlePointerDown(e)
+  }
+
+  const handleViewportPointerMove = (e: React.PointerEvent) => {
+    if (!shiftOrbitGestureRef.current) handlePointerMove(e)
+  }
+
+  const handleViewportPointerUp = (e: React.PointerEvent) => {
+    if (shiftOrbitGestureRef.current) {
+      shiftOrbitGestureRef.current = false
+      return
+    }
+    handlePointerUp(e)
+  }
+
+  const handleViewportPointerLeave = (e: React.PointerEvent) => {
+    if (shiftOrbitGestureRef.current) {
+      shiftOrbitGestureRef.current = false
+      return
+    }
+    handlePointerLeave(e)
+  }
+
   return (
     <div
       ref={bindContainerRef}
       className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}`}
       onClick={viewportGizmoActive ? undefined : onActivate}
-      onPointerDown={viewportGizmoActive ? undefined : handlePointerDown}
-      onPointerMove={viewportGizmoActive ? undefined : handlePointerMove}
-      onPointerUp={viewportGizmoActive ? undefined : handlePointerUp}
-      onPointerLeave={viewportGizmoActive ? undefined : handlePointerLeave}
+      onPointerDown={viewportGizmoActive ? undefined : handleViewportPointerDown}
+      onPointerMove={viewportGizmoActive ? undefined : handleViewportPointerMove}
+      onPointerUp={viewportGizmoActive ? undefined : handleViewportPointerUp}
+      onPointerLeave={viewportGizmoActive ? undefined : handleViewportPointerLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onContextMenu={view === 'perspective' ? (e) => e.preventDefault() : undefined}
+      title={view === 'perspective' ? 'Shift or Alt + left-drag to orbit · two-finger scroll to zoom' : undefined}
     >
-      <ViewportViewPicker view={view} onSelect={handleSelectView} />
-      <span className="viewport-stats">
-        {perspectivePrimitiveScrollHeight
-          ? `Drag or scroll height (${(primitiveBoxDraft?.scrollHeight ?? 4).toFixed(1)}) · double-click to place`
-          : roundedBoxParamWheel
-            ? `Rounded box · sub ${roundedBoxSubdivisions} · round ${Math.round(roundedBoxRoundness * 100)}% · scroll / Shift+scroll`
-            : selectedObj
-              ? `${selectedObj.name} · ${selectedObj.positions.length}v`
-              : `${vertCount}v total`}
-        {!perspectivePrimitiveScrollHeight &&
-          !roundedBoxParamWheel &&
-          selectionObjectIds.length > 1 &&
-          ` · ${selectionObjectIds.length} selected`}
-      </span>
+      <div className="viewport-view-chrome">
+        <span className="viewport-stats">
+          {perspectivePrimitiveScrollHeight
+            ? `Drag or scroll height (${(primitiveBoxDraft?.scrollHeight ?? 4).toFixed(1)}) · double-click to place`
+            : roundedBoxParamWheel
+              ? `Rounded box · sub ${roundedBoxSubdivisions} · round ${Math.round(roundedBoxRoundness * 100)}% · scroll / Shift+scroll`
+              : selectedObj
+                ? `${selectedObj.name} · ${selectedObj.positions.length}v`
+                : `${vertCount}v total`}
+          {!perspectivePrimitiveScrollHeight &&
+            !roundedBoxParamWheel &&
+            selectionObjectIds.length > 1 &&
+            ` · ${selectionObjectIds.length} selected`}
+        </span>
+        <ViewportViewPicker view={view} onSelect={handleSelectView} />
+      </div>
 
       {marqueeRect && <MarqueeOverlay rect={marqueeRect} />}
 
@@ -453,6 +535,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
       <Canvas
         className="viewport-canvas-root"
         frameloop={continuousFrames ? 'always' : 'demand'}
+        dpr={[1, 2]}
         orthographic={isOrtho}
         eventSource={containerRef as React.RefObject<HTMLElement>}
         camera={{
@@ -462,7 +545,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           far: 2000,
           up: setup.up,
         }}
-        gl={{ antialias: true, alpha: false }}
+        gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
         style={{
           background: viewportBg,
           pointerEvents: canvasPointerEvents ? 'auto' : 'none',

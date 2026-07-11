@@ -70,12 +70,41 @@ function ResizeHandle({
     [axis, onDrag]
   )
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 0.1 : 0.02
+    const increase = axis === 'column' ? e.key === 'ArrowRight' : e.key === 'ArrowDown'
+    const decrease = axis === 'column' ? e.key === 'ArrowLeft' : e.key === 'ArrowUp'
+    if (increase || decrease) {
+      e.preventDefault()
+      const current = axis === 'column'
+        ? useAppStore.getState().viewportColSplit
+        : useAppStore.getState().viewportRowSplit
+      onDrag(current + (increase ? step : -step))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      onDrag(0.18)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      onDrag(0.82)
+    }
+  }
+
   return (
     <div
       className={`viewport-splitter viewport-splitter-${axis}`}
       onPointerDown={handlePointerDown}
+      onKeyDown={handleKeyDown}
       role="separator"
       aria-orientation={axis === 'column' ? 'vertical' : 'horizontal'}
+      aria-label={`Resize viewport ${axis === 'column' ? 'columns' : 'rows'}`}
+      aria-valuemin={18}
+      aria-valuemax={82}
+      aria-valuenow={Math.round(
+        (axis === 'column'
+          ? useAppStore.getState().viewportColSplit
+          : useAppStore.getState().viewportRowSplit) * 100
+      )}
+      tabIndex={0}
     />
   )
 }

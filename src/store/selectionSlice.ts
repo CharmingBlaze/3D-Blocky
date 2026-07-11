@@ -98,6 +98,16 @@ function colorFromSelection(objects: SceneObject[], id: string | null): number |
   return objects.find((o) => o.id === id)?.color
 }
 
+/** Avoid notifying subscribers when a hover pick resolves to the same component. */
+function meshHoverEquals(a: MeshPickHit | null, b: MeshPickHit | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.objectId !== b.objectId || a.vertex !== b.vertex || a.face !== b.face) {
+    return false
+  }
+  if (!a.edge && !b.edge) return true
+  return a.edge?.[0] === b.edge?.[0] && a.edge?.[1] === b.edge?.[1]
+}
+
 function extrudeSyncForObject(obj: SceneObject | undefined): { extrudeAmount?: number } {
   if (isSketchDoodleObject(obj) && obj.sketchSource.isClosed) {
     return { extrudeAmount: obj.sketchSource.extrudeDepth }
@@ -530,7 +540,10 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
       get().commitHistory('Delete selection')
     },
 
-    setMeshHover: (hit) => set({ meshHover: hit } as unknown as Partial<S>),
+    setMeshHover: (hit) => {
+      if (meshHoverEquals(get().meshHover, hit)) return
+      set({ meshHover: hit } as unknown as Partial<S>)
+    },
 
     translateMeshSelection: (deltaWorld, basePositions) => {
       const { meshSelection, objects } = get()

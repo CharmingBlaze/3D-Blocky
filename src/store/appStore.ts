@@ -36,6 +36,7 @@ import {
   reorderPixelLayer,
   sampleColorFromDocument,
   syncPixelDocumentGpu,
+  flushPixelDocumentGpuSync,
   resyncAllPixelDocuments,
 } from '../pixel/pixelEditorSlice'
 import { resizePixelDocument as resizePixelDoc } from '../pixel/pixelDocument'
@@ -44,6 +45,8 @@ import { compositeLayers } from '../pixel/compositeLayers'
 import { exportCompositeToPngBlob } from '../pixel/pixelTools'
 import { serializePixelDocument, parsePixelDocumentFile } from '../pixel/pixelDocumentIO'
 import { exportFilenameForPixelDocument } from '../io/materialTextureExport'
+import { releasePixelDocumentTexture } from '../rendering/textureCache'
+import { clearPixelCompositeCache } from '../pixel/pixelCompositeCache'
 import { downloadBlob, downloadJSON, PIXEL_PROJECT_FILTERS } from '../io/download'
 import { TEXTURE_PROJECT_SUFFIX } from '../app/branding'
 import { resolveEffectiveMaterial, ensureObjectMaterial } from '../material/materials'
@@ -425,9 +428,22 @@ function purgeTextureResourcesForObjects(
     if (nextDocs[key]) {
       if (nextDocs === pixelDocuments) nextDocs = { ...pixelDocuments }
       delete nextDocs[key]
+      releasePixelDocumentTexture(key)
+      clearPixelCompositeCache(key)
     }
   }
   return { objectTextures: nextTextures, pixelDocuments: nextDocs }
+}
+
+let pendingTextureRevisionRaf = 0
+function scheduleTextureRevisionBump(
+  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void
+): void {
+  if (pendingTextureRevisionRaf) return
+  pendingTextureRevisionRaf = requestAnimationFrame(() => {
+    pendingTextureRevisionRaf = 0
+    set((s) => ({ pixelTextureRevision: s.pixelTextureRevision + 1 }))
+  })
 }
 
 function sanitizeImageSelectionIds(
@@ -919,6 +935,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   commitPixelEdit: () => {
     const pending = get().pixelEditHistoryPending
+    flushPixelDocumentGpuSync()
+    if (pendingTextureRevisionRaf) {
+      cancelAnimationFrame(pendingTextureRevisionRaf)
+      pendingTextureRevisionRaf = 0
+    }
     set({ pixelEditHistoryPending: false, pixelTextureRevision: get().pixelTextureRevision + 1 })
     if (pending) get().commitHistory('Pixel edit')
   },
@@ -1218,9 +1239,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       tool,
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
-      pixelEditorSymmetryV
+      pixelEditorSymmetryV,
+      { sync: 'raf' }
     )
     set({ pixelDocuments: docs })
+    scheduleTextureRevisionBump(set)
   },
 
   paintPixelShape: (tool, x0, y0, x1, y1) => {
@@ -1322,9 +1345,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorBrushSize,
       tool,
       pixelEditorSymmetryH,
-      pixelEditorSymmetryV
+      pixelEditorSymmetryV,
+      { sync: 'raf' }
     )
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+    set({ pixelDocuments: docs })
+    scheduleTextureRevisionBump(set)
   },
 
   paintOnModelStroke: (docId, points) => {
@@ -1348,9 +1373,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       tool,
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
-      pixelEditorSymmetryV
+      pixelEditorSymmetryV,
+      { sync: 'raf' }
     )
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+    set({ pixelDocuments: docs })
+    scheduleTextureRevisionBump(set)
   },
 
   paintOnModelShape: (docId, tool, x0, y0, x1, y1) => {
