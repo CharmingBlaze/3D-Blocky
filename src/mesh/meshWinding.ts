@@ -52,9 +52,6 @@ export function reorientFacesOutward(
   for (let fi = 0; fi < mesh.faces.length; fi++) {
     const face = mesh.faces[fi]!
     if (face.length < 3) continue
-    const a = mesh.positions[face[0]!]!
-    const b = mesh.positions[face[1]!]!
-    const c = mesh.positions[face[2]!]!
     const n = computeFaceNormal(mesh.positions, [face[0]!, face[1]!, face[2]!])
     // For quads/n-gons, use the first triangle's normal against face centroid.
     let cx = 0
