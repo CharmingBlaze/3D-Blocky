@@ -1,6 +1,7 @@
 import { generateBeadFromEllipse, generateBeadFromSilhouette } from '../mesh/bead'
 import { generateCapsuleSweep } from '../mesh/extrusion'
 import { generateCapsulePillow } from '../mesh/capsulePillow'
+import { generateVerticalShapedCapsule } from '../mesh/verticalCapsule'
 import { generateLathe } from '../mesh/lathe'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { reconstructOrganicMesh } from '../mesh/organicVolumeReconstruct'
@@ -122,6 +123,7 @@ function finalizeMesh(
     applyColor(result, color)
   } else if (
     !preserveDetail &&
+    intent !== 'vertical-capsule' &&
     (intent === 'soft-silhouette' ||
       intent === 'sharp-silhouette' ||
       intent === 'silhouette-extrude' ||
@@ -131,16 +133,28 @@ function finalizeMesh(
       result = simplifyMesh(result, polyBudget)
       applyColor(result, color)
     }
-  } else if (!preserveDetail && !latheObject && result.vertexCount() > polyBudget) {
+  } else if (
+    !preserveDetail &&
+    !latheObject &&
+    intent !== 'vertical-capsule' &&
+    result.vertexCount() > polyBudget
+  ) {
     result = simplifyMesh(result, polyBudget)
     applyColor(result, color)
   }
+
+  const hasCylindricalUvs =
+    intent === 'vertical-capsule' &&
+    result.uvs.length > 0 &&
+    result.faceUvIndices.length === result.faces.length
 
   return result.toObject(generateId(), customName ?? interpretation.name, {
     polyBudget: latheObject ? result.vertexCount() : preserveDetail ? result.vertexCount() : polyBudget,
     color,
     polyBudgetMode: latheObject || preserveDetail ? 'adaptive' : 'strict',
     smoothShading: latheObject ? false : undefined,
+    uvAutoPacked: hasCylindricalUvs ? true : undefined,
+    uvMappingMode: hasCylindricalUvs ? 'box' : undefined,
     transform: {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },
@@ -298,6 +312,7 @@ function generateForIntent(
       })
 
     case 'capsule-pillow': {
+      // Sample once here; pillow must not resample again (keeps depth edges aligned).
       const boundary = curvatureSampleClosedLoop(
         relative,
         tess.minAngleDeg,
@@ -310,6 +325,7 @@ function generateForIntent(
             depth: tess.extrudeDepth,
             minAngleDeg: tess.minAngleDeg,
             maxBoundaryVerts: tess.boundaryVerts,
+            preserveBoundary: true,
             color,
           })
         )
@@ -319,6 +335,23 @@ function generateForIntent(
         depth: tess.extrudeDepth,
         minAngleDeg: tess.minAngleDeg,
         maxBoundaryVerts: tess.boundaryVerts,
+        preserveBoundary: true,
+        color,
+      })
+    }
+
+    case 'vertical-capsule': {
+      const boundary = curvatureSampleClosedLoop(
+        relative,
+        tess.minAngleDeg,
+        tess.boundaryVerts
+      )
+      return generateVerticalShapedCapsule(boundary, {
+        radialSegments: tess.radialSegments,
+        profileRings: tess.profileRings,
+        minAngleDeg: tess.minAngleDeg,
+        maxBoundaryVerts: tess.boundaryVerts,
+        preserveBoundary: true,
         color,
       })
     }
@@ -441,7 +474,7 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
   )
 
   const effectiveTess =
-    extrudeAmount != null && (extrudeMode || preserveDetail)
+    extrudeAmount != null && (extrudeMode || preserveDetail || strokeMode === 'capsule')
       ? { ...tess, extrudeDepth: Math.max(1.6, Math.abs(extrudeAmount)) }
       : tess
 

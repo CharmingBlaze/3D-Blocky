@@ -55,6 +55,7 @@ export function vectorPathMeshName(
   if (extrudeMode) return closed ? 'Doodle' : 'Capsule'
   if (strokeMode === 'blob') return 'Blob'
   if (strokeMode === 'centerline') return 'Path'
+  if (strokeMode === 'capsule') return 'Capsule'
   return closed ? 'Doodle' : 'Path'
 }
 
@@ -116,6 +117,10 @@ export function vectorPathToMesh(
 
   if (options.strokeMode === 'centerline') {
     return polylineToMesh({ ...base, strokeMode: 'centerline' })
+  }
+
+  if (options.strokeMode === 'capsule') {
+    return polylineToMesh({ ...base, strokeMode: 'capsule' })
   }
 
   if (options.strokeMode === 'outline') {

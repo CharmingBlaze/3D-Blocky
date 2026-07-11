@@ -4,7 +4,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore, type ViewType } from '../store/appStore'
 import { planeToStroke3D } from '../utils/screenToWorld'
 import { isSketchNearClose } from '../stroke/sketchDoodle'
-import { ExtrudePreviewMesh } from './ExtrudePreviewMesh'
 import { useTheme } from '../theme/useTheme'
 
 interface StrokeCanvasProps {
@@ -20,7 +19,6 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     isDrawing,
     activeColor,
     defaultDepth,
-    sketchExtrudeMode,
     autoConnectPaths,
     closeThreshold,
   } = useAppStore(
@@ -31,7 +29,6 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       isDrawing: s.isDrawing,
       activeColor: s.activeColor,
       defaultDepth: s.defaultDepth,
-      sketchExtrudeMode: s.sketchExtrudeMode,
       autoConnectPaths: s.autoConnectPaths,
       closeThreshold: s.closeThreshold,
     }))
@@ -69,14 +66,13 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
 
   return (
     <>
-      {sketchExtrudeMode && <ExtrudePreviewMesh points={currentStroke} view={view} />}
       {strokePath.length >= 2 && (
         <Line
           points={strokePath}
           color={color}
-          lineWidth={sketchExtrudeMode ? 1.5 : 2}
+          lineWidth={2}
           transparent
-          opacity={sketchExtrudeMode ? 0.55 : 0.9}
+          opacity={0.9}
           depthTest={false}
         />
       )}

@@ -144,7 +144,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
   }, [autoConnectPaths, activeTool, vectorDocument.paths, view, defaultDepth])
 
   const showFillPreview =
-    strokeMode === 'outline' || strokeMode === 'blob' || penExtrudeMode
+    strokeMode === 'outline' || strokeMode === 'blob' || strokeMode === 'capsule' || penExtrudeMode
 
   if (roundedBoxPreviewGeometry) {
     return (

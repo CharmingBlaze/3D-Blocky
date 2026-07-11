@@ -249,6 +249,10 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
             drawInputMode: 'regular',
             activeTool: 'draw',
             toolCategory: 'draw',
+            sketchExtrudeMode: false,
+            sketchLatheMode: false,
+            penExtrudeMode: false,
+            penLatheMode: false,
             ...clearVectorDraftState(),
             ...clearStrokeDraftState(),
           })

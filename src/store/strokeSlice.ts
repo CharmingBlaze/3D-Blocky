@@ -18,7 +18,7 @@ import { planeToWorld3D } from '../utils/screenToWorld'
 import type { ViewType } from '../scene/viewTypes'
 import { emaSmoothPoint, movingAverageSmoothStroke } from '../stroke/strokeCapture'
 
-export type StrokeMode = 'outline' | 'centerline' | 'blob'
+export type StrokeMode = 'outline' | 'centerline' | 'blob' | 'capsule'
 export type DrawInputMode = 'regular' | 'vector-pen'
 
 export interface ExtrudeDragAnchor {
@@ -444,10 +444,22 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     },
 
     setStrokeMode: (mode) => {
+      // Outline / Path / Blob are mutually exclusive with Extrude and Lathe.
+      const clearExtras = {
+        sketchExtrudeMode: false,
+        sketchLatheMode: false,
+        penExtrudeMode: false,
+        penLatheMode: false,
+      }
       if (get().drawInputMode === 'regular') {
-        set({ strokeMode: mode, drawInputMode: 'regular', activeTool: 'draw' } as unknown as Partial<T>)
+        set({
+          strokeMode: mode,
+          drawInputMode: 'regular',
+          activeTool: 'draw',
+          ...clearExtras,
+        } as unknown as Partial<T>)
       } else {
-        set({ strokeMode: mode } as Partial<T>)
+        set({ strokeMode: mode, ...clearExtras } as Partial<T>)
       }
     },
 

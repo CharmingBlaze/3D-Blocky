@@ -151,7 +151,8 @@ function resampleSpacing(points: Vec2[], brushDensity: number): number {
     maxY = Math.max(maxY, p.y)
   }
   const diagonal = Math.hypot(maxX - minX, maxY - minY)
-  return Math.max(1.1, Math.min(3.5, diagonal / 56, brushDensity * 0.28))
+  // Slightly coarser than before so outline doodles stay lower-poly.
+  return Math.max(1.25, Math.min(3.8, diagonal / 48, brushDensity * 0.32))
 }
 
 function dedupeConsecutivePoints(points: Vec2[], epsilon = 0.01): Vec2[] {
@@ -288,7 +289,7 @@ function buildClosedSoftBlob(
 ): HalfEdgeMesh {
   const maxBoundary = preserveDetail
     ? relative.length
-    : Math.max(12, Math.min(relative.length, Math.floor(polyBudget / 3)))
+    : Math.max(10, Math.min(relative.length, Math.floor(polyBudget / 4), 28))
   const boundary =
     relative.length <= maxBoundary ? relative : capBoundaryPoints(relative, maxBoundary)
   const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (boundary.length + 4))))

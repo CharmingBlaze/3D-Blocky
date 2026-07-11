@@ -88,10 +88,20 @@ function commitPrimitiveLikeUI(
 function inwardFaceCount(positions: { x: number; y: number; z: number }[], faces: number[][], center = ORIGIN) {
   let inward = 0
   for (const face of faces) {
-    if (face.length !== 3) continue
-    const tri = face as [number, number, number]
+    if (face.length < 3) continue
+    const tri = [face[0]!, face[1]!, face[2]!] as [number, number, number]
     const n = computeFaceNormal(positions, tri)
-    const c = faceCentroid(positions, tri)
+    let cx = 0
+    let cy = 0
+    let cz = 0
+    for (const vi of face) {
+      const p = positions[vi]!
+      cx += p.x
+      cy += p.y
+      cz += p.z
+    }
+    const inv = 1 / face.length
+    const c = { x: cx * inv, y: cy * inv, z: cz * inv }
     const dot = n.x * (c.x - center.x) + n.y * (c.y - center.y) + n.z * (c.z - center.z)
     if (dot < 0) inward++
   }
@@ -365,6 +375,75 @@ describe('MeshBuilder', () => {
     const center = meshCentroid(obj!.positions)
     expect(inwardFaceCount(obj!.positions, obj!.faces, center)).toBe(0)
     expect(meshSignedVolume(HalfEdgeMesh.fromObject(obj!))).toBeGreaterThan(0)
+  })
+
+  it('closed capsule stroke builds a vertical volumetric capsule', () => {
+    const square = [
+      { x: -20, y: -40 },
+      { x: 20, y: -40 },
+      { x: 20, y: 40 },
+      { x: -20, y: 40 },
+      { x: -20, y: -40 },
+    ]
+    const obj = polylineToMesh({
+      points: square,
+      view: 'front',
+      polyBudget: 128,
+      brushDensity: 12,
+      strokeMode: 'capsule',
+      rdpTolerance: 2,
+      closeThreshold: 12,
+      defaultDepth: 0,
+      color: 0xff8800,
+      pathClosed: true,
+    })
+    expect(obj).not.toBeNull()
+    expect(obj!.name).toBe('Capsule')
+    expect(obj!.positions.length).toBeGreaterThan(16)
+    expect(obj!.positions.length).toBeLessThan(200)
+    // Standing capsule: tall in Y, with real thickness into the view (Z).
+    expect(axisExtent(obj!, 'y')).toBeGreaterThan(50)
+    expect(axisExtent(obj!, 'z')).toBeGreaterThan(15)
+    expect(axisExtent(obj!, 'z')).toBeGreaterThan(axisExtent(obj!, 'x') * 0.35)
+    const center = meshCentroid(obj!.positions)
+    expect(inwardFaceCount(obj!.positions, obj!.faces, center)).toBe(0)
+    expect(meshSignedVolume(HalfEdgeMesh.fromObject(obj!))).toBeGreaterThan(0)
+    // Body is quads; only pole caps stay as triangles.
+    const quadCount = obj!.faces.filter((f) => f.length === 4).length
+    const triCount = obj!.faces.filter((f) => f.length === 3).length
+    expect(quadCount).toBeGreaterThan(triCount)
+    expect(quadCount).toBeGreaterThan(8)
+    // Cylindrical UVs baked in — body unwraps as one strip, not per-triangle islands.
+    expect(obj!.uvs?.length).toBeGreaterThan(0)
+    expect(obj!.faceUvIndices?.length).toBe(obj!.faces.length)
+    expect(obj!.uvAutoPacked).toBe(true)
+  })
+
+  it('open capsule stroke sweeps a capped capsule along the path', () => {
+    const path = [
+      { x: 0, y: 0 },
+      { x: 10, y: 5 },
+      { x: 25, y: 8 },
+      { x: 40, y: 0 },
+    ]
+    const obj = polylineToMesh({
+      points: path,
+      view: 'front',
+      polyBudget: 128,
+      brushDensity: 12,
+      strokeMode: 'capsule',
+      rdpTolerance: 2,
+      closeThreshold: 12,
+      defaultDepth: 0,
+      color: 0x88ff00,
+      extrudeAmount: 8,
+    })
+    expect(obj).not.toBeNull()
+    expect(obj!.name).toBe('Capsule')
+    expect(obj!.positions.length).toBeGreaterThan(16)
+    expect(obj!.positions.length).toBeLessThan(200)
+    expect(obj!.faces.length).toBeGreaterThan(16)
+    expect(axisExtent(obj!, 'x')).toBeGreaterThan(20)
   })
 
   it.each(CAD_PRIMITIVE_TYPES)('CAD %s keeps welded topology for component edits', (type) => {

@@ -8,29 +8,32 @@ import {
   computeFaceNormal,
   faceCentroid,
   meshCentroid,
-  flipFace,
   type TriangleFace,
 } from './MeshBuilder'
 
-/** Signed volume — positive when triangle windings are consistently oriented. */
+/** Signed volume — positive when face windings are consistently oriented. */
 export function meshSignedVolume(mesh: HalfEdgeMesh): number {
   let volume = 0
   for (const face of mesh.faces) {
     if (face.length < 3) continue
-    const a = mesh.positions[face[0]]
-    const b = mesh.positions[face[1]]
-    const c = mesh.positions[face[2]]
-    volume +=
-      a.x * (b.y * c.z - c.y * b.z) +
-      b.x * (c.y * a.z - a.y * c.z) +
-      c.x * (a.y * b.z - b.y * a.z)
+    const a = mesh.positions[face[0]!]!
+    for (let i = 1; i < face.length - 1; i++) {
+      const b = mesh.positions[face[i]!]!
+      const c = mesh.positions[face[i + 1]!]!
+      volume +=
+        a.x * (b.y * c.z - c.y * b.z) +
+        b.x * (c.y * a.z - a.y * c.z) +
+        c.x * (a.y * b.z - b.y * a.z)
+    }
   }
   return volume / 6
 }
 
 export function flipMeshFaces(mesh: HalfEdgeMesh): void {
-  for (const face of mesh.faces) {
-    face.reverse()
+  for (let fi = 0; fi < mesh.faces.length; fi++) {
+    mesh.faces[fi]!.reverse()
+    const uvs = mesh.faceUvIndices[fi]
+    if (uvs) uvs.reverse()
   }
   mesh.buildHalfEdges()
 }
@@ -46,20 +49,35 @@ export function reorientFacesOutward(
   if (mesh.faces.length === 0) return mesh
 
   const center = refPoint ?? meshCentroid(mesh.positions)
-  for (const face of mesh.faces) {
-    if (face.length !== 3) continue
-    const tri = face as TriangleFace
-    const n = computeFaceNormal(mesh.positions, tri)
-    const c = faceCentroid(mesh.positions, tri)
-    const dx = c.x - center.x
-    const dy = c.y - center.y
-    const dz = c.z - center.z
+  for (let fi = 0; fi < mesh.faces.length; fi++) {
+    const face = mesh.faces[fi]!
+    if (face.length < 3) continue
+    const a = mesh.positions[face[0]!]!
+    const b = mesh.positions[face[1]!]!
+    const c = mesh.positions[face[2]!]!
+    const n = computeFaceNormal(mesh.positions, [face[0]!, face[1]!, face[2]!])
+    // For quads/n-gons, use the first triangle's normal against face centroid.
+    let cx = 0
+    let cy = 0
+    let cz = 0
+    for (const vi of face) {
+      const p = mesh.positions[vi]!
+      cx += p.x
+      cy += p.y
+      cz += p.z
+    }
+    const inv = 1 / face.length
+    cx *= inv
+    cy *= inv
+    cz *= inv
+    const dx = cx - center.x
+    const dy = cy - center.y
+    const dz = cz - center.z
     const dot = n.x * dx + n.y * dy + n.z * dz
     if (dot < 0) {
-      const flipped = flipFace(tri)
-      face[0] = flipped[0]
-      face[1] = flipped[1]
-      face[2] = flipped[2]
+      face.reverse()
+      const uv = mesh.faceUvIndices[fi]
+      if (uv) uv.reverse()
     }
   }
   mesh.buildHalfEdges()

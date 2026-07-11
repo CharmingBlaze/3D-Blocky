@@ -87,6 +87,7 @@ function hemiScale(t: number): number {
 /**
  * Paint 3D-style doodle pillow: exact drawn outline at the equator,
  * low-poly capsule profile in depth (hemisphere bottom + hemisphere top).
+ * Rings scale radially from the centroid so depth edges stay clean.
  */
 export function generateCapsulePillow(
   polygon: Vec2[],
@@ -111,7 +112,7 @@ export function generateCapsulePillow(
   const depth = Math.max(1.6, rawDepth)
   const fitR = depth / 2
   const centroid = boundaryCentroid(boundary)
-  const bands = Math.max(1, hemiRings)
+  const bands = Math.max(2, hemiRings)
   const rings: number[][] = []
 
   const bottomPole = mesh.positions.length

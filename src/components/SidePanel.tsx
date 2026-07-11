@@ -32,6 +32,11 @@ const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
   { id: 'centerline', label: 'Path', hint: 'Open stroke → rounded tube path' },
   { id: 'blob', label: 'Blob', hint: 'Low-poly faceted volume (alternative doodle style)' },
+  {
+    id: 'capsule',
+    label: 'Capsule',
+    hint: 'Closed loop → silhouette capsule; open stroke → bend a capsule along the path',
+  },
 ]
 
 const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate', 'relax', 'pinch']
@@ -865,7 +870,7 @@ export function SidePanel() {
                 </p>
               </>
             )}
-            <SideBtnGroup cols={3}>
+            <SideBtnGroup cols={4}>
               {STROKE_MODES.map((m) => (
                 <button
                   key={m.id}

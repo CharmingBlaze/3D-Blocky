@@ -29,6 +29,7 @@ export type StrokeIntent =
   | 'path-tube'
   | 'path-capsule'
   | 'capsule-pillow'
+  | 'vertical-capsule'
   | 'profile-lathe'
   | 'hole-line'
 
@@ -160,6 +161,21 @@ export function interpretStroke(
       ...base,
       intent: 'soft-silhouette',
       name: lobes > 1 ? `Blob (${lobes} lobes)` : 'Blob',
+    }
+  }
+
+  if (strokeMode === 'capsule') {
+    if (!isClosed) {
+      return {
+        ...base,
+        intent: isStraightLine(points) ? 'hole-line' : 'path-capsule',
+        name: isStraightLine(points) ? 'Hole' : 'Capsule',
+      }
+    }
+    return {
+      ...base,
+      intent: 'vertical-capsule',
+      name: 'Capsule',
     }
   }
 
@@ -336,6 +352,24 @@ export function allocateTessellation(
           : Math.max(16, Math.min(Math.floor(budget * 0.85), 64)),
         extrudeDepth: Math.max(4, cappedDensity * 1.1),
         minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : Math.max(8, minAngleDeg - 4),
+      }
+    }
+    case 'vertical-capsule': {
+      const profileRings = Math.max(
+        6,
+        Math.min(14, Math.floor(budget / Math.max(8, cappedDensity)))
+      )
+      const radialSegments = Math.max(
+        6,
+        Math.min(10, Math.floor(budget / Math.max(6, profileRings)))
+      )
+      return {
+        radialSegments,
+        profileRings,
+        pathSamples: 0,
+        boundaryVerts: Math.max(12, Math.min(Math.floor(budget * 0.5), 36)),
+        extrudeDepth: Math.max(4, cappedDensity),
+        minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : minAngleDeg,
       }
     }
     case 'profile-lathe': {

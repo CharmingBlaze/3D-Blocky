@@ -67,7 +67,6 @@ function stitchRingsUpward(
       const lo1 = ringLower[next]!
       const hi0 = ringUpper[si]!
       const hi1 = ringUpper[next]!
-      // Outward-facing quads between latitude rings (same winding as TubeGeometry)
       mesh.faces.push([lo0, lo1, hi1])
       mesh.faces.push([lo0, hi1, hi0])
       mesh.faceColors.push(color, color)
@@ -78,6 +77,7 @@ function stitchRingsUpward(
 /**
  * Paint 3D soft doodle — solid filled pillow; only the outer shell is meshed
  * (no internal slice caps, which caused visible holes in the silhouette).
+ * Rings scale radially so silhouette edges stay aligned in depth.
  */
 export function generateSoftInflateDome(
   polygon: Vec2[],

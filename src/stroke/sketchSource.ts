@@ -85,7 +85,7 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     })
   }
 
-  const maxBoundary = Math.max(8, Math.min(20, Math.floor(polyBudget / 4)))
+  const maxBoundary = Math.max(8, Math.min(18, Math.floor(polyBudget / 4)))
   const boundary = capBoundaryPoints(relative, maxBoundary)
   const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (maxBoundary + 4))))
 
