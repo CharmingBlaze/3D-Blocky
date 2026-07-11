@@ -640,23 +640,30 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
     },
 
     setSelectionSmoothShading: (smooth) => {
-      const { selectionObjectIds, selectedObjectId, objects } = get()
-      const ids =
-        selectionObjectIds.length > 0
-          ? selectionObjectIds
-          : selectedObjectId
-            ? [selectedObjectId]
-            : []
+      const { selectionObjectIds, selectedObjectId, meshSelection, objects } = get()
+      const ids = [
+        ...new Set([
+          ...(selectionObjectIds.length > 0
+            ? selectionObjectIds
+            : selectedObjectId
+              ? [selectedObjectId]
+              : []),
+          ...(meshSelection?.objectId ? [meshSelection.objectId] : []),
+        ]),
+      ]
       if (ids.length === 0) return
 
       const idSet = new Set(ids)
       const targets = ids
         .map((id) => objects.find((o) => o.id === id))
         .filter((o): o is SceneObject => o != null)
+      if (targets.length === 0) return
       if (targets.every((o) => o.smoothShading === smooth)) return
 
       set((s) => ({
-        objects: s.objects.map((o) => (idSet.has(o.id) ? { ...o, smoothShading: smooth } : o)),
+        objects: s.objects.map((o) =>
+          idSet.has(o.id) ? { ...o, smoothShading: smooth } : o
+        ),
       }) as unknown as Partial<S>)
       get().commitHistory(smooth ? 'Shade smooth' : 'Shade flat')
     },

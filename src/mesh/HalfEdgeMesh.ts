@@ -26,6 +26,8 @@ export interface MeshData {
   uvs?: Float32Array
   /** Per-corner RGB (3) or RGBA (4) — length = cornerCount * components */
   faceColors: Float32Array
+  /** Blender-style shade-smooth normals (topology-averaged); length = vertexCount * 3 */
+  normals?: Float32Array
   flatShading: boolean
 }
 
@@ -242,18 +244,30 @@ export class HalfEdgeMesh {
   }
 
   getVertexNormal(vi: number, averaged = true): Vec3 {
-    const normals: Vec3[] = []
+    let sum = { x: 0, y: 0, z: 0 }
+    let any = false
+    let first: Vec3 | null = null
     for (const face of this.faces) {
-      if (!face.includes(vi)) continue
       const idx = face.indexOf(vi)
-      const a = this.positions[face[idx]]
-      const b = this.positions[face[(idx + 1) % face.length]]
-      const c = this.positions[face[(idx + face.length - 1) % face.length]]
-      normals.push(faceNormal(a, b, c))
+      if (idx < 0) continue
+      const a = this.positions[face[idx]]!
+      const b = this.positions[face[(idx + 1) % face.length]!]!
+      const c = this.positions[face[(idx + face.length - 1) % face.length]!]!
+      const n = faceNormal(a, b, c)
+      if (!averaged) return n
+      // Angle-weighted average — matches Blender Shade Smooth.
+      const e1 = normalize3(sub3(b, a))
+      const e2 = normalize3(sub3(c, a))
+      const cos = Math.max(-1, Math.min(1, e1.x * e2.x + e1.y * e2.y + e1.z * e2.z))
+      const angle = Math.acos(cos)
+      sum = add3(sum, scale3(n, angle))
+      if (!any) {
+        first = n
+        any = true
+      }
     }
-    if (normals.length === 0) return { x: 0, y: 1, z: 0 }
-    if (!averaged) return normals[0]
-    const sum = normals.reduce((acc, n) => add3(acc, n), { x: 0, y: 0, z: 0 })
+    if (!any) return { x: 0, y: 1, z: 0 }
+    if (!averaged) return first ?? { x: 0, y: 1, z: 0 }
     return normalize3(sum)
   }
 
@@ -323,7 +337,10 @@ export class HalfEdgeMesh {
         }
       }
     } else {
-      // Blender-style shade smooth: weld corners so vertex normals interpolate.
+      // Blender-style shade smooth: weld for UVs/colors, but keep topology normals
+      // so UV seams don't create hard shading edges.
+      const topoNormals = this.positions.map((_, vi) => this.getVertexNormal(vi, true))
+      const normals: number[] = []
       const weldMap = new Map<string, number>()
 
       const weldKey = (vi: number, fi: number, ci: number): string => {
@@ -349,6 +366,8 @@ export class HalfEdgeMesh {
         const renderIdx = positions.length / 3
         const p = this.positions[vi]!
         positions.push(p.x, p.y, p.z)
+        const n = topoNormals[vi]!
+        normals.push(n.x, n.y, n.z)
         if (hasUv) {
           const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
           const uv = this.uvs[uvIdx] ?? { u: 0, v: 0 }
@@ -383,6 +402,15 @@ export class HalfEdgeMesh {
             indices.push(cornerIdx[0]!, cornerIdx[i]!, cornerIdx[i + 1]!)
           }
         }
+      }
+
+      return {
+        positions: new Float32Array(positions),
+        indices: new Uint32Array(indices),
+        uvs: uvs.length > 0 ? new Float32Array(uvs) : undefined,
+        faceColors: new Float32Array(faceColors),
+        normals: new Float32Array(normals),
+        flatShading,
       }
     }
 

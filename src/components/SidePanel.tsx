@@ -24,6 +24,7 @@ import { PrimitivesToolbarToggle } from './PrimitivesToolbar'
 import { activeExtrudeMode, activeLatheMode, activeLatheCaps } from '../stroke/drawExtrudeMode'
 import { getLatheViewHint } from '../stroke/latheProfile'
 import { SidePanelPixelEditorMenu } from './SidePanelPixelEditorMenu'
+import { SideButtonDropdown } from './SideButtonDropdown'
 import { resolveTargetObjectIds } from '../material/materialEditorSlice'
 import { computeSelectionFitFrame } from '../viewport/fitViewports'
 
@@ -526,12 +527,16 @@ export function SidePanel() {
   const isSculptTool = SCULPT_TOOLS.includes(activeTool)
 
   const allSelectedSmooth =
-    selectionCount > 0 &&
-    selectionObjectIds.every((id) => objects.find((o) => o.id === id)?.smoothShading)
+    (selectionCount > 0 || !!selectedObjectId) &&
+    (selectionCount > 0 ? selectionObjectIds : selectedObjectId ? [selectedObjectId] : []).every(
+      (id) => objects.find((o) => o.id === id)?.smoothShading
+    )
 
   const allSelectedFlat =
-    selectionCount > 0 &&
-    selectionObjectIds.every((id) => !objects.find((o) => o.id === id)?.smoothShading)
+    (selectionCount > 0 || !!selectedObjectId) &&
+    (selectionCount > 0 ? selectionObjectIds : selectedObjectId ? [selectedObjectId] : []).every(
+      (id) => !objects.find((o) => o.id === id)?.smoothShading
+    )
 
   const selectedSubDActive =
     selectionCount > 0 &&
@@ -676,23 +681,6 @@ export function SidePanel() {
           </SideSection>
 
           <SideSection title="View" columns={2} order={70}>
-            <select
-              className="shape-kind-select side-select"
-              value={viewportDisplayMode}
-              onChange={(e) =>
-                setViewportDisplayMode(e.target.value as ViewportDisplayMode)
-              }
-              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
-            >
-              {VIEWPORT_DISPLAY_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {VIEWPORT_DISPLAY_CONFIG[mode].label}
-                </option>
-              ))}
-            </select>
-            <p className="side-color-hint muted">
-              {VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
-            </p>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${showGrid ? 'active' : ''}`}
@@ -755,6 +743,18 @@ export function SidePanel() {
             >
               Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
             </button>
+            <SideButtonDropdown
+              label="View"
+              value={viewportDisplayMode}
+              options={VIEWPORT_DISPLAY_MODES.map((mode) => ({
+                value: mode,
+                label: VIEWPORT_DISPLAY_CONFIG[mode].label,
+              }))}
+              onSelect={(mode) => setViewportDisplayMode(mode as ViewportDisplayMode)}
+              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
+              alwaysShowLabel
+              active
+            />
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
@@ -1431,7 +1431,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${allSelectedFlat ? 'active' : ''}`}
                 onClick={() => setSelectionSmoothShading(false)}
-                disabled={selectionCount === 0}
+                disabled={selectionCount === 0 && !selectedObjectId}
                 title="Shade flat — faceted low-poly look (Blender Shade Flat)"
               >
                 Shade Flat
@@ -1439,7 +1439,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${allSelectedSmooth ? 'active' : ''}`}
                 onClick={() => setSelectionSmoothShading(true)}
-                disabled={selectionCount === 0}
+                disabled={selectionCount === 0 && !selectedObjectId}
                 title="Shade smooth — averaged vertex normals (Blender Shade Smooth)"
               >
                 Shade Smooth

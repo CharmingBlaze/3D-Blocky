@@ -1,6 +1,6 @@
 import { useMemo, useRef, useEffect, memo } from 'react'
 import { useThree } from '@react-three/fiber'
-import { Edges, Outlines } from '@react-three/drei'
+import { Outlines } from '@react-three/drei'
 import * as THREE from 'three'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { computeVertexDensity } from '../sculpt/sculptTools'
@@ -72,13 +72,16 @@ export function buildViewportMeshGeometry(
   }
 
   if (flatShading) setFlatNormalsFromIndices(geo)
-  else geo.computeVertexNormals()
+  else if (data.normals && data.normals.length === data.positions.length) {
+    geo.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3))
+  } else {
+    geo.computeVertexNormals()
+  }
   return geo
 }
 
 function MeshMaterial({
   config,
-  flatShading,
   emissive,
   emissiveIntensity,
   wireframe,
@@ -92,7 +95,6 @@ function MeshMaterial({
   xray = false,
 }: {
   config: (typeof VIEWPORT_DISPLAY_CONFIG)[ViewportDisplayMode]
-  flatShading: boolean
   emissive: THREE.Color
   emissiveIntensity: number
   wireframe?: boolean
@@ -111,9 +113,11 @@ function MeshMaterial({
     : undefined
 
   const isTransparent = xray || (pixelTextureBlend ? opacity < 1 : opacity < 1 || textureAlpha)
+  // Flat vs smooth is controlled by geometry normals (HalfEdgeMesh.toMeshData), not
+  // material.flatShading — toggling that flag often fails to recompile the shader in R3F.
   const common = {
     vertexColors: useVertexColors,
-    flatShading,
+    flatShading: false,
     side,
     wireframe: wireframe ?? config.wireframe,
     transparent: isTransparent,
@@ -276,6 +280,10 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
+  useEffect(() => {
+    requestAnimationFrame(() => invalidate())
+  }, [flatShading, geometry, invalidate])
+
   uvPatchRef.current.topology = renderObject
   uvPatchRef.current.flatShading = flatShading
 
@@ -302,19 +310,15 @@ export const MeshRenderer = memo(function MeshRenderer({
   const emissiveIntensity = 0
 
   const edgeColor = displayMode === 'model' ? meshOutlineSecondary : meshOutline
-  const edgeThreshold = !flatShading
-    ? 50
-    : displayMode === 'model'
-      ? 15
-      : 12
   const wireColor = meshOutline
 
+  // Model-view outlines use topology edges for both flat and smooth shading.
+  // (drei <Edges> fails to draw reliably on smooth/welded meshes.)
   const topologyEdgeGeometry = useMemo(() => {
-    if (!config.showEdgeOutline || !flatShading) return null
+    if (!config.showEdgeOutline) return null
     return buildEdgeSegmentsGeometry(renderObject, collectUniqueEdges(renderObject))
   }, [
     config.showEdgeOutline,
-    flatShading,
     renderObject.positions,
     renderObject.faces,
   ])
@@ -325,11 +329,15 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   return (
     <group>
-      <mesh ref={meshRef} geometry={geometry} renderOrder={0}>
+      <mesh
+        ref={meshRef}
+        key={flatShading ? 'shade-flat' : 'shade-smooth'}
+        geometry={geometry}
+        renderOrder={0}
+      >
         <MeshMaterial
-          key={texture ? `${textureUrl}-${texture.uuid}` : textureUrl ?? 'no-tex'}
+          key={`${flatShading ? 'flat' : 'smooth'}-${texture ? `${textureUrl}-${texture.uuid}` : textureUrl ?? 'no-tex'}`}
           config={config}
-          flatShading={flatShading}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
           opacity={xrayOpacity}
@@ -354,9 +362,6 @@ export const MeshRenderer = memo(function MeshRenderer({
               polygonOffsetUnits={-1}
             />
           </lineSegments>
-        )}
-        {config.showEdgeOutline && !flatShading && (
-          <Edges threshold={edgeThreshold} color={edgeColor} renderOrder={2} />
         )}
         {objectSelectionOutline && (
           <Outlines
