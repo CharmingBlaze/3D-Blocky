@@ -202,8 +202,7 @@ export const MeshRenderer = memo(function MeshRenderer({
     config.supportsTexture &&
     Boolean(pixelDoc || textureUrl)
   const usePixelTexture = Boolean(pixelDoc && useTexture)
-  const meshSide =
-    usePixelTexture && !materialSettings.doubleSided ? THREE.FrontSide : THREE.DoubleSide
+  const meshSide = materialSettings.doubleSided ? THREE.DoubleSide : THREE.FrontSide
   const meshOpacity = materialSettings.opacity
   const viewportXRay = useAppStore((s) => s.viewportXRay)
   const xrayOpacity = viewportXRay

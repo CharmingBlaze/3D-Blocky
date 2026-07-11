@@ -11,6 +11,7 @@ import { cloneSceneObject } from '../mesh/meshOps'
 import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
+import { stampDrawMaterial } from '../material/materialEditorSlice'
 import type { UvTextureInfo } from './appStore'
 
 export type { SymmetryAxis } from '../symmetry/symmetry'
@@ -63,6 +64,7 @@ export interface SceneObjectsSliceDeps {
 
 type SceneStore = SceneObjectsLayoutState & {
   polyBudget: number
+  drawDoubleSided: boolean
   symmetryEnabled: boolean
   symmetryAxis: SymmetryAxis
   symmetryPlane: number
@@ -89,9 +91,10 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
 
   return {
     addObject: (obj, options) => {
-      const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget } = store()
+      const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget, drawDoubleSided } = store()
       const budget = obj.polyBudget ?? polyBudget
-      const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(obj), budget)
+      const stamped = stampDrawMaterial(obj, drawDoubleSided)
+      const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(stamped), budget)
       const batch = [prepared]
       if (symmetryEnabled && !options?.skipSymmetry) {
         batch.push(mirrorSceneObject(prepared, symmetryAxis, symmetryPlane))

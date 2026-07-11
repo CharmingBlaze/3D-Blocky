@@ -211,6 +211,15 @@ export function faceIndicesForMaterialEdit(
   return 'object'
 }
 
-export function ensureNewObjectMaterial(color: number): Material {
-  return defaultMaterial(color)
+export function ensureNewObjectMaterial(color: number, doubleSided = false): Material {
+  return { ...defaultMaterial(color), doubleSided }
+}
+
+/** Stamp the draw-sides preference onto a newly created scene object. */
+export function stampDrawMaterial(obj: SceneObject, doubleSided: boolean): SceneObject {
+  const base = obj.material ? cloneMaterial(obj.material) : defaultMaterial(obj.color)
+  return {
+    ...obj,
+    material: { ...base, doubleSided },
+  }
 }

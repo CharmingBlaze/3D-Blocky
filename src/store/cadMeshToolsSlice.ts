@@ -18,6 +18,7 @@ import {
   commitPolyDrawFace,
   flipFacesWinding,
 } from '../polyDraw/polyDrawCommit'
+import { stampDrawMaterial } from '../material/materialEditorSlice'
 import type { SelectionMode } from './selectionSlice'
 import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
 import type { Vec3 } from '../utils/math'
@@ -236,6 +237,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
     polyDrawCancel: () => set({ polyDrawDraft: null, polyDrawHover: null } as unknown as Partial<S>),
 
     polyDrawFinish: () => {
+      const state = get() as ReturnType<typeof get> & { drawDoubleSided?: boolean }
       const {
         polyDrawDraft,
         polyDrawMode,
@@ -244,7 +246,8 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         symmetryEnabled,
         symmetryAxis,
         symmetryPlane,
-      } = get()
+      } = state
+      const drawDoubleSided = state.drawDoubleSided ?? false
       if (!polyDrawDraft || polyDrawDraft.points.length < 3) {
         set({ polyDrawDraft: null } as unknown as Partial<S>)
         return
@@ -265,6 +268,11 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       const isNewObject =
         result.removedIds.length === 0 && !objects.some((o) => o.id === result.primaryId)
       let nextObjects = result.objects
+      if (isNewObject) {
+        nextObjects = nextObjects.map((o) =>
+          o.id === result.primaryId ? stampDrawMaterial(o, drawDoubleSided) : o
+        )
+      }
 
       const facesToSelect = Array.from(
         { length: result.newFaceCount },

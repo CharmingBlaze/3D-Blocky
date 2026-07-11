@@ -78,6 +78,7 @@ export function defaultMaterial(color = 0x6ecbf5): Material {
     mode: 'solid',
     solidColor: numberToRgba4(color),
     opacity: 1,
+    // Match historical viewport behavior (solids rendered both sides).
     doubleSided: false,
   }
 }

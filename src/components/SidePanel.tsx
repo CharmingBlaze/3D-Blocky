@@ -258,6 +258,8 @@ export function SidePanel() {
     setAutoConnectPaths,
     smoothDrawing,
     setSmoothDrawing,
+    drawDoubleSided,
+    setDrawDoubleSided,
     sketchExtrudeMode,
     penExtrudeMode,
     sketchLatheMode,
@@ -374,6 +376,8 @@ export function SidePanel() {
       setAutoConnectPaths: s.setAutoConnectPaths,
       smoothDrawing: s.smoothDrawing,
       setSmoothDrawing: s.setSmoothDrawing,
+      drawDoubleSided: s.drawDoubleSided,
+      setDrawDoubleSided: s.setDrawDoubleSided,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
       sketchLatheMode: s.sketchLatheMode,
@@ -773,7 +777,7 @@ export function SidePanel() {
             {drawInputMode === 'vector-pen' && (
               <p className="side-color-hint muted">
                 Click to add points · drag for curves · click first point to close · edit
-                anchors/handles · Enter commits to 3D · Esc cancels
+                anchors/handles · Enter or double-click commits to 3D · Esc cancels
               </p>
             )}
             <div className="side-checkbox-row">
@@ -795,6 +799,30 @@ export function SidePanel() {
                   onChange={(e) => setSmoothDrawing(e.target.checked)}
                 />
                 <span>Smooth draw</span>
+              </label>
+            </div>
+            <div className="side-checkbox-row">
+              <label
+                className="side-checkbox"
+                title="Only the front of faces is visible (back faces are culled)"
+              >
+                <input
+                  type="checkbox"
+                  checked={!drawDoubleSided}
+                  onChange={() => setDrawDoubleSided(false)}
+                />
+                <span>Single-sided</span>
+              </label>
+              <label
+                className="side-checkbox"
+                title="Both sides of faces are visible — good for thin planes and open shells"
+              >
+                <input
+                  type="checkbox"
+                  checked={drawDoubleSided}
+                  onChange={() => setDrawDoubleSided(true)}
+                />
+                <span>Double-sided</span>
               </label>
             </div>
             <div className="side-shape-menus">

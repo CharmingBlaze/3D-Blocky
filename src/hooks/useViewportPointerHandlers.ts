@@ -168,6 +168,7 @@ export function useViewportPointerHandlers({
     penPointerDown,
     penPointerMove,
     penPointerUp,
+    penFinishPath,
     primitiveBoxPointerDown,
     primitiveBoxPointerMove,
     primitiveBoxPointerUp,
@@ -1052,6 +1053,21 @@ export function useViewportPointerHandlers({
       if (!pt) return
 
       if (activeTool === 'vector-pen' && view !== 'perspective') {
+        // Double-click finalizes like Enter (Illustrator-style).
+        if (e.detail >= 2) {
+          const draft = useAppStore.getState().vectorPenDraft
+          if (
+            draft &&
+            draft.view === view &&
+            draft.pendingAnchorIndex === null &&
+            draft.anchors.length >= (draft.closed ? 3 : 2)
+          ) {
+            e.preventDefault()
+            e.stopPropagation()
+            penFinishPath()
+            return
+          }
+        }
         vectorGestureViewRef.current = view
         penPointerDown(pt, view)
         return
@@ -1111,6 +1127,7 @@ export function useViewportPointerHandlers({
       clearMeshSelection,
       startVectorStroke,
       penPointerDown,
+      penFinishPath,
       primitiveBoxPointerDown,
       getGroundPoint,
       resolvePolyDrawAt,

@@ -48,6 +48,8 @@ export interface SceneSettingsLayoutState {
   showDensityHeatmap: boolean
   themeId: ThemeId
   activeColor: number
+  /** Prefer double-sided materials on newly drawn objects (mutually exclusive with single-sided UI). */
+  drawDoubleSided: boolean
   showToolRing: boolean
   showExportDialog: boolean
 }
@@ -58,6 +60,7 @@ export interface SceneSettingsLayoutActions {
   setBrushStrength: (strength: number) => void
   setBrushRadius: (radius: number) => void
   setActiveColor: (color: number) => void
+  setDrawDoubleSided: (on: boolean) => void
   setFacetExaggeration: (value: number) => void
   setShowDensityHeatmap: (show: boolean) => void
   setThemeId: (id: ThemeId) => void
@@ -83,6 +86,7 @@ export const sceneSettingsInitialState: SceneSettingsLayoutState = {
   showDensityHeatmap: false,
   themeId: BOOT_THEME_ID,
   activeColor: BOOT_ACCENT,
+  drawDoubleSided: false,
   showToolRing: false,
   showExportDialog: false,
 }
@@ -210,6 +214,7 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
       })
       store().commitHistory('Recolor')
     },
+    setDrawDoubleSided: (on) => setPartial({ drawDoubleSided: on }),
     setFacetExaggeration: (value) => setPartial({ facetExaggeration: value }),
     setShowDensityHeatmap: (show) => setPartial({ showDensityHeatmap: show }),
     setThemeId: (id) => {
