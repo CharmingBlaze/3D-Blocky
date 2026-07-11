@@ -44,7 +44,7 @@ const UNIT_VERTEX_CUBE_EDGES = new THREE.EdgesGeometry(UNIT_VERTEX_CUBE)
 const VERTEX_PIXEL_SIZE = {
   idle: 7,
   hover: 9,
-  selected: 11,
+  selected: 13,
 } as const
 
 /** Slightly smaller on-screen handles in perspective so they don't dominate the view. */

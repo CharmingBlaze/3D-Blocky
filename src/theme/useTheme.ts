@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useAppStore } from '../store/appStore'
-import { darkenHex } from './colorUtils'
+import { darkenHex, lightenHex } from './colorUtils'
 import { getTheme, hexToNumber, type ThemeCssVars } from './themes'
 
 export interface ThemeColors {
@@ -82,14 +82,15 @@ export function useTheme(): ThemeColors {
       meshOutlineSecondary: css['--mesh-outline-secondary'],
       meshSelected: css['--mesh-selected'],
       meshHover: css['--mesh-hover'],
-      vertexIdle: darkenHex(css['--mesh-outline-secondary'], 0.22),
-      vertexIdleBorder: darkenHex(css['--mesh-outline'], 0.32),
-      vertexHover: darkenHex(css['--mesh-hover'], 0.24),
-      vertexHoverBorder: darkenHex(css['--accent-orange'], 0.22),
-      vertexSelected: darkenHex(css['--mesh-selected'], 0.2),
-      vertexSelectedBorder: darkenHex(css['--accent'], 0.36),
-      vertexDraft: darkenHex(css['--accent'], 0.24),
-      vertexDraftHover: darkenHex(css['--mesh-hover'], 0.28),
+      vertexIdle: darkenHex(css['--mesh-outline-secondary'], 0.18),
+      vertexIdleBorder: darkenHex(css['--mesh-outline'], 0.26),
+      vertexHover: lightenHex(css['--mesh-hover'], 0.12),
+      vertexHoverBorder: lightenHex(css['--accent-orange'], 0.18),
+      // Selected verts use full theme selection color + a brighter rim so they pop on every theme.
+      vertexSelected: lightenHex(css['--mesh-selected'], 0.16),
+      vertexSelectedBorder: lightenHex(css['--accent'], 0.38),
+      vertexDraft: lightenHex(css['--accent'], 0.1),
+      vertexDraftHover: lightenHex(css['--mesh-hover'], 0.14),
       // Object pick outline follows --mesh-selected (theme accent), not wireframe --mesh-outline
       objectSelectOutline: css['--mesh-selected'],
       objectSelectOutlineSecondary: darkenHex(css['--mesh-selected'], 0.28),

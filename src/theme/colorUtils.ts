@@ -37,3 +37,14 @@ export function darkenHex(hex: string, amount: number): string {
   const b = Math.round(rgb[2] * f)
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
 }
+
+/** Lighten a hex color toward white. `amount` is 0 (unchanged) to 1 (white). */
+export function lightenHex(hex: string, amount: number): string {
+  const rgb = parseHexColor(hex)
+  if (!rgb) return hex
+  const t = Math.max(0, Math.min(1, amount))
+  const r = Math.round(rgb[0] + (255 - rgb[0]) * t)
+  const g = Math.round(rgb[1] + (255 - rgb[1]) * t)
+  const b = Math.round(rgb[2] + (255 - rgb[2]) * t)
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
