@@ -2,10 +2,6 @@ import { useEffect, useCallback, lazy, Suspense, useState, useRef } from 'react'
 import './App.css'
 import { subscribeGraphicsNotice } from './rendering/webglContextNotice'
 import { ViewportLayout } from './components/ViewportLayout'
-import { SidePanel } from './components/SidePanel'
-import { ToolRing } from './components/ToolRing'
-import { ExportDialog } from './components/ExportDialog'
-import { MeshModalController } from './components/MeshModalController'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { TransformToolbar } from './components/TransformToolbar'
 import { PrimitivesToolbar } from './components/PrimitivesToolbar'
@@ -13,6 +9,18 @@ import { useAppStore } from './store/appStore'
 import { selectionHasComponents } from './mesh/meshSelection'
 import type { NudgeDirection } from './utils/viewNavigation'
 
+const SidePanel = lazy(() =>
+  import('./components/SidePanel').then((m) => ({ default: m.SidePanel }))
+)
+const ToolRing = lazy(() =>
+  import('./components/ToolRing').then((m) => ({ default: m.ToolRing }))
+)
+const ExportDialog = lazy(() =>
+  import('./components/ExportDialog').then((m) => ({ default: m.ExportDialog }))
+)
+const MeshModalController = lazy(() =>
+  import('./components/MeshModalController').then((m) => ({ default: m.MeshModalController }))
+)
 const UVEditorPanel = lazy(() =>
   import('./components/UVEditorPanel').then((m) => ({ default: m.UVEditorPanel }))
 )
@@ -60,24 +68,6 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export default function App() {
-  const setActiveTool = useAppStore((s) => s.setActiveTool)
-  const setSelectionMode = useAppStore((s) => s.setSelectionMode)
-  const setShowGrid = useAppStore((s) => s.setShowGrid)
-  const setViewportXRay = useAppStore((s) => s.setViewportXRay)
-  const setShowToolRing = useAppStore((s) => s.setShowToolRing)
-  const setShowExportDialog = useAppStore((s) => s.setShowExportDialog)
-  const undo = useAppStore((s) => s.undo)
-  const redo = useAppStore((s) => s.redo)
-  const toggleTopologyLock = useAppStore((s) => s.toggleTopologyLock)
-  const penFinishPath = useAppStore((s) => s.penFinishPath)
-  const penCancelPath = useAppStore((s) => s.penCancelPath)
-  const toggleMaximizedView = useAppStore((s) => s.toggleMaximizedView)
-  const setDrawInputMode = useAppStore((s) => s.setDrawInputMode)
-  const showToolRing = useAppStore((s) => s.showToolRing)
-  const showExportDialog = useAppStore((s) => s.showExportDialog)
-  const uvEditorOpen = useAppStore((s) => s.uvEditorOpen)
-  const materialEditorOpen = useAppStore((s) => s.materialEditorOpen)
-  const pixelEditorOpen = useAppStore((s) => s.pixelEditorOpen)
   const [graphicsNotice, setGraphicsNotice] = useState<string | null>(null)
 
   useEffect(() => subscribeGraphicsNotice(setGraphicsNotice), [])
@@ -92,19 +82,19 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove, true)
   }, [])
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
       const ctrlOrMeta = e.ctrlKey || e.metaKey
+      const store = () => useAppStore.getState()
 
       // Undo / redo — always intercept so the browser doesn't steal Ctrl+Z.
       if (ctrlOrMeta && e.code === 'KeyZ' && !e.shiftKey) {
         e.preventDefault()
-        if (!isTypingTarget(e.target)) undo()
+        if (!isTypingTarget(e.target)) store().undo()
         return
       }
       if (ctrlOrMeta && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey))) {
         e.preventDefault()
-        if (!isTypingTarget(e.target)) redo()
+        if (!isTypingTarget(e.target)) store().redo()
         return
       }
 
@@ -112,12 +102,12 @@ export default function App() {
 
       if (ctrlOrMeta && e.code === 'KeyC' && !e.shiftKey) {
         e.preventDefault()
-        useAppStore.getState().copySelection()
+        store().copySelection()
         return
       }
       if (ctrlOrMeta && e.code === 'KeyV' && !e.shiftKey) {
         e.preventDefault()
-        useAppStore.getState().pasteClipboard()
+        store().pasteClipboard()
         return
       }
       if (ctrlOrMeta && e.code === 'KeyS' && !e.shiftKey) {
@@ -149,16 +139,17 @@ export default function App() {
       }
       if (e.key === 'Tab') {
         e.preventDefault()
-        setShowToolRing(!useAppStore.getState().showToolRing)
+        const s = store()
+        s.setShowToolRing(!s.showToolRing)
       }
       if (e.key === '\\' || e.code === 'Backslash') {
         e.preventDefault()
-        const state = useAppStore.getState()
+        const state = store()
         state.setShowSidePanel(!state.showSidePanel)
         return
       }
       if (e.key === 'Escape') {
-        const state = useAppStore.getState()
+        const state = store()
         if (state.meshModal) {
           e.preventDefault()
           state.cancelMeshModal()
@@ -179,27 +170,27 @@ export default function App() {
           }
           return
         }
-        setShowToolRing(false)
-        setShowExportDialog(false)
-        penCancelPath()
-        useAppStore.getState().cancelPrimitiveBoxDraft()
-        useAppStore.getState().polyDrawCancel()
-        useAppStore.getState().knifeCancel()
-        useAppStore.getState().bendCancel()
-        useAppStore.getState().loopCutCancel()
-        useAppStore.getState().clearMeshSelection()
-        useAppStore.getState().setMeshHover(null)
-        useAppStore.getState().setVertexMergeModifierHeld(false)
-        if (useAppStore.getState().maximizedSlot !== null) toggleMaximizedView()
+        state.setShowToolRing(false)
+        state.setShowExportDialog(false)
+        state.penCancelPath()
+        state.cancelPrimitiveBoxDraft()
+        state.polyDrawCancel()
+        state.knifeCancel()
+        state.bendCancel()
+        state.loopCutCancel()
+        state.clearMeshSelection()
+        state.setMeshHover(null)
+        state.setVertexMergeModifierHeld(false)
+        if (state.maximizedSlot !== null) state.toggleMaximizedView()
       }
       if (e.key === ' ') {
-        const state = useAppStore.getState()
+        const state = store()
         if (state.uvEditorOpen) return
         e.preventDefault()
-        toggleMaximizedView()
+        state.toggleMaximizedView()
       }
       if (e.key === 'Enter') {
-        const state = useAppStore.getState()
+        const state = store()
         if (state.meshModal) {
           e.preventDefault()
           state.confirmMeshModal()
@@ -212,7 +203,7 @@ export default function App() {
         }
         if (state.vectorPenDraft) {
           e.preventDefault()
-          penFinishPath()
+          state.penFinishPath()
           return
         }
         if (state.activeTool === 'poly-draw') {
@@ -223,6 +214,11 @@ export default function App() {
         if (state.loopCutDraft) {
           e.preventDefault()
           state.loopCutCommit()
+          return
+        }
+        if (state.activeTool === 'knife' && state.knifeDraft && state.knifeDraft.points.length >= 2) {
+          e.preventDefault()
+          state.knifeApply()
         }
       }
       if (e.key === 'f' || e.key === 'F') {
@@ -305,11 +301,11 @@ export default function App() {
         }
         return
       }
-      if (e.key === '1') setSelectionMode('object')
-      if (e.key === '2') setSelectionMode('vertex')
-      if (e.key === '3') setSelectionMode('edge')
-      if (e.key === '4') setSelectionMode('face')
-      const state = useAppStore.getState()
+      if (e.key === '1') store().setSelectionMode('object')
+      if (e.key === '2') store().setSelectionMode('vertex')
+      if (e.key === '3') store().setSelectionMode('edge')
+      if (e.key === '4') store().setSelectionMode('face')
+      const state = store()
       const hasMeshComponents =
         state.selectionMode !== 'object' && selectionHasComponents(state.meshSelection)
 
@@ -369,96 +365,80 @@ export default function App() {
       }
 
       if ((e.key === 'a' || e.key === 'A') && !ctrlOrMeta && !e.altKey && !e.shiftKey) {
-        if (!useAppStore.getState().uvEditorOpen) {
+        if (!store().uvEditorOpen) {
           e.preventDefault()
-          useAppStore.getState().toggleSelectAll()
+          store().toggleSelectAll()
           return
         }
       }
 
-      if (e.key === 'q' || e.key === 'Q') setSelectionMode('object')
-      if (e.key === 'w' || e.key === 'W') setActiveTool('move')
-      if (e.key === 'e' || e.key === 'E') setActiveTool('rotate')
-      if (e.key === 'r' || e.key === 'R') setActiveTool('rotate')
-      if (e.key === 's' || e.key === 'S') setActiveTool('scale')
-      if (e.key === 'v' || e.key === 'V') setDrawInputMode('vector-pen')
-      if (e.key === 'd') setDrawInputMode('regular')
-      if (e.key === 'l') toggleTopologyLock()
+      if (e.key === 'q' || e.key === 'Q') store().setSelectionMode('object')
+      if (e.key === 'w' || e.key === 'W') store().setActiveTool('move')
+      if (e.key === 'e' || e.key === 'E') store().setActiveTool('rotate')
+      if (e.key === 'r' || e.key === 'R') store().setActiveTool('rotate')
+      if (e.key === 's' || e.key === 'S') store().setActiveTool('scale')
+      if (e.key === 'v' || e.key === 'V') store().setDrawInputMode('vector-pen')
+      if (e.key === 'd') store().setDrawInputMode('regular')
+      if (e.key === 'l') store().toggleTopologyLock()
       if (e.key === 'g') {
-        const showGrid = useAppStore.getState().showGrid
-        setShowGrid(!showGrid)
+        const s = store()
+        s.setShowGrid(!s.showGrid)
       }
       if (e.key === 'x' || e.key === 'X') {
-        const xRay = useAppStore.getState().viewportXRay
-        setViewportXRay(!xRay)
+        const s = store()
+        s.setViewportXRay(!s.viewportXRay)
       }
       if (e.code === 'KeyM' && !e.repeat && !ctrlOrMeta && !e.altKey) {
-        const state = useAppStore.getState()
-        if (state.selectionMode === 'vertex' && state.meshSelection) {
-          const verts = state.meshSelection.vertices
+        const mergeState = store()
+        if (mergeState.selectionMode === 'vertex' && mergeState.meshSelection) {
+          const verts = mergeState.meshSelection.vertices
           if (verts.length >= 2) {
             e.preventDefault()
-            state.mergeSelectedVertices()
+            mergeState.mergeSelectedVertices()
             return
           }
           if (verts.length === 1) {
-            state.setVertexMergeModifierHeld(true)
+            mergeState.setVertexMergeModifierHeld(true)
             return
           }
         }
       }
-      if (e.key === 'h') setActiveTool('boolean-hole')
+      if (e.key === 'h') store().setActiveTool('boolean-hole')
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const state = useAppStore.getState()
-        if (state.selectedReferenceImageId || state.selectedBillboardImageId) {
+        const delState = store()
+        if (delState.selectedReferenceImageId || delState.selectedBillboardImageId) {
           e.preventDefault()
-          state.deleteSelectedImageDrop()
+          delState.deleteSelectedImageDrop()
           return
         }
-        const hasObjectSelection = state.selectionObjectIds.length > 0
+        const hasObjectSelection = delState.selectionObjectIds.length > 0
         const hasComponentSelection =
-          state.selectionMode !== 'object' &&
-          selectionHasComponents(state.meshSelection)
+          delState.selectionMode !== 'object' &&
+          selectionHasComponents(delState.meshSelection)
         if (hasObjectSelection || hasComponentSelection) {
           e.preventDefault()
-          state.deleteSelection()
+          delState.deleteSelection()
         }
       }
       if (e.key in NUDGE_KEYS) {
-        const state = useAppStore.getState()
+        const nudgeState = store()
         const hasObjectSelection =
-          state.selectionMode === 'object' && state.selectionObjectIds.length > 0
+          nudgeState.selectionMode === 'object' && nudgeState.selectionObjectIds.length > 0
         const hasComponentSelection =
-          (state.selectionMode === 'vertex' ||
-            state.selectionMode === 'edge' ||
-            state.selectionMode === 'face') &&
-          selectionHasComponents(state.meshSelection)
+          (nudgeState.selectionMode === 'vertex' ||
+            nudgeState.selectionMode === 'edge' ||
+            nudgeState.selectionMode === 'face') &&
+          selectionHasComponents(nudgeState.meshSelection)
         if (
           (hasObjectSelection || hasComponentSelection) &&
-          NUDGE_TOOLS.has(state.activeTool)
+          NUDGE_TOOLS.has(nudgeState.activeTool)
         ) {
           e.preventDefault()
-          state.nudgeSelection(NUDGE_KEYS[e.key], e.shiftKey)
+          nudgeState.nudgeSelection(NUDGE_KEYS[e.key], e.shiftKey)
         }
       }
-    },
-    [
-      undo,
-      redo,
-      setShowGrid,
-      setViewportXRay,
-      setShowToolRing,
-      setShowExportDialog,
-      setSelectionMode,
-      setActiveTool,
-      toggleTopologyLock,
-      penFinishPath,
-      penCancelPath,
-      setDrawInputMode,
-      toggleMaximizedView,
-    ]
-  )
+    }, [])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown, true)
@@ -482,7 +462,9 @@ export default function App() {
         <div className="app-main">
           <ViewportLayout />
         </div>
-        <SidePanel />
+        <Suspense fallback={null}>
+          <SidePanelHost />
+        </Suspense>
       </div>
 
       {graphicsNotice && (
@@ -491,17 +473,42 @@ export default function App() {
         </div>
       )}
 
-      {showToolRing && <ToolRing onClose={() => setShowToolRing(false)} />}
       <TransformToolbar />
       <PrimitivesToolbar />
-      {showExportDialog && <ExportDialog onClose={() => setShowExportDialog(false)} />}
-      <MeshModalController />
       <Suspense fallback={null}>
-        {uvEditorOpen && <UVEditorPanel />}
-        {materialEditorOpen && <MaterialEditorPanel />}
-        {pixelEditorOpen && <PixelEditorPanel />}
+        <AppOverlays />
       </Suspense>
       </div>
     </AppErrorBoundary>
+  )
+}
+
+function SidePanelHost() {
+  const showSidePanel = useAppStore((s) => s.showSidePanel)
+  if (!showSidePanel) return null
+  return <SidePanel />
+}
+
+function AppOverlays() {
+  const showToolRing = useAppStore((s) => s.showToolRing)
+  const showExportDialog = useAppStore((s) => s.showExportDialog)
+  const uvEditorOpen = useAppStore((s) => s.uvEditorOpen)
+  const materialEditorOpen = useAppStore((s) => s.materialEditorOpen)
+  const pixelEditorOpen = useAppStore((s) => s.pixelEditorOpen)
+  const meshModalOpen = useAppStore((s) => !!(s.meshModal || s.objectTransformModal))
+
+  return (
+    <>
+      {showToolRing && (
+        <ToolRing onClose={() => useAppStore.getState().setShowToolRing(false)} />
+      )}
+      {showExportDialog && (
+        <ExportDialog onClose={() => useAppStore.getState().setShowExportDialog(false)} />
+      )}
+      {meshModalOpen && <MeshModalController />}
+      {uvEditorOpen && <UVEditorPanel />}
+      {materialEditorOpen && <MaterialEditorPanel />}
+      {pixelEditorOpen && <PixelEditorPanel />}
+    </>
   )
 }

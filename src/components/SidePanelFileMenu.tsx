@@ -28,9 +28,7 @@ export function SidePanelFileMenu() {
     setBusy(true)
     try {
       const saved = await saveProject()
-      if (saved) {
-        setMessage('Project saved.')
-      }
+      if (saved) setMessage('Project saved.')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Save failed.')
     } finally {
@@ -50,9 +48,9 @@ export function SidePanelFileMenu() {
     setBusy(true)
     try {
       const loaded = await loadProjectFromDialog()
-      if (loaded) setMessage('Project loaded.')
+      if (loaded) setMessage('Project opened.')
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Load failed.')
+      setMessage(err instanceof Error ? err.message : 'Open failed.')
     } finally {
       setBusy(false)
     }
@@ -64,7 +62,8 @@ export function SidePanelFileMenu() {
       if (action === 'new') runNew()
       else if (action === 'save') void runSave()
       else if (action === 'load') void runLoad()
-      else if (action === 'import' || action === 'export') setShowExportDialog(true)
+      else if (action === 'export') setShowExportDialog(true)
+      else if (action === 'import') setShowExportDialog(true)
     },
     [busy, runLoad, runNew, runSave, setShowExportDialog]
   )
@@ -73,15 +72,15 @@ export function SidePanelFileMenu() {
     <SideButtonDropdown
       label={busy ? 'File…' : 'File'}
       options={[
-        { value: 'new', label: 'New' },
-        { value: 'save', label: 'Save…' },
-        { value: 'load', label: 'Open…' },
+        { value: 'new', label: 'New Project' },
+        { value: 'save', label: 'Save Project' },
+        { value: 'load', label: 'Open Project…' },
         { value: 'import', label: 'Import…' },
         { value: 'export', label: 'Export…' },
       ]}
       onSelect={handleSelect}
       disabled={busy}
-      title="New, save, open, import, or export"
+      title="New, save, open, import, or export (Blockbench-style)"
       footer={message ? <p className="side-color-hint muted side-file-status">{message}</p> : null}
     />
   )

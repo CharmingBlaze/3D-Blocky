@@ -1276,7 +1276,7 @@ export function SidePanel() {
                 className={`side-btn ${activeTool === 'knife' ? 'active' : ''}`}
                 onClick={() => setActiveTool('knife')}
                 disabled={selectionCount === 0}
-                title="Knife — drag a cut line on mesh; snaps to verts/edges; Shift = 45° (K)"
+                title="Knife — click points on the mesh (snaps to verts/edges); Enter confirms cut; Esc cancels; Shift = 45° (K)"
               >
                 Knife
               </button>
@@ -1292,6 +1292,12 @@ export function SidePanel() {
                 Loop Cut
               </button>
             </SideBtnGroup>
+            {activeTool === 'knife' && (
+              <p className="side-color-hint muted">
+                Click to place cut points · green = vertex, orange = edge · Enter confirms · Esc
+                cancels
+              </p>
+            )}
             {selectionCount > 0 && !selectedObj?.topologyLocked && (
               <>
                 <SideSlider

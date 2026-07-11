@@ -1,0 +1,842 @@
+/* Per-theme chrome beyond palette — fonts/radius already come from CSS vars. */
+
+html {
+  font-family: var(--font-ui);
+}
+
+html,
+body,
+#root,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-ui);
+}
+
+code,
+pre,
+.mono,
+.side-panel-stats,
+.stat-value,
+.hotkey,
+.kbd {
+  font-family: var(--font-mono);
+}
+
+/* Soft default radius mapping for common chrome */
+.transform-toolbar,
+.side-panel,
+.toolbar-btn,
+.theme-select,
+.modal,
+.export-dialog,
+.mesh-modal,
+.tool-ring-branch,
+.tool-ring-branch-item {
+  border-radius: var(--radius);
+}
+
+.transform-toolbar-btn,
+.transform-toolbar-close {
+  border-radius: max(0px, calc(var(--radius) - 2px));
+}
+
+/* Pixel / CRT themes: Press Start 2P is huge — scale UI text down */
+html[data-theme='gameboy'],
+html[data-theme='nes'],
+html[data-theme='atari'],
+html[data-theme='msx'],
+html[data-theme='neo-geo'],
+html[data-theme='terminal'],
+html[data-theme='matrix'] {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  image-rendering: pixelated;
+}
+
+html[data-theme='gameboy'] .side-panel,
+html[data-theme='nes'] .side-panel,
+html[data-theme='atari'] .side-panel,
+html[data-theme='msx'] .side-panel,
+html[data-theme='terminal'] .side-panel {
+  border-width: 3px;
+  border-style: solid;
+  box-shadow: none;
+}
+
+html[data-theme='gameboy'] .toolbar-btn,
+html[data-theme='nes'] .toolbar-btn,
+html[data-theme='atari'] .toolbar-btn,
+html[data-theme='msx'] .toolbar-btn,
+html[data-theme='terminal'] .toolbar-btn,
+html[data-theme='gameboy'] .tool-ring-branch-item,
+html[data-theme='nes'] .tool-ring-branch-item {
+  border-radius: 0;
+  border: 2px solid var(--border);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+/* Game Boy — green LCD bezel */
+html[data-theme='gameboy'] {
+  background: #0f380f;
+}
+
+html[data-theme='gameboy'] .side-panel,
+html[data-theme='gameboy'] .transform-toolbar {
+  background: #306230;
+  border-color: #0f380f;
+  box-shadow: inset 0 0 0 2px #8bac0f;
+}
+
+html[data-theme='gameboy'] .toolbar-btn.active,
+html[data-theme='gameboy'] .tool-ring-branch-item.active {
+  background: #9bbc0f;
+  color: #0f380f;
+}
+
+/* NES — chunky gray plastic + red accent */
+html[data-theme='nes'] .side-panel-header,
+html[data-theme='nes'] .toolbar-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 0;
+}
+
+html[data-theme='nes'] .side-panel {
+  border: 4px solid #1c1c1c;
+  box-shadow: 4px 4px 0 #000;
+}
+
+/* SNES — purple shell with soft buttons */
+html[data-theme='snes'] .toolbar-btn,
+html[data-theme='snes'] .tool-ring-branch-item {
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+html[data-theme='snes'] .toolbar-btn.active {
+  background: var(--accent);
+  color: #3a2860;
+  font-weight: 700;
+}
+
+/* Genesis — black + sharp red */
+html[data-theme='genesis'] .side-panel {
+  border: 1px solid #e60012;
+  box-shadow: 0 0 0 1px #000, 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+html[data-theme='genesis'] .toolbar-btn.active {
+  background: #e60012;
+  color: #fff;
+  box-shadow: 0 0 12px rgb(230 0 18 / 45%);
+}
+
+/* Saturn — gold trim */
+html[data-theme='saturn'] .side-panel,
+html[data-theme='saturn'] .transform-toolbar {
+  border-color: #c8a840;
+  box-shadow: inset 0 1px 0 rgb(200 168 64 / 25%);
+}
+
+/* PSX — four-button vibe */
+html[data-theme='psx'] .toolbar-btn.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+html[data-theme='psx'] .side-panel {
+  border: 2px solid #003791;
+  box-shadow:
+    inset 0 3px 0 #3d7eff,
+    inset 3px 0 0 #2dd4a8,
+    inset -3px 0 0 #f5a623,
+    inset 0 -3px 0 #e85a9b;
+}
+
+/* PS2 / PS3 */
+html[data-theme='ps2'] .side-panel {
+  background: linear-gradient(180deg, #1a2848 0%, #0c1428 100%);
+  border-color: #3a60a0;
+}
+
+html[data-theme='ps3'] .side-panel {
+  background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 100%);
+  border-color: #0090ff;
+  box-shadow: 0 0 24px rgb(0 144 255 / 12%);
+}
+
+/* Dreamcast — orange swirl accent bar */
+html[data-theme='dreamcast'] .side-panel-header {
+  border-bottom: 3px solid #ff6600;
+}
+
+html[data-theme='dreamcast'] .toolbar-btn.active {
+  background: #ff6600;
+  color: #111;
+}
+
+/* N64 — controller-color accents on active tools */
+html[data-theme='n64'] .toolbar-btn.active {
+  background: #c41e3a;
+  box-shadow: 2px 2px 0 #1e90ff;
+}
+
+/* GameCube — indigo shell */
+html[data-theme='gamecube'] .side-panel {
+  background: linear-gradient(160deg, #6b5cad 0%, #4a3d8a 55%, #3a2f70 100%);
+  border: 2px solid #8b7cc8;
+}
+
+html[data-theme='gamecube'] .toolbar-btn {
+  border-radius: 10px;
+}
+
+/* Xbox — green glow */
+html[data-theme='xbox'] .toolbar-btn.active,
+html[data-theme='xbox'] .tool-ring-branch-item.active {
+  background: #107c10;
+  box-shadow: 0 0 14px rgb(16 124 16 / 45%);
+}
+
+html[data-theme='xbox'] .side-panel {
+  border-color: #107c10;
+}
+
+/* Neo Geo — arcade gold */
+html[data-theme='neo-geo'] .side-panel-header {
+  color: #ffd700;
+  text-shadow: 0 0 8px rgb(255 215 0 / 35%);
+}
+
+html[data-theme='neo-geo'] .toolbar-btn.active {
+  background: #ffd700;
+  color: #111;
+}
+
+/* Atari — woodgrain bar */
+html[data-theme='atari'] .side-panel-header {
+  background: linear-gradient(
+    90deg,
+    #5c3317 0%,
+    #8b5a2b 25%,
+    #5c3317 50%,
+    #8b5a2b 75%,
+    #5c3317 100%
+  );
+  color: #ff8c00;
+  border-radius: 0;
+}
+
+/* Game Gear — teal handheld */
+html[data-theme='game-gear'] .side-panel {
+  border: 3px solid #2a8a8a;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px #1a5050;
+}
+
+/* MSX — classic blue frame */
+html[data-theme='msx'] .side-panel {
+  border: 4px solid #0033a0;
+  box-shadow: inset 0 0 0 2px #66a0ff;
+}
+
+/* ── Operating Systems ─────────────────────────────────────────────── */
+
+/* Windows 95 — classic 3D bevel chrome */
+html[data-theme='win95'] .side-panel,
+html[data-theme='win95'] .transform-toolbar,
+html[data-theme='win95'] .tool-ring-branch {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #dfdfdf #808080 #808080 #dfdfdf;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-theme='win95'] .side-panel-header {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  border-radius: 0;
+  font-weight: 700;
+}
+
+html[data-theme='win95'] .toolbar-btn,
+html[data-theme='win95'] .tool-ring-branch-item,
+html[data-theme='win95'] .theme-select {
+  background: #c0c0c0;
+  color: #000;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme='win95'] .toolbar-btn:active,
+html[data-theme='win95'] .toolbar-btn.active {
+  border-color: #808080 #fff #fff #808080;
+  background: #b0b0b0;
+}
+
+html[data-theme='win95'] .transform-toolbar {
+  backdrop-filter: none;
+  background: #c0c0c0;
+}
+
+/* Windows XP — Luna title bar */
+html[data-theme='winxp'] .side-panel-header {
+  background: linear-gradient(180deg, #0a5ad4 0%, #0054e3 40%, #003bb3 100%);
+  color: #fff;
+  border-radius: 6px 6px 0 0;
+  text-shadow: 1px 1px 0 rgb(0 0 0 / 25%);
+}
+
+html[data-theme='winxp'] .side-panel {
+  border: 2px solid #0054e3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 40 120 / 25%);
+  backdrop-filter: none;
+}
+
+html[data-theme='winxp'] .toolbar-btn {
+  border: 1px solid #003c74;
+  background: linear-gradient(180deg, #fff 0%, #ece9d8 100%);
+  color: #000;
+  border-radius: 3px;
+}
+
+html[data-theme='winxp'] .toolbar-btn.active {
+  background: linear-gradient(180deg, #ffe08a 0%, #e8b820 100%);
+  border-color: #c08000;
+}
+
+/* Vista / 7 — Aero glass */
+html[data-theme='winvista'] .side-panel,
+html[data-theme='winvista'] .transform-toolbar {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border: 1px solid rgb(255 255 255 / 55%);
+  box-shadow:
+    0 8px 32px rgb(40 80 140 / 22%),
+    inset 0 1px 0 rgb(255 255 255 / 70%);
+  backdrop-filter: blur(18px) saturate(1.35);
+}
+
+html[data-theme='winvista'] .side-panel-header {
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 55%) 0%,
+    rgb(180 210 240 / 35%) 100%
+  );
+  border-bottom: 1px solid rgb(255 255 255 / 40%);
+}
+
+/* Windows 8 Metro — flat tiles */
+html[data-theme='win8'] .toolbar-btn,
+html[data-theme='win8'] .tool-ring-branch-item {
+  border-radius: 0;
+  border: none;
+  background: #003d55;
+}
+
+html[data-theme='win8'] .toolbar-btn.active {
+  background: #00aba9;
+  color: #001018;
+}
+
+html[data-theme='win8'] .side-panel {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+/* Windows 10 */
+html[data-theme='win10'] .toolbar-btn.active {
+  background: #0078d4;
+  color: #fff;
+  border-radius: 0;
+}
+
+html[data-theme='win10'] .side-panel {
+  border-radius: 0;
+  border-color: #454545;
+}
+
+/* Windows 11 — mica + soft radius */
+html[data-theme='win11'] .side-panel,
+html[data-theme='win11'] .transform-toolbar,
+html[data-theme='win11'] .tool-ring-branch {
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+  backdrop-filter: blur(40px) saturate(1.2);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 28%);
+}
+
+html[data-theme='win11'] .toolbar-btn {
+  border-radius: 8px;
+}
+
+html[data-theme='win11'] .toolbar-btn.active {
+  background: #60cdff;
+  color: #001a2e;
+}
+
+/* Mac Classic — platinum */
+html[data-theme='macclassic'] .side-panel,
+html[data-theme='macclassic'] .transform-toolbar {
+  background: #dddddd;
+  border: 1px solid #000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 #fff inset, -1px -1px 0 #808080 inset;
+  backdrop-filter: none;
+}
+
+html[data-theme='macclassic'] .side-panel-header {
+  background: repeating-linear-gradient(
+    180deg,
+    #fff 0px,
+    #fff 1px,
+    #ddd 1px,
+    #ddd 2px
+  );
+  border-bottom: 1px solid #000;
+  color: #000;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* Mac Aqua */
+html[data-theme='macaqua'] .side-panel,
+html[data-theme='macaqua'] .transform-toolbar {
+  background: linear-gradient(180deg, #f4f8ff 0%, #d0e4ff 100%);
+  border: 1px solid #7aa8e0;
+  border-radius: 12px;
+  box-shadow:
+    0 10px 28px rgb(40 100 180 / 18%),
+    inset 0 1px 0 #fff;
+}
+
+html[data-theme='macaqua'] .toolbar-btn {
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff 0%, #c8dcff 100%);
+  border: 1px solid #7aa8e0;
+  color: #1a3048;
+}
+
+html[data-theme='macaqua'] .toolbar-btn.active {
+  background: linear-gradient(180deg, #6eb0ff 0%, #2a70d0 100%);
+  color: #fff;
+}
+
+/* Mac Dark */
+html[data-theme='macdark'] .side-panel {
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  backdrop-filter: blur(28px);
+  border: 1px solid rgb(255 255 255 / 8%);
+}
+
+html[data-theme='macdark'] .toolbar-btn {
+  border-radius: 8px;
+}
+
+/* Ubuntu */
+html[data-theme='ubuntu'] .side-panel-header {
+  background: #77216f;
+  color: #fff;
+}
+
+html[data-theme='ubuntu'] .toolbar-btn.active {
+  background: #e95420;
+  color: #fff;
+}
+
+/* Debian */
+html[data-theme='debian'] .side-panel {
+  border: 2px solid #a80030;
+}
+
+html[data-theme='debian'] .toolbar-btn.active {
+  background: #a80030;
+  color: #fff;
+}
+
+/* Fedora */
+html[data-theme='fedora'] .toolbar-btn.active {
+  background: #51a2da;
+  color: #0a1a28;
+}
+
+/* Mint */
+html[data-theme='mint'] .toolbar-btn.active {
+  background: #87cf3e;
+  color: #1a2a10;
+}
+
+html[data-theme='mint'] .side-panel {
+  border-color: #87cf3e;
+}
+
+/* Arch */
+html[data-theme='arch'] .toolbar-btn.active {
+  background: #1793d1;
+  color: #fff;
+}
+
+html[data-theme='arch'] .side-panel {
+  border-color: #1793d1;
+}
+
+/* Terminal — CRT phosphor */
+html[data-theme='terminal'] {
+  text-shadow: 0 0 4px rgb(0 255 65 / 35%);
+}
+
+html[data-theme='terminal'] .side-panel,
+html[data-theme='terminal'] .transform-toolbar {
+  background: #000;
+  border: 1px solid #00ff41;
+  border-radius: 0;
+  box-shadow: 0 0 20px rgb(0 255 65 / 12%), inset 0 0 40px rgb(0 255 65 / 4%);
+  backdrop-filter: none;
+}
+
+html[data-theme='terminal'] .toolbar-btn {
+  border: 1px solid #00ff41;
+  border-radius: 0;
+  color: #00ff41;
+  background: transparent;
+}
+
+html[data-theme='terminal'] .toolbar-btn.active {
+  background: #00ff41;
+  color: #000;
+  text-shadow: none;
+}
+
+/* Matrix — green rain feel */
+html[data-theme='matrix'] .side-panel {
+  border: 1px solid #00ff41;
+  box-shadow: 0 0 16px rgb(0 255 65 / 15%);
+}
+
+html[data-theme='matrix'] .toolbar-btn.active {
+  background: #00ff41;
+  color: #001100;
+}
+
+/* Neon cyberpunk */
+html[data-theme='neon'] .side-panel {
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+html[data-theme='neon'] .toolbar-btn.active {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* Blood Moon */
+html[data-theme='blood-moon'] .side-panel {
+  border-color: #a01020;
+  box-shadow: 0 0 28px rgb(160 16 32 / 20%);
+}
+
+/* Mono — hard B&W */
+html[data-theme='mono'] .side-panel,
+html[data-theme='mono'] .toolbar-btn {
+  border-radius: 0;
+  border-width: 2px;
+}
+
+html[data-theme='mono'] .toolbar-btn.active {
+  background: #000;
+  color: #fff;
+}
+
+html[data-theme-contrast='light'] .side-panel,
+html[data-theme-contrast='light'] .transform-toolbar {
+  color: var(--text);
+}
+
+/* ── Theme-matched scrollbars ───────────────────────────────────────── */
+
+html[data-theme-contrast='light'] {
+  color-scheme: light;
+}
+
+html[data-theme-contrast='dark'] {
+  color-scheme: dark;
+}
+
+/* Zero-radius themes get chunkier square scrollbars by default */
+html[data-theme='nes'],
+html[data-theme='gameboy'],
+html[data-theme='genesis'],
+html[data-theme='atari'],
+html[data-theme='msx'],
+html[data-theme='neo-geo'],
+html[data-theme='terminal'],
+html[data-theme='matrix'],
+html[data-theme='mono'],
+html[data-theme='win8'],
+html[data-theme='macclassic'] {
+  --scrollbar-size: 12px;
+  --scrollbar-radius: 0px;
+}
+
+/* Windows 95 — thick bevelled classic scrollbar */
+html[data-theme='win95'] {
+  --scrollbar-size: 16px;
+  --scrollbar-radius: 0px;
+  --scrollbar-track: #dfdfdf;
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-thumb-hover: #b0b0b0;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-track,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar-track {
+  background: #dfdfdf;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #808080;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-thumb,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  border-radius: 0;
+  background-clip: border-box;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-thumb:hover,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar-thumb:hover {
+  background: #d0d0d0;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-button,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar-button {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-button:vertical:decrement {
+  background-image: linear-gradient(135deg, transparent 40%, #000 40% 60%, transparent 60%),
+    linear-gradient(225deg, transparent 40%, #000 40% 60%, transparent 60%);
+  background-size: 6px 4px;
+  background-repeat: no-repeat;
+  background-position: center 5px;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-button:vertical:increment {
+  background-image: linear-gradient(45deg, transparent 40%, #000 40% 60%, transparent 60%),
+    linear-gradient(-45deg, transparent 40%, #000 40% 60%, transparent 60%);
+  background-size: 6px 4px;
+  background-repeat: no-repeat;
+  background-position: center 7px;
+}
+
+html[data-theme='win95'] ::-webkit-scrollbar-corner,
+html[data-theme='win95'] .themed-scroll::-webkit-scrollbar-corner {
+  background: #c0c0c0;
+}
+
+/* Mac Classic — platinum chunky */
+html[data-theme='macclassic'] {
+  --scrollbar-size: 15px;
+  --scrollbar-radius: 0px;
+  --scrollbar-track: #dddddd;
+  --scrollbar-thumb: #999999;
+  --scrollbar-thumb-hover: #777777;
+}
+
+html[data-theme='macclassic'] ::-webkit-scrollbar-thumb,
+html[data-theme='macclassic'] .themed-scroll::-webkit-scrollbar-thumb {
+  border: 1px solid #000;
+  background-clip: border-box;
+}
+
+/* XP Luna — soft blue */
+html[data-theme='winxp'] {
+  --scrollbar-size: 16px;
+  --scrollbar-radius: 3px;
+  --scrollbar-track: #ece9d8;
+  --scrollbar-thumb: #7ba2e7;
+  --scrollbar-thumb-hover: #5a8ad6;
+}
+
+/* Pixel / CRT — accent thumbs on panel track */
+html[data-theme='gameboy'] {
+  --scrollbar-track: #306230;
+  --scrollbar-thumb: #8bac0f;
+  --scrollbar-thumb-hover: #9bbc0f;
+}
+
+html[data-theme='terminal'],
+html[data-theme='matrix'] {
+  --scrollbar-track: #000000;
+  --scrollbar-thumb: #00ff41;
+  --scrollbar-thumb-hover: #66ff88;
+}
+
+html[data-theme='terminal'] ::-webkit-scrollbar-thumb,
+html[data-theme='matrix'] ::-webkit-scrollbar-thumb,
+html[data-theme='terminal'] .themed-scroll::-webkit-scrollbar-thumb,
+html[data-theme='matrix'] .themed-scroll::-webkit-scrollbar-thumb {
+  box-shadow: 0 0 6px rgb(0 255 65 / 35%);
+}
+
+html[data-theme='nes'] {
+  --scrollbar-track: #5c5c5c;
+  --scrollbar-thumb: #e4000f;
+  --scrollbar-thumb-hover: #ff3030;
+}
+
+/* Soft / rounded modern themes keep thin accent-tinted thumbs */
+html[data-theme='win11'],
+html[data-theme='macdark'],
+html[data-theme='macaqua'] {
+  --scrollbar-size: 8px;
+  --scrollbar-radius: 8px;
+}
+
+html[data-theme='neon'] {
+  --scrollbar-track: #0c0c14;
+  --scrollbar-thumb: #ff00aa;
+  --scrollbar-thumb-hover: #00f0ff;
+}
+
+/* ── Studio theme chrome ────────────────────────────────────────────── */
+
+html[data-theme='blueprint'] .side-panel {
+  border: 1px solid #7ec8f0;
+  box-shadow: inset 0 0 0 1px rgb(126 200 240 / 20%);
+  background-image:
+    linear-gradient(rgb(126 200 240 / 8%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(126 200 240 / 8%) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+html[data-theme='noir'] .side-panel-header {
+  background: linear-gradient(90deg, #0a0a0a, #242018);
+  border-bottom: 1px solid #c8a060;
+  color: #e8e0d0;
+  font-style: italic;
+}
+
+html[data-theme='vaporwave'] .side-panel {
+  border: 1px solid #ff71ce;
+  box-shadow: 0 0 28px rgb(1 205 254 / 18%), 0 0 48px rgb(255 113 206 / 12%);
+}
+
+html[data-theme='vaporwave'] .toolbar-btn.active {
+  background: linear-gradient(90deg, #01cdfe, #ff71ce);
+  color: #1a0a28;
+}
+
+html[data-theme='radar'] .side-panel {
+  border: 1px solid #60c040;
+  box-shadow: inset 0 0 40px rgb(128 255 64 / 6%);
+}
+
+html[data-theme='radar'] .toolbar-btn.active {
+  background: #80ff40;
+  color: #0c1408;
+  box-shadow: 0 0 12px rgb(128 255 64 / 45%);
+}
+
+html[data-theme='manga'] .side-panel,
+html[data-theme='manga'] .toolbar-btn {
+  border-radius: 0;
+  border-width: 2px;
+  border-color: #111;
+}
+
+html[data-theme='manga'] .toolbar-btn.active {
+  background: #e60012;
+  color: #fff;
+}
+
+html[data-theme='candy'] .toolbar-btn {
+  border-radius: 999px;
+}
+
+html[data-theme='candy'] .toolbar-btn.active {
+  background: #ff4da6;
+  color: #fff;
+}
+
+html[data-theme='obsidian'] .side-panel {
+  border: 1px solid rgb(126 200 255 / 25%);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 45%);
+}
+
+html[data-theme='poison'] .toolbar-btn.active {
+  background: #c8ff00;
+  color: #0a1004;
+  box-shadow: 0 0 14px rgb(200 255 0 / 35%);
+}
+
+html[data-theme='circuit'] .side-panel {
+  border: 1px solid #c08040;
+}
+
+html[data-theme='circuit'] .toolbar-btn.active {
+  background: #d4a050;
+  color: #0a1a0c;
+}
+
+html[data-theme='lava-lamp'] .toolbar-btn {
+  border-radius: 999px;
+}
+
+html[data-theme='lava-lamp'] .toolbar-btn.active {
+  background: linear-gradient(135deg, #ff4080, #e040ff);
+  color: #fff;
+}
+
+html[data-theme='aurora'] .side-panel {
+  border-color: #40e8b0;
+  box-shadow: 0 0 28px rgb(64 232 176 / 12%), 0 0 48px rgb(192 96 224 / 8%);
+}
+
+html[data-theme='porcelain'] .side-panel {
+  border: 2px solid #1a3a9a;
+  box-shadow: 0 8px 24px rgb(26 58 154 / 12%);
+}
+
+html[data-theme='steampunk'] .side-panel-header {
+  border-bottom: 2px solid #c8a050;
+  color: #d4b060;
+}
+
+html[data-theme='ink-wash'] .side-panel {
+  border: 1px solid #1a1a18;
+  box-shadow: 2px 2px 0 #1a1a18;
+}
+
+html[data-theme='studio-clay'] .side-panel {
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+}
+
+
+

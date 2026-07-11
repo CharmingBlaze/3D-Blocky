@@ -14,7 +14,8 @@ describe('generateLathe caps', () => {
       capTop: false,
       capBottom: false,
     })
-    expect(mesh.faces.length).toBe(12)
+    expect(mesh.faces.length).toBe(6)
+    expect(mesh.faces.every((f) => f.length === 4)).toBe(true)
   })
 
   it('adds top and bottom caps when enabled', () => {
@@ -24,6 +25,8 @@ describe('generateLathe caps', () => {
       capTop: true,
       capBottom: true,
     })
-    expect(mesh.faces.length).toBe(24)
+    // 6 body quads + 6 top tris + 6 bottom tris
+    expect(mesh.faces.length).toBe(18)
+    expect(mesh.faces.filter((f) => f.length === 4).length).toBe(6)
   })
 })

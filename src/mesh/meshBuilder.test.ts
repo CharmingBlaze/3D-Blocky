@@ -67,6 +67,30 @@ const CAD_PRIMITIVE_TYPES = [
   'cylinder',
   'capsule',
   'pyramid',
+  'doughnut',
+  'ring',
+  'stairs',
+  'star',
+  'dome',
+  'halfCircle',
+] as const
+
+/** Center-based outward tests are invalid for torus-like / open-base shells. */
+const CAD_SKIP_INWARD_CHECK = new Set(['doughnut', 'ring', 'dome'])
+
+/** Primitives whose bodies should be true 4-vert quads (poles/caps may stay tris). */
+const CAD_QUAD_BODY_TYPES = [
+  'box',
+  'sphere',
+  'cylinder',
+  'capsule',
+  'pyramid',
+  'doughnut',
+  'ring',
+  'stairs',
+  'star',
+  'dome',
+  'halfCircle',
 ] as const
 
 /** Same path as Draw panel → commitPrimitiveBox → addObject (includes poly budget). */
@@ -169,7 +193,8 @@ describe('MeshBuilder', () => {
       48
     )
     expect(obj).not.toBeNull()
-    expect(obj!.faces.length).toBeGreaterThanOrEqual(20)
+    expect(obj!.faces.length).toBeGreaterThanOrEqual(12)
+    expect(obj!.faces.some((f) => f.length === 4)).toBe(true)
     expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
   })
 
@@ -209,10 +234,11 @@ describe('MeshBuilder', () => {
     const obj = commitPrimitiveLikeUI('sphere', 64)
     expect(obj).not.toBeNull()
     expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
-    expect(obj!.faces.length).toBeGreaterThanOrEqual(20)
+    expect(obj!.faces.length).toBeGreaterThanOrEqual(12)
+    expect(obj!.faces.some((f) => f.length === 4)).toBe(true)
   })
 
-  it('CAD box uses eight welded corner vertices', () => {
+  it('CAD box uses eight welded corner vertices and six quads', () => {
     const obj = primitiveBoxToSceneObject(
       'box',
       TEST_BOX,
@@ -222,8 +248,41 @@ describe('MeshBuilder', () => {
     )
     expect(obj).not.toBeNull()
     expect(obj!.positions.length).toBe(8)
-    expect(obj!.faces.length).toBe(12)
+    expect(obj!.faces.length).toBe(6)
+    expect(obj!.faces.every((f) => f.length === 4)).toBe(true)
     expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
+  })
+
+  it.each(CAD_QUAD_BODY_TYPES)('CAD %s stores body faces as quads', (type) => {
+    const obj = primitiveBoxToSceneObject(
+      type,
+      TEST_BOX,
+      heightAxisForView('front'),
+      0x6ecbf5,
+      128
+    )
+    expect(obj).not.toBeNull()
+    const quads = obj!.faces.filter((f) => f.length === 4)
+    expect(quads.length).toBeGreaterThan(0)
+    if (!CAD_SKIP_INWARD_CHECK.has(type)) {
+      expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
+    }
+  })
+
+  it('CAD cylinder sides are quads with triangle caps', () => {
+    const obj = primitiveBoxToSceneObject(
+      'cylinder',
+      TEST_BOX,
+      heightAxisForView('front'),
+      0x6ecbf5,
+      128
+    )
+    expect(obj).not.toBeNull()
+    const quads = obj!.faces.filter((f) => f.length === 4)
+    const tris = obj!.faces.filter((f) => f.length === 3)
+    expect(quads.length).toBeGreaterThan(0)
+    expect(tris.length).toBeGreaterThan(0)
+    expect(quads.length + tris.length).toBe(obj!.faces.length)
   })
 
   it('CAD capsule is cylinder plus two hemispheres with shared rings', () => {
@@ -456,7 +515,9 @@ describe('MeshBuilder', () => {
     )
     expect(obj).not.toBeNull()
     expect(obj!.positions.length).toBeGreaterThan(0)
-    expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
+    if (!CAD_SKIP_INWARD_CHECK.has(type)) {
+      expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
+    }
 
     const welded = weldSceneObjectCoincidentVertices(obj!)
     expect(welded.positions.length).toBe(obj!.positions.length)

@@ -127,13 +127,13 @@ export function generateLathe(
     } else if (ringA.length > 1 && ringB.length > 1) {
       for (let si = 0; si < segments; si++) {
         const next = (si + 1) % segments
-        const a = ringA[si]
-        const b = ringA[next]
-        const c = ringB[si]
-        const d = ringB[next]
-        mesh.faces.push([a, c, b])
-        mesh.faces.push([c, d, b])
-        mesh.faceColors.push(0x6ecbf5, 0x6ecbf5)
+        const a = ringA[si]!
+        const b = ringA[next]!
+        const c = ringB[si]!
+        const d = ringB[next]!
+        // Quad strip like capsule — same winding as the old triangle pair (a,c,b)+(c,d,b).
+        mesh.faces.push([a, c, d, b])
+        mesh.faceColors.push(0x6ecbf5)
       }
     }
   }

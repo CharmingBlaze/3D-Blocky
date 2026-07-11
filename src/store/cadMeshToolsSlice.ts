@@ -55,12 +55,21 @@ export interface LoopCutDraft {
   t: number
 }
 
+export type KnifeSnapKind = 'vertex' | 'edge' | 'face'
+
+export interface KnifePoint {
+  world: Vec3
+  local: Vec3
+  snap: KnifeSnapKind
+}
+
 export interface KnifeDraft {
-  objectId: string | null
-  start: Vec3 | null
-  end: Vec3 | null
-  committed: Array<{ start: Vec3; end: Vec3 }>
+  objectId: string
+  points: KnifePoint[]
+  hover: KnifePoint | null
   view: ViewType
+  /** Camera forward at last hover/click — used for Enter-to-confirm. */
+  viewForward: Vec3
 }
 
 export interface BendDraft {
@@ -106,10 +115,15 @@ export interface CadMeshToolsLayoutActions {
   loopCutAdjustWheel: (deltaY: number) => void
   loopCutCommit: () => void
   loopCutCancel: () => void
+  knifeHover: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
+  knifeClearHover: () => void
+  knifeAddPoint: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
+  knifeApply: (viewForward?: Vec3) => void
+  knifeCancel: () => void
+  /** @deprecated use knifeAddPoint / knifeApply — kept for transitional call sites */
   knifePointerDown: (objectId: string, world: Vec3, view: ViewType) => void
   knifePointerMove: (world: Vec3) => void
   knifeCommit: (viewForward: Vec3) => void
-  knifeCancel: () => void
   bendBegin: (objectId: string, origin: Vec3, view: ViewType, clientX: number, clientY: number) => void
   bendPointerMove: (world: Vec3 | null, clientX: number, clientY: number) => void
   bendPointerUp: () => void
@@ -389,72 +403,152 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
 
     loopCutCancel: () => set({ loopCutDraft: null } as unknown as Partial<S>),
 
-    knifePointerDown: (objectId, world, view) => {
+    knifeHover: (objectId, point, view, viewForward) => {
       const prev = get().knifeDraft
-      const committed =
-        prev?.objectId === objectId && prev.committed?.length ? [...prev.committed] : []
+      if (prev && prev.objectId !== objectId) {
+        set({
+          knifeDraft: {
+            objectId,
+            points: [],
+            hover: { ...point },
+            view,
+            viewForward: { ...viewForward },
+          },
+          activeTool: 'knife',
+        } as unknown as Partial<S>)
+        return
+      }
       set({
         knifeDraft: {
           objectId,
-          start: { ...world },
-          end: null,
-          committed,
-          view,
+          points: prev?.points ?? [],
+          hover: { ...point, world: { ...point.world }, local: { ...point.local } },
+          view: prev?.view ?? view,
+          viewForward: { ...viewForward },
         },
         activeTool: 'knife',
       } as unknown as Partial<S>)
     },
 
-    knifePointerMove: (world) => {
+    knifeClearHover: () => {
       const { knifeDraft } = get()
-      if (!knifeDraft?.start) return
-      set({ knifeDraft: { ...knifeDraft, end: { ...world } } } as unknown as Partial<S>)
+      if (!knifeDraft?.hover) return
+      set({ knifeDraft: { ...knifeDraft, hover: null } } as unknown as Partial<S>)
     },
 
-    knifeCommit: (viewForward) => {
-      const { knifeDraft, objects } = get()
-      if (!knifeDraft?.start || !knifeDraft.end || !knifeDraft.objectId) {
-        set({ knifeDraft: null } as unknown as Partial<S>)
+    knifeAddPoint: (objectId, point, view, viewForward) => {
+      const prev = get().knifeDraft
+      const points =
+        prev?.objectId === objectId ? [...prev.points] : ([] as KnifePoint[])
+      const last = points[points.length - 1]
+      if (
+        last &&
+        Math.hypot(
+          last.local.x - point.local.x,
+          last.local.y - point.local.y,
+          last.local.z - point.local.z
+        ) < 1e-5
+      ) {
         return
       }
+      points.push({
+        world: { ...point.world },
+        local: { ...point.local },
+        snap: point.snap,
+      })
+      set({
+        knifeDraft: {
+          objectId,
+          points,
+          hover: null,
+          view,
+          viewForward: { ...viewForward },
+        },
+        activeTool: 'knife',
+      } as unknown as Partial<S>)
+    },
+
+    knifeApply: (viewForward) => {
+      const { knifeDraft, objects } = get()
+      if (!knifeDraft || knifeDraft.points.length < 2) return
       const obj = objects.find((o) => o.id === knifeDraft.objectId)
       if (!obj || obj.topologyLocked) {
         set({ knifeDraft: null } as unknown as Partial<S>)
         return
       }
 
-      const localStart = localPointFromWorld(obj, knifeDraft.start)
-      const localEnd = localPointFromWorld(obj, knifeDraft.end)
-      if (!knifeSegmentLongEnough(localStart, localEnd)) {
+      const forward = viewForward ?? knifeDraft.viewForward
+      const localForward = worldDeltaToLocal(obj, forward)
+      let current = obj
+      let applied = 0
+      for (let i = 0; i + 1 < knifeDraft.points.length; i++) {
+        const a = knifeDraft.points[i]!
+        const b = knifeDraft.points[i + 1]!
+        if (!knifeSegmentLongEnough(a.local, b.local)) continue
+        const next = knifeCutObject(current, a.local, b.local, localForward)
+        if (next !== current) {
+          current = next
+          applied++
+        }
+      }
+
+      if (applied === 0) {
         set({ knifeDraft: null } as unknown as Partial<S>)
         return
       }
 
-      const localForward = worldDeltaToLocal(obj, viewForward)
-      const cut = knifeCutObject(obj, localStart, localEnd, localForward)
-      const committed = [
-        ...(knifeDraft.committed ?? []),
-        { start: { ...knifeDraft.start }, end: { ...knifeDraft.end } },
-      ]
       get().updateObject(obj.id, {
-        positions: cut.positions,
-        faces: cut.faces,
-        faceColors: cut.faceColors,
-        faceGroups: cut.faceGroups,
+        positions: current.positions,
+        faces: current.faces,
+        faceColors: current.faceColors,
+        faceGroups: current.faceGroups,
+        uvs: current.uvs,
+        faceUvIndices: current.faceUvIndices,
       })
-      set({
-        knifeDraft: {
-          objectId: knifeDraft.objectId,
-          start: null,
-          end: null,
-          committed,
-          view: knifeDraft.view,
-        },
-      } as unknown as Partial<S>)
-      get().commitHistory('Knife cut')
+      set({ knifeDraft: null } as unknown as Partial<S>)
+      get().commitHistory(applied === 1 ? 'Knife cut' : `Knife cut ×${applied}`)
     },
 
     knifeCancel: () => set({ knifeDraft: null } as unknown as Partial<S>),
+
+    // Legacy drag API → maps onto point path (two-point stroke)
+    knifePointerDown: (objectId, world, view) => {
+      const obj = get().objects.find((o) => o.id === objectId)
+      const local = obj ? localPointFromWorld(obj, world) : { ...world }
+      get().knifeAddPoint(
+        objectId,
+        { world, local, snap: 'face' },
+        view,
+        { x: 0, y: 0, z: -1 }
+      )
+    },
+
+    knifePointerMove: (world) => {
+      const { knifeDraft, objects } = get()
+      if (!knifeDraft) return
+      const obj = objects.find((o) => o.id === knifeDraft.objectId)
+      const local = obj ? localPointFromWorld(obj, world) : { ...world }
+      set({
+        knifeDraft: {
+          ...knifeDraft,
+          hover: { world: { ...world }, local, snap: 'face' },
+        },
+      } as unknown as Partial<S>)
+    },
+
+    knifeCommit: (viewForward) => {
+      const { knifeDraft } = get()
+      if (!knifeDraft) return
+      if (knifeDraft.hover && knifeDraft.points.length >= 1) {
+        get().knifeAddPoint(
+          knifeDraft.objectId,
+          knifeDraft.hover,
+          knifeDraft.view,
+          viewForward
+        )
+      }
+      get().knifeApply(viewForward)
+    },
 
     bendBegin: (objectId, origin, view, clientX, clientY) => {
       const obj = get().objects.find((o) => o.id === objectId)

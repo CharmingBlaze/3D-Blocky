@@ -6,9 +6,7 @@ import type { ViewType } from '../scene/viewTypes'
 import { faceNormal, type Vec3 } from '../utils/math'
 import {
   computeFaceNormal,
-  faceCentroid,
   meshCentroid,
-  type TriangleFace,
 } from './MeshBuilder'
 
 /** Signed volume — positive when face windings are consistently oriented. */
@@ -119,13 +117,24 @@ export function orientLatheMeshOutward(
 /** True when every face normal points away from `refPoint`. */
 export function meshFacesPointAwayFrom(mesh: HalfEdgeMesh, refPoint: Vec3): boolean {
   for (const face of mesh.faces) {
-    if (face.length !== 3) continue
-    const tri = face as TriangleFace
-    const n = computeFaceNormal(mesh.positions, tri)
-    const c = faceCentroid(mesh.positions, tri)
-    const dx = c.x - refPoint.x
-    const dy = c.y - refPoint.y
-    const dz = c.z - refPoint.z
+    if (face.length < 3) continue
+    const n = computeFaceNormal(mesh.positions, [face[0]!, face[1]!, face[2]!])
+    let cx = 0
+    let cy = 0
+    let cz = 0
+    for (const vi of face) {
+      const p = mesh.positions[vi]!
+      cx += p.x
+      cy += p.y
+      cz += p.z
+    }
+    const inv = 1 / face.length
+    cx *= inv
+    cy *= inv
+    cz *= inv
+    const dx = cx - refPoint.x
+    const dy = cy - refPoint.y
+    const dz = cz - refPoint.z
     if (n.x * dx + n.y * dy + n.z * dz < -1e-4) return false
   }
   return true

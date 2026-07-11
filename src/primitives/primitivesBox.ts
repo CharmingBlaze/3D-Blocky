@@ -242,13 +242,10 @@ export function createInscribedCylinder(
   const bi = b.addVertexVec(mapLocal(0, -halfH, 0, heightAxis, center))
   const ti = b.addVertexVec(mapLocal(0, halfH, 0, heightAxis, center))
 
-  const sideGroup: number[] = []
   for (let i = 0; i < segs; i++) {
     const j = (i + 1) % segs
-    sideGroup.push(b.addTriangle(bottom[i]!, bottom[j]!, top[j]!))
-    sideGroup.push(b.addTriangle(bottom[i]!, top[j]!, top[i]!))
+    b.addQuad(bottom[i]!, bottom[j]!, top[j]!, top[i]!)
   }
-  b.addFaceGroup(sideGroup)
 
   const bottomCap: number[] = []
   for (let i = 0; i < segs; i++) {
@@ -354,7 +351,7 @@ export function createInscribedPyramid(
   const b2 = b.addVertexVec(mapLocal(hw, -halfH, hd, heightAxis, center))
   const b3 = b.addVertexVec(mapLocal(-hw, -halfH, hd, heightAxis, center))
 
-  b.addFaceGroup([b.addTriangle(b0, b2, b1), b.addTriangle(b0, b3, b2)])
+  b.addQuad(b0, b1, b2, b3)
   b.addFaceGroup([b.addTriangle(apex, b0, b1)])
   b.addFaceGroup([b.addTriangle(apex, b1, b2)])
   b.addFaceGroup([b.addTriangle(apex, b2, b3)])

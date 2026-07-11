@@ -36,6 +36,7 @@ interface MeshRendererProps {
   facetExaggeration: number
   showDensityHeatmap: boolean
   displayMode: ViewportDisplayMode
+  viewportXRay?: boolean
 }
 
 export function buildViewportMeshGeometry(
@@ -174,6 +175,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   facetExaggeration,
   showDensityHeatmap,
   displayMode,
+  viewportXRay = false,
 }: MeshRendererProps) {
   const {
     meshOutline,
@@ -208,7 +210,6 @@ export const MeshRenderer = memo(function MeshRenderer({
   const usePixelTexture = Boolean(pixelDoc && useTexture)
   const meshSide = materialSettings.doubleSided ? THREE.DoubleSide : THREE.FrontSide
   const meshOpacity = materialSettings.opacity
-  const viewportXRay = useAppStore((s) => s.viewportXRay)
   const xrayOpacity = viewportXRay
     ? Math.min(meshOpacity, meshOpacity * VIEWPORT_XRAY_OPACITY)
     : meshOpacity

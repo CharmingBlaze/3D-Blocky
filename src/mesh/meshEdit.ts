@@ -112,6 +112,92 @@ export interface AppendFaceResult {
   newFaceCount: number
 }
 
+function faceCentroidLocal(positions: Vec3[], face: number[]): Vec3 {
+  let x = 0
+  let y = 0
+  let z = 0
+  for (const vi of face) {
+    const p = positions[vi]!
+    x += p.x
+    y += p.y
+    z += p.z
+  }
+  const inv = 1 / Math.max(1, face.length)
+  return { x: x * inv, y: y * inv, z: z * inv }
+}
+
+function meshCentroidLocal(positions: Vec3[]): Vec3 {
+  if (positions.length === 0) return { x: 0, y: 0, z: 0 }
+  let x = 0
+  let y = 0
+  let z = 0
+  for (const p of positions) {
+    x += p.x
+    y += p.y
+    z += p.z
+  }
+  const inv = 1 / positions.length
+  return { x: x * inv, y: y * inv, z: z * inv }
+}
+
+/** Newell normal for an n-gon (local space). */
+export function faceNewellNormal(positions: Vec3[], face: number[]): Vec3 {
+  let nx = 0
+  let ny = 0
+  let nz = 0
+  const n = face.length
+  for (let i = 0; i < n; i++) {
+    const a = positions[face[i]!]!
+    const b = positions[face[(i + 1) % n]!]!
+    nx += (a.y - b.y) * (a.z + b.z)
+    ny += (a.z - b.z) * (a.x + b.x)
+    nz += (a.x - b.x) * (a.y + b.y)
+  }
+  const len = Math.hypot(nx, ny, nz)
+  if (len < 1e-12) return { x: 0, y: 1, z: 0 }
+  return { x: nx / len, y: ny / len, z: nz / len }
+}
+
+/**
+ * Orient a new face so its winding matches neighboring faces (manifold opposite
+ * edge direction), otherwise so the normal points away from the mesh centroid.
+ */
+export function orientFaceWindingOutward(
+  positions: Vec3[],
+  existingFaces: number[][],
+  face: number[]
+): number[] {
+  if (face.length < 3) return face
+
+  let sameDir = 0
+  let oppositeDir = 0
+  for (let i = 0; i < face.length; i++) {
+    const a = face[i]!
+    const b = face[(i + 1) % face.length]!
+    for (const ef of existingFaces) {
+      for (let j = 0; j < ef.length; j++) {
+        const c = ef[j]!
+        const d = ef[(j + 1) % ef.length]!
+        if (c === a && d === b) sameDir++
+        else if (c === b && d === a) oppositeDir++
+      }
+    }
+  }
+
+  // Shared edges must run opposite on adjacent faces. Same-direction ⇒ flip.
+  if (sameDir > oppositeDir) return [...face].reverse()
+  if (oppositeDir > sameDir) return face
+
+  const n = faceNewellNormal(positions, face)
+  const c = faceCentroidLocal(positions, face)
+  const center = meshCentroidLocal(positions)
+  const dx = c.x - center.x
+  const dy = c.y - center.y
+  const dz = c.z - center.z
+  if (n.x * dx + n.y * dy + n.z * dz < 0) return [...face].reverse()
+  return face
+}
+
 /**
  * Append one face (triangle, quad, or n-gon) to a scene object.
  * Corner refs with `existing` must reference vertices already in `object`.
@@ -119,7 +205,7 @@ export interface AppendFaceResult {
 export function appendFace(
   object: SceneObject,
   corners: CornerRef[],
-  options: { color: number; flipNormal?: boolean }
+  options: { color: number; flipNormal?: boolean; asNgon?: boolean }
 ): AppendFaceResult {
   const positions = object.positions.map((p) => ({ ...p }))
   const faces = object.faces.map((f) => [...f])
@@ -138,17 +224,31 @@ export function appendFace(
     }
   }
 
+  // Selection fill: keep a single n-gon so quads stay quads.
+  if (options.asNgon && cornerIndices.length >= 3) {
+    let face = [...cornerIndices]
+    if (options.flipNormal) face = face.reverse()
+    faces.push(face)
+    faceColors.push(options.color)
+    faceGroups.push([faceStart])
+    return {
+      object: { ...object, positions, faces, faceColors, faceGroups },
+      newFaceStartIndex: faceStart,
+      newFaceCount: 1,
+    }
+  }
+
   let triangles: [number, number, number][] = []
   if (cornerIndices.length === 3) {
-    triangles = [[cornerIndices[0], cornerIndices[1], cornerIndices[2]]]
+    triangles = [[cornerIndices[0]!, cornerIndices[1]!, cornerIndices[2]!]]
   } else if (cornerIndices.length === 4) {
     triangles = triangulateQuad(cornerIndices as [number, number, number, number])
   } else {
     const worldCorners = corners.map((c) => ({ ...c.world }))
     triangles = triangulatePolygon(worldCorners).map(([a, b, c]) => [
-      cornerIndices[a],
-      cornerIndices[b],
-      cornerIndices[c],
+      cornerIndices[a!]!,
+      cornerIndices[b!]!,
+      cornerIndices[c!]!,
     ])
   }
 
@@ -191,7 +291,7 @@ export function sceneObjectFromFace(
   return appendFace(empty, corners, options)
 }
 
-/** Create a triangle or quad face from existing vertex indices (selection order = winding). */
+/** Create a triangle or quad face from existing vertex indices. */
 export function appendFaceFromVertexIndices(
   object: SceneObject,
   vertexIndices: number[],
@@ -200,18 +300,25 @@ export function appendFaceFromVertexIndices(
   if (vertexIndices.length !== 3 && vertexIndices.length !== 4) return null
   if (new Set(vertexIndices).size !== vertexIndices.length) return null
 
-  const corners: CornerRef[] = []
   for (const vi of vertexIndices) {
     if (vi < 0 || vi >= object.positions.length) return null
-    corners.push({
-      kind: 'existing',
-      objectId: object.id,
-      vertexIndex: vi,
-      world: worldPointFromObject(object, object.positions[vi]),
-    })
   }
 
-  return appendFace(object, corners, { color })
+  // Match neighbors / point away from mesh center so F-fill faces outward.
+  const ordered = orientFaceWindingOutward(
+    object.positions,
+    object.faces,
+    [...vertexIndices]
+  )
+
+  const corners: CornerRef[] = ordered.map((vi) => ({
+    kind: 'existing' as const,
+    objectId: object.id,
+    vertexIndex: vi,
+    world: worldPointFromObject(object, object.positions[vi]!),
+  }))
+
+  return appendFace(object, corners, { color, asNgon: true })
 }
 
 function ensureFaceColors(obj: SceneObject): number[] {

@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useRef, useCallback, useState, useLayoutEffect, useEffect } from 'react'
+import { useRef, useCallback, useState, useLayoutEffect, useEffect, useMemo } from 'react'
 import { MOUSE, Vector3 } from 'three'
 import type * as THREE from 'three'
 import { popViewportInteraction, pushViewportInteraction, useViewportInteractionActive } from '../rendering/viewportFrameLoop'
@@ -221,9 +221,10 @@ function ViewportControls({
       setPrimaryOrbitModifier(false)
       return
     }
+    // Alt (not Shift) enables temporary LMB orbit — Shift is reserved for multi-select.
     const setOrbitOnKey = (event: KeyboardEvent) => {
-      if (event.key === 'Shift' || event.key === 'Alt') {
-        setPrimaryOrbitModifier(event.shiftKey || event.altKey)
+      if (event.key === 'Alt' || event.key === 'Shift') {
+        setPrimaryOrbitModifier(event.altKey)
       }
     }
     const clearOrbit = () => setPrimaryOrbitModifier(false)
@@ -281,7 +282,8 @@ function ViewportControls({
       onStart={handleControlsStart}
       onEnd={handleControlsEnd}
       mouseButtons={{
-        // Laptop-friendly orbit: hold Shift or Alt while dragging with the primary button.
+        // Laptop-friendly orbit: hold Alt while dragging with the primary button.
+        // Shift is kept free for additive vertex/edge/face/object selection.
         LEFT: primaryOrbitModifier && isPerspective ? MOUSE.ROTATE : undefined,
         MIDDLE: disableMiddlePan ? undefined : MOUSE.PAN,
         RIGHT: isPerspective ? MOUSE.ROTATE : undefined,
@@ -321,6 +323,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
     imageDropMode,
     selectedBillboardImageId,
     billboardImages,
+    viewportXRay,
     setActiveView,
     setViewportSlotView,
     pixelTextureRevision,
@@ -345,6 +348,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
       imageDropMode: s.imageDropMode,
       selectedBillboardImageId: s.selectedBillboardImageId,
       billboardImages: s.billboardImages,
+      viewportXRay: s.viewportXRay,
       setActiveView: s.setActiveView,
       setViewportSlotView: s.setViewportSlotView,
       pixelTextureRevision: s.pixelTextureRevision,
@@ -422,7 +426,10 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
   })
 
   const selectedObj = objects.find((o) => o.id === selectedObjectId)
-  const vertCount = objects.reduce((s, o) => s + o.positions.length, 0)
+  const vertCount = useMemo(
+    () => objects.reduce((s, o) => s + o.positions.length, 0),
+    [objects]
+  )
   const gizmoTargetId = isActiveViewport
     ? selectionHasComponents(meshSelection) && isComponentSelectionMode(selectionMode)
       ? meshSelection!.objectId
@@ -490,8 +497,10 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
               ? 'cursor-sculpt'
               : ''
 
+  // Only Alt+LMB steals the gesture for orbit. Shift+LMB must reach selection
+  // handlers so vertex/edge/face multi-select works.
   const isOrbitModifierGesture = (e: React.PointerEvent) =>
-    view === 'perspective' && (e.shiftKey || e.altKey) && e.button === 0
+    view === 'perspective' && e.altKey && !e.shiftKey && e.button === 0
 
   const handleViewportPointerDown = (e: React.PointerEvent) => {
     if (isOrbitModifierGesture(e)) {
@@ -533,7 +542,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onContextMenu={view === 'perspective' ? (e) => e.preventDefault() : undefined}
-      title={view === 'perspective' ? 'Shift or Alt + left-drag to orbit · two-finger scroll to zoom' : undefined}
+      title={view === 'perspective' ? 'Alt + left-drag to orbit · right-drag to orbit · Shift+click to multi-select · two-finger scroll to zoom' : undefined}
     >
       <div className="viewport-view-chrome">
         <span className="viewport-stats">
@@ -552,6 +561,27 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
         <ViewportViewPicker view={view} onSelect={handleSelectView} />
       </div>
 
+      {isActive && activeTool === 'knife' && (
+        <div className="knife-tool-toast" role="status">
+          <span>
+            {cadPreview.knifeDraft && cadPreview.knifeDraft.points.length >= 2
+              ? 'Press Enter to apply Knife Tool'
+              : 'Click edges to place cut points · Enter to apply · Esc to cancel'}
+          </span>
+          <button
+            type="button"
+            className="knife-tool-toast-close"
+            aria-label="Cancel knife"
+            onClick={(e) => {
+              e.stopPropagation()
+              useAppStore.getState().knifeCancel()
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {marqueeRect && <MarqueeOverlay rect={marqueeRect} />}
 
       <ReferenceImageOverlay view={view} containerRef={containerRef} />
@@ -563,7 +593,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
       <Canvas
         className="viewport-canvas-root"
         frameloop={continuousFrames ? 'always' : 'demand'}
-        dpr={[1, 2]}
+        dpr={layoutVisible && isActive ? ([1, 2] as [number, number]) : 1}
         orthographic={isOrtho}
         eventSource={containerRef as React.RefObject<HTMLElement>}
         camera={{
@@ -627,6 +657,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
             showDensityHeatmap={showDensityHeatmap}
             selectionMode={selectionMode}
             viewportDisplayMode={viewportDisplayMode}
+            viewportXRay={viewportXRay}
           />
         ))}
 
@@ -645,13 +676,13 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           />
         )}
 
-        <PrimitiveBoxCanvas />
-        <PolyDrawVisuals />
-        <KnifeVisuals />
-        <BendVisuals />
-        <LoopCutVisuals />
+        {(activeTool === 'primitive-box' || primitiveBoxDraft) && <PrimitiveBoxCanvas />}
+        {activeTool === 'poly-draw' && <PolyDrawVisuals />}
+        {activeTool === 'knife' && <KnifeVisuals />}
+        {activeTool === 'bend' && <BendVisuals />}
+        {activeTool === 'loop-cut' && <LoopCutVisuals />}
         <DrawVertexOverlay />
-        <BillboardImages />
+        {billboardImages.length > 0 && <BillboardImages />}
 
         {view !== 'perspective' && (
           <>

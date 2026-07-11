@@ -9,5 +9,8 @@ export function applyTheme(themeId: ThemeId): void {
   }
   root.dataset.theme = themeId
   // Drive contrast-aware chrome: light panels get dark text, dark panels get light text.
-  root.dataset.themeContrast = isLightHex(css['--bg-panel']) ? 'light' : 'dark'
+  const light = isLightHex(css['--bg-panel'])
+  root.dataset.themeContrast = light ? 'light' : 'dark'
+  // Match OS overlay scrollbars + form controls to theme brightness.
+  root.style.colorScheme = light ? 'light' : 'dark'
 }

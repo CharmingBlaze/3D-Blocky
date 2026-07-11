@@ -436,12 +436,20 @@ export function ensureSceneObjectOutward<T extends { positions: Vec3[]; faces: n
   if (obj.faces.length === 0) return obj
   const center = refPoint ?? meshCentroid(obj.positions)
   const faces = obj.faces.map((face) => {
-    if (face.length !== 3) return face
-    const tri = face as TriangleFace
-    const n = computeFaceNormal(obj.positions, tri)
-    const c = faceCentroid(obj.positions, tri)
-    const dot = n.x * (c.x - center.x) + n.y * (c.y - center.y) + n.z * (c.z - center.z)
-    if (dot < 0) return [face[0], face[2], face[1]] as number[]
+    if (face.length < 3) return face
+    const n = computeFaceNormal(obj.positions, [face[0]!, face[1]!, face[2]!])
+    let cx = 0
+    let cy = 0
+    let cz = 0
+    for (const vi of face) {
+      const p = obj.positions[vi]!
+      cx += p.x
+      cy += p.y
+      cz += p.z
+    }
+    const inv = 1 / face.length
+    const dot = n.x * (cx * inv - center.x) + n.y * (cy * inv - center.y) + n.z * (cz * inv - center.z)
+    if (dot < 0) return [...face].reverse()
     return face
   })
   return { ...obj, faces }

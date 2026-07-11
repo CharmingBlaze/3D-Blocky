@@ -279,8 +279,8 @@ export function pickMeshSurfaceWorld(
 }
 
 /**
- * Knife placement: raycast mesh, snap to nearby vertices/edges (Blockbench-style).
- * Returns both world and mesh-local coordinates.
+ * Knife placement: raycast mesh under the cursor, optionally snap to nearby verts/edges.
+ * Face hit under the mouse wins unless a vert/edge is clearly closer on screen.
  */
 export function pickKnifeHit(
   clientX: number,
@@ -289,32 +289,117 @@ export function pickKnifeHit(
   camera: THREE.Camera,
   objects: SceneObject[],
   preferredObjectId?: string | null
-): { objectId: string; world: Vec3; local: Vec3 } | null {
+): {
+  objectId: string
+  world: Vec3
+  local: Vec3
+  snap: 'vertex' | 'edge' | 'face'
+  vertexIndex: number | null
+  edge: [number, number] | null
+  faceIndex: number | null
+} | null {
   const ray = rayFromPointer(clientX, clientY, rect, camera)
-  const faceHit = pickClosestObject(objects, ray, preferredObjectId)
-  if (!faceHit) return null
 
-  const obj = objects.find((o) => o.id === faceHit.objectId)
+  // Prefer the active object, but fall back so the cursor still tracks when the ray
+  // grazes a different mesh or leaves the preferred silhouette.
+  let faceHit =
+    (preferredObjectId
+      ? pickClosestObject(objects, ray, preferredObjectId)
+      : null) ?? pickClosestObject(objects, ray, null)
+
+  if (!faceHit) {
+    // Ray missed faces — still allow screen-space snap on the preferred object.
+    const targetId = preferredObjectId
+    const obj = targetId ? objects.find((o) => o.id === targetId) : null
+    if (!obj) return null
+
+    const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 12, false)
+    if (vi !== null) {
+      const local = { ...obj.positions[vi]! }
+      return {
+        objectId: obj.id,
+        world: worldPointFromObject(obj, local),
+        local,
+        snap: 'vertex',
+        vertexIndex: vi,
+        edge: null,
+        faceIndex: null,
+      }
+    }
+    const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 10, false)
+    if (edge) {
+      const local = closestPointOnEdgeLocal(obj, edge, clientX, clientY, rect, camera)
+      return {
+        objectId: obj.id,
+        world: worldPointFromObject(obj, local),
+        local,
+        snap: 'edge',
+        vertexIndex: null,
+        edge,
+        faceIndex: null,
+      }
+    }
+    return null
+  }
+
+  const obj = objects.find((o) => o.id === faceHit!.objectId)
   if (!obj) return null
 
-  const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 14, false)
-  if (vi !== null) {
-    const local = { ...obj.positions[vi]! }
-    return { objectId: obj.id, world: worldPointFromObject(obj, local), local }
-  }
-
-  const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 12, false)
-  if (edge) {
-    const local = closestPointOnEdgeLocal(obj, edge, clientX, clientY, rect, camera)
-    return { objectId: obj.id, world: worldPointFromObject(obj, local), local }
-  }
-
-  const local = {
+  const faceLocal = {
     x: faceHit.pointLocal.x,
     y: faceHit.pointLocal.y,
     z: faceHit.pointLocal.z,
   }
-  return { objectId: obj.id, world: worldPointFromObject(obj, local), local }
+  const faceWorld = worldPointFromObject(obj, faceLocal)
+
+  const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 11, false)
+  if (vi !== null) {
+    const local = { ...obj.positions[vi]! }
+    const world = worldPointFromObject(obj, local)
+    const screen = projectWorldToScreen(world, camera, rect)
+    const dist = Math.hypot(clientX - screen.x, clientY - screen.y)
+    if (dist <= 11) {
+      return {
+        objectId: obj.id,
+        world,
+        local,
+        snap: 'vertex',
+        vertexIndex: vi,
+        edge: null,
+        faceIndex: faceHit.faceIndex,
+      }
+    }
+  }
+
+  // Edge snap is the main Blockbench cue — prefer edges whenever nearby.
+  const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 18, false)
+  if (edge) {
+    const local = closestPointOnEdgeLocal(obj, edge, clientX, clientY, rect, camera)
+    const world = worldPointFromObject(obj, local)
+    const screen = projectWorldToScreen(world, camera, rect)
+    const dist = Math.hypot(clientX - screen.x, clientY - screen.y)
+    if (dist <= 18) {
+      return {
+        objectId: obj.id,
+        world,
+        local,
+        snap: 'edge',
+        vertexIndex: null,
+        edge,
+        faceIndex: faceHit.faceIndex,
+      }
+    }
+  }
+
+  return {
+    objectId: obj.id,
+    world: faceWorld,
+    local: faceLocal,
+    snap: 'face',
+    vertexIndex: null,
+    edge: null,
+    faceIndex: faceHit.faceIndex,
+  }
 }
 
 function closestPointOnEdgeLocal(

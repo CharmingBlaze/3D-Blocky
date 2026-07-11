@@ -31,6 +31,7 @@ interface ObjectNodeProps {
   showDensityHeatmap: boolean
   selectionMode: SelectionMode
   viewportDisplayMode: ViewportDisplayMode
+  viewportXRay: boolean
 }
 
 function ObjectMeshEditOverlay({
@@ -42,12 +43,16 @@ function ObjectMeshEditOverlay({
   selectionMode: SelectionMode
   isSelected: boolean
 }) {
+  const activeTool = useAppStore((s) => s.activeTool)
   const meshSelection = useAppStore((s) =>
     s.meshSelection?.objectId === object.id ? s.meshSelection : null
   )
   const meshHover = useAppStore((s) =>
     s.meshHover?.objectId === object.id ? s.meshHover : null
   )
+
+  // Knife / loop-cut use their own overlays — hide edit handles so the view stays clean.
+  if (activeTool === 'knife' || activeTool === 'loop-cut') return null
 
   const inComponentMode = isComponentSelectionMode(selectionMode)
   const showMeshEdit =
@@ -76,6 +81,7 @@ function ObjectNodeInner({
   showDensityHeatmap,
   selectionMode,
   viewportDisplayMode,
+  viewportXRay,
 }: ObjectNodeProps) {
   const rootRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
@@ -130,6 +136,7 @@ function ObjectNodeInner({
             facetExaggeration={facetExaggeration}
             showDensityHeatmap={showDensityHeatmap}
             displayMode={viewportDisplayMode}
+            viewportXRay={viewportXRay}
           />
           <ObjectMeshEditOverlay
             object={object}
@@ -180,5 +187,6 @@ export const ObjectNode = memo(ObjectNodeInner, (prev, next) =>
   prev.facetExaggeration === next.facetExaggeration &&
   prev.showDensityHeatmap === next.showDensityHeatmap &&
   prev.selectionMode === next.selectionMode &&
-  prev.viewportDisplayMode === next.viewportDisplayMode
+  prev.viewportDisplayMode === next.viewportDisplayMode &&
+  prev.viewportXRay === next.viewportXRay
 )

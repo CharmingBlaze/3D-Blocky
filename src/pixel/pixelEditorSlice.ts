@@ -1,7 +1,6 @@
 import { generateId } from '../utils/math'
 import type { CustomPalette, Rgba4 } from '../material/materialTypes'
 import { hexToRgba4 } from '../material/materialTypes'
-import { loadPixelPenPalettes } from '../material/palettes'
 import { compositeLayers } from './compositeLayers'
 import {
   clonePixelDocument,
@@ -77,7 +76,7 @@ export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorFillTolerance: 32,
   pixelEditorColor: hexToRgba4('#6ecbf5'),
   pixelEditorPaletteId: 'pico8',
-  pixelEditorCustomPalettes: loadPixelPenPalettes(),
+  pixelEditorCustomPalettes: [],
   pixelDocuments: {},
   pixelTextureRevision: 0,
 }

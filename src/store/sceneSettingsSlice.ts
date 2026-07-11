@@ -14,8 +14,9 @@ import { numberToRgba4, rgba4ToNumber } from '../material/materialTypes'
 import { rgba4Equal } from '../material/colorObject'
 import type { Rgba4 } from '../material/materialTypes'
 import { applyTheme } from '../theme/applyTheme'
-import { getTheme, hexToNumber, type ThemeId } from '../theme/themes'
+import { getThemeMaterialColor, getThemeMaterialHex, type ThemeId } from '../theme/themes'
 import { readStoredThemeId } from '../theme/bootstrapTheme'
+import { hexToRgba4 } from '../material/materialTypes'
 import { mirrorWorldPoint } from '../symmetry/symmetry'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
@@ -23,7 +24,7 @@ import type { SelectionMode } from './selectionSlice'
 
 const THEME_STORAGE_KEY = 'lpo-theme'
 const BOOT_THEME_ID = readStoredThemeId()
-const BOOT_ACCENT = hexToNumber(getTheme(BOOT_THEME_ID).css['--accent'])
+const BOOT_MATERIAL = getThemeMaterialColor(BOOT_THEME_ID)
 
 function objectNeedsRecolor(obj: SceneObject, color: number, rgba: Rgba4): boolean {
   const mat = ensureObjectMaterial(obj).material!
@@ -85,7 +86,7 @@ export const sceneSettingsInitialState: SceneSettingsLayoutState = {
   facetExaggeration: 0,
   showDensityHeatmap: false,
   themeId: BOOT_THEME_ID,
-  activeColor: BOOT_ACCENT,
+  activeColor: BOOT_MATERIAL,
   drawDoubleSided: false,
   showToolRing: false,
   showExportDialog: false,
@@ -224,8 +225,12 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
       } catch {
         /* ignore */
       }
-      const accent = hexToNumber(getTheme(id).css['--accent'])
-      setPartial({ themeId: id, activeColor: accent })
+      const materialHex = getThemeMaterialHex(id)
+      setPartial({
+        themeId: id,
+        activeColor: getThemeMaterialColor(id),
+        materialEditorColor: hexToRgba4(materialHex),
+      })
     },
     toggleTopologyLock: () => {
       const { selectedObjectId, objects } = store()

@@ -52,7 +52,7 @@ import { TEXTURE_PROJECT_SUFFIX } from '../app/branding'
 import { resolveEffectiveMaterial, ensureObjectMaterial } from '../material/materials'
 import type { CustomPalette, GradientDirection, GradientHandle2D, HarmonyScheme, MaterialMode, Rgba4 } from '../material/materialTypes'
 import { rgba4ToHex } from '../material/materialTypes'
-import { PRESET_PALETTES, generateHarmonyPalette, savePixelPenPalettes } from '../material/palettes'
+import { PRESET_PALETTES, generateHarmonyPalette, savePixelPenPalettes, loadCustomPalettes, loadPixelPenPalettes } from '../material/palettes'
 import { assignUvMappingForMode } from '../uv/uvObject'
 import { sanitizeSceneSnapshot, type SceneSnapshot } from '../history/sceneHistory'
 import { reconcilePixelDocumentCache } from '../rendering/textureCache'
@@ -555,6 +555,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedObjectId,
       selectionObjectIds,
       objects,
+      materialEditorCustomPalettes,
     } = get()
     if (!materialEditorOpen && !selectedObjectId && selectionObjectIds.length === 0) return
     if (materialEditorOpen && materialEditorPanel.minimized) {
@@ -564,9 +565,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!materialEditorOpen) {
       const ids = resolveTargetObjectIds(selectedObjectId, selectionObjectIds)
       const synced = syncEditorColorFromSelection(objects, ids)
+      const palettes =
+        materialEditorCustomPalettes.length > 0
+          ? materialEditorCustomPalettes
+          : loadCustomPalettes()
       set({
         materialEditorOpen: true,
         materialEditorPanel: { ...materialEditorPanel, minimized: false },
+        materialEditorCustomPalettes: palettes,
         ...(synced ? { materialEditorColor: synced } : {}),
       })
       return
@@ -861,6 +867,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorPanel: { ...state.pixelEditorPanel, minimized: false },
       pixelEditorDocId: docId,
       pixelEditorPaintOnModel: opts?.paintOnModel ?? true,
+      pixelEditorCustomPalettes:
+        state.pixelEditorCustomPalettes.length > 0
+          ? state.pixelEditorCustomPalettes
+          : loadPixelPenPalettes(),
     })
   },
 

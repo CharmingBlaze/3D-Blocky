@@ -2,7 +2,12 @@ import { SideButtonDropdown } from './SideButtonDropdown'
 import { useAppStore } from '../store/appStore'
 import { THEMES, getTheme, type ThemeGroup, type ThemeId } from '../theme/themes'
 
-const THEME_GROUPS: ThemeGroup[] = ['Classic', 'Game Systems', 'Operating Systems']
+const THEME_GROUPS: ThemeGroup[] = [
+  'Classic',
+  'Studio',
+  'Game Systems',
+  'Operating Systems',
+]
 
 const THEME_OPTIONS = THEME_GROUPS.flatMap((group) =>
   THEMES.filter((t) => t.group === group).map((t) => ({

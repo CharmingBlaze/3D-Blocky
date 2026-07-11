@@ -26,15 +26,12 @@ export interface LowPolyCapsuleParams {
   outwardCenter: Vec3
 }
 
-function connectRings(b: MeshBuilder, ringA: number[], ringB: number[]): number[] {
-  const faces: number[] = []
+function connectRings(b: MeshBuilder, ringA: number[], ringB: number[]): void {
   const segs = ringA.length
   for (let i = 0; i < segs; i++) {
     const j = (i + 1) % segs
-    faces.push(b.addTriangle(ringA[i]!, ringA[j]!, ringB[j]!))
-    faces.push(b.addTriangle(ringA[i]!, ringB[j]!, ringB[i]!))
+    b.addQuad(ringA[i]!, ringA[j]!, ringB[j]!, ringB[i]!)
   }
-  return faces
 }
 
 function fanPoleToRing(
@@ -86,12 +83,12 @@ function appendHemisphere(
   if (ringsFromPole.length > 1) {
     capFaces.push(...fanPoleToRing(b, pole, ringsFromPole[0]!, poleIsMin))
     for (let ri = 0; ri < ringsFromPole.length - 1; ri++) {
-      capFaces.push(...connectRings(b, ringsFromPole[ri]!, ringsFromPole[ri + 1]!))
+      connectRings(b, ringsFromPole[ri]!, ringsFromPole[ri + 1]!)
     }
   } else {
     capFaces.push(...fanPoleToRing(b, pole, equatorRing, poleIsMin))
   }
-  b.addFaceGroup(capFaces)
+  if (capFaces.length > 0) b.addFaceGroup(capFaces)
 }
 
 /**
@@ -136,7 +133,7 @@ export function buildLowPolyCapsuleIndexed(params: LowPolyCapsuleParams): Indexe
   const topRing = cylLength > 1e-5 ? buildRing(cylTop, 1) : bottomRing
 
   if (topRing !== bottomRing) {
-    b.addFaceGroup(connectRings(b, bottomRing, topRing))
+    connectRings(b, bottomRing, topRing)
   }
 
   // 2. Hemispheres — equator rings weld to the cylinder rings.

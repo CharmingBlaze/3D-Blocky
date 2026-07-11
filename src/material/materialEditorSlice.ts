@@ -24,7 +24,6 @@ import { gradientHandlesForDirection } from './gradientLine'
 import {
   allPaletteOptions,
   generateHarmonyPalette,
-  loadCustomPalettes,
   paletteColorsById,
   saveCustomPalettes,
 } from './palettes'
@@ -56,7 +55,7 @@ export const materialEditorInitialState: MaterialEditorState = {
   materialEditorPanel: { x: 96, y: 96, width: 340, height: 620, minimized: false },
   materialEditorColor: hexToRgba4('#6ecbf5'),
   materialEditorPaletteId: 'pico8',
-  materialEditorCustomPalettes: loadCustomPalettes(),
+  materialEditorCustomPalettes: [],
   materialEditorEyedropperActive: false,
   materialEditorGradientDirection: 'y',
   materialEditorGradientStart: { u: 0.5, v: 0.92 },

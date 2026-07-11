@@ -42,7 +42,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { ObjectTransform } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SculptTool } from '../sculpt/sculptTools'
-import { cloneTransform, ensureTransform, selectionWorldCenter } from '../mesh/objectTransform'
+import { cloneTransform, ensureTransform, localPointFromWorld, selectionWorldCenter } from '../mesh/objectTransform'
 import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
 import {
@@ -187,9 +187,9 @@ export function useViewportPointerHandlers({
     loopCutBegin,
     loopCutCommit,
     loopCutAdjustWheel,
-    knifePointerDown,
-    knifePointerMove,
-    knifeCommit,
+    knifeHover,
+    knifeClearHover,
+    knifeAddPoint,
     bendBegin,
     bendPointerMove,
     bendPointerUp,
@@ -251,9 +251,9 @@ export function useViewportPointerHandlers({
       loopCutBegin: s.loopCutBegin,
       loopCutCommit: s.loopCutCommit,
       loopCutAdjustWheel: s.loopCutAdjustWheel,
-      knifePointerDown: s.knifePointerDown,
-      knifePointerMove: s.knifePointerMove,
-      knifeCommit: s.knifeCommit,
+      knifeHover: s.knifeHover,
+      knifeClearHover: s.knifeClearHover,
+      knifeAddPoint: s.knifeAddPoint,
       bendBegin: s.bendBegin,
       bendPointerMove: s.bendPointerMove,
       bendPointerUp: s.bendPointerUp,
@@ -415,7 +415,7 @@ export function useViewportPointerHandlers({
     [view, defaultDepth, polyDrawSnapAllScene]
   )
 
-  const resolveKnifeWorld = useCallback(
+  const resolveKnifeHit = useCallback(
     (clientX: number, clientY: number, preferredId: string | null, shiftKey = false) => {
       const rect = containerRef.current?.getBoundingClientRect()
       const camera = cameraRef.current
@@ -423,50 +423,15 @@ export function useViewportPointerHandlers({
 
       const store = useAppStore.getState()
       const hit = pickKnifeHit(clientX, clientY, rect, camera, store.objects, preferredId)
-      if (!hit) {
-        const targetId =
-          preferredId ??
-          store.selectedObjectId ??
-          (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
-        if (!targetId) return null
-
-        const obj = store.objects.find((o) => o.id === targetId)
-        const tr = obj ? ensureTransform(obj).position : { x: 0, y: defaultDepth, z: 0 }
-        const through = new Vector3(tr.x, tr.y, tr.z)
-        const plane = buildCameraDragPlane(camera, through)
-        const planeHit = clientToCameraPlane(clientX, clientY, rect, camera, plane)
-        if (!planeHit) return null
-        const world = { x: planeHit.x, y: planeHit.y, z: planeHit.z }
-        const draft = store.knifeDraft
-        if (shiftKey && draft?.start) {
-          const constrained = constrainKnifeEndWorld(
-            draft.start,
-            world,
-            (w) => {
-              const p = new Vector3(w.x, w.y, w.z).project(camera)
-              return {
-                x: rect.left + (p.x * 0.5 + 0.5) * rect.width,
-                y: rect.top + (-p.y * 0.5 + 0.5) * rect.height,
-              }
-            },
-            (sx, sy) => {
-              const ndcX = ((sx - rect.left) / rect.width) * 2 - 1
-              const ndcY = -((sy - rect.top) / rect.height) * 2 + 1
-              const vec = new Vector3(ndcX, ndcY, 0.5).unproject(camera)
-              return { x: vec.x, y: vec.y, z: vec.z }
-            },
-            true
-          )
-          return { objectId: targetId, world: constrained }
-        }
-        return { objectId: targetId, world }
-      }
+      if (!hit) return null
 
       let world = hit.world
+      let local = hit.local
       const draft = store.knifeDraft
-      if (shiftKey && draft?.start) {
+      const anchor = draft?.points[draft.points.length - 1]?.world ?? null
+      if (shiftKey && anchor) {
         world = constrainKnifeEndWorld(
-          draft.start,
+          anchor,
           world,
           (w) => {
             const p = new Vector3(w.x, w.y, w.z).project(camera)
@@ -483,11 +448,50 @@ export function useViewportPointerHandlers({
           },
           true
         )
+        const obj = store.objects.find((o) => o.id === hit.objectId)
+        local = obj ? localPointFromWorld(obj, world) : world
       }
 
-      return { objectId: hit.objectId, world }
+      return {
+        objectId: hit.objectId,
+        world,
+        local,
+        snap: hit.snap,
+        vertexIndex: hit.vertexIndex,
+        edge: hit.edge,
+        faceIndex: hit.faceIndex,
+      }
     },
-    [defaultDepth]
+    []
+  )
+
+  /** @deprecated Prefer resolveKnifeHit — kept for bend tool reuse of mesh picking. */
+  const resolveKnifeWorld = useCallback(
+    (clientX: number, clientY: number, preferredId: string | null, shiftKey = false) => {
+      const hit = resolveKnifeHit(clientX, clientY, preferredId, shiftKey)
+      if (hit) return { objectId: hit.objectId, world: hit.world }
+
+      // Bend still allows off-mesh axis placement via camera plane.
+      const rect = containerRef.current?.getBoundingClientRect()
+      const camera = cameraRef.current
+      if (!rect || !camera) return null
+
+      const store = useAppStore.getState()
+      const targetId =
+        preferredId ??
+        store.selectedObjectId ??
+        (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
+      if (!targetId) return null
+
+      const obj = store.objects.find((o) => o.id === targetId)
+      const tr = obj ? ensureTransform(obj).position : { x: 0, y: defaultDepth, z: 0 }
+      const through = new Vector3(tr.x, tr.y, tr.z)
+      const plane = buildCameraDragPlane(camera, through)
+      const planeHit = clientToCameraPlane(clientX, clientY, rect, camera, plane)
+      if (!planeHit) return null
+      return { objectId: targetId, world: { x: planeHit.x, y: planeHit.y, z: planeHit.z } }
+    },
+    [defaultDepth, resolveKnifeHit]
   )
 
   const getObjectDragDelta = useCallback(
@@ -942,11 +946,16 @@ export function useViewportPointerHandlers({
           store.knifeDraft?.objectId ??
           store.selectedObjectId ??
           (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
-        const resolved = resolveKnifeWorld(e.clientX, e.clientY, preferred)
-        if (!resolved) return
+        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey)
+        if (!hit) return
         e.currentTarget.setPointerCapture(e.pointerId)
-        selectObject(resolved.objectId)
-        knifePointerDown(resolved.objectId, resolved.world, view)
+        selectObject(hit.objectId)
+        knifeAddPoint(
+          hit.objectId,
+          { world: hit.world, local: hit.local, snap: hit.snap },
+          view,
+          getCameraViewForward(camera)
+        )
         return
       }
 
@@ -1137,6 +1146,8 @@ export function useViewportPointerHandlers({
       tryBeginMeshSelectionDrag,
       commitHistory,
       beginPointerInteraction,
+      resolveKnifeHit,
+      knifeAddPoint,
     ]
   )
 
@@ -1299,11 +1310,23 @@ export function useViewportPointerHandlers({
 
       const store = useAppStore.getState()
 
-      if (store.activeTool === 'knife' && (e.buttons & 1) === 1 && store.knifeDraft?.start) {
-        const preferred = store.knifeDraft.objectId ?? store.selectedObjectId
-        const resolved = resolveKnifeWorld(e.clientX, e.clientY, preferred, e.shiftKey)
-        if (resolved) {
-          knifePointerMove(resolved.world)
+      if (store.activeTool === 'knife') {
+        const preferred =
+          store.knifeDraft?.objectId ??
+          store.selectedObjectId ??
+          (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
+        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey)
+        if (hit) {
+          knifeHover(
+            hit.objectId,
+            { world: hit.world, local: hit.local, snap: hit.snap },
+            view,
+            cameraRef.current
+              ? getCameraViewForward(cameraRef.current)
+              : { x: 0, y: 0, z: -1 }
+          )
+        } else {
+          knifeClearHover()
         }
         return
       }
@@ -1422,7 +1445,7 @@ export function useViewportPointerHandlers({
         return
       }
     },
-    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, knifePointerMove, setPrimitiveBoxScrollHeight]
+    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, resolveKnifeHit, knifeHover, knifeClearHover, setPrimitiveBoxScrollHeight]
   )
 
   const handlePointerUp = useCallback(
@@ -1468,13 +1491,8 @@ export function useViewportPointerHandlers({
         }
         return
       }
-      if (store.activeTool === 'knife' && store.knifeDraft?.start) {
-        const camera = cameraRef.current
-        if (camera && store.knifeDraft.end) {
-          knifeCommit(getCameraViewForward(camera))
-        } else {
-          useAppStore.getState().knifeCancel()
-        }
+      if (store.activeTool === 'knife' && store.knifeDraft) {
+        // Blockbench-style: clicks place points; Enter confirms. Pointer-up only releases capture.
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId)
         }
@@ -1691,7 +1709,6 @@ export function useViewportPointerHandlers({
       applyMeshPick,
       applyMeshMarqueePick,
       clearMeshSelection,
-      knifeCommit,
       commitHistory,
       viewportXRay,
       endPointerInteraction,
