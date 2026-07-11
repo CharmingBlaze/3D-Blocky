@@ -344,6 +344,44 @@ function closestPointOnEdgeLocal(
   }
 }
 
+function pickNearestFace(
+  obj: SceneObject,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  camera: THREE.Camera,
+  thresholdPx = 18,
+  cullBackFaces = false
+): number | null {
+  let bestFi: number | null = null
+  let bestDist = thresholdPx
+  let bestViewZ = -Infinity
+
+  for (const group of buildFaceOverlayGroups(obj)) {
+    if (cullBackFaces && !isFaceOverlayGroupPickable(obj, group, camera)) {
+      continue
+    }
+    const world = worldPointFromObject(obj, group.centroid)
+    const screen = projectWorldToScreen(world, camera, rect)
+    const dist = Math.hypot(clientX - screen.x, clientY - screen.y)
+    if (dist > thresholdPx) continue
+
+    const vz = viewSpaceZ(camera, world)
+    const isCloser =
+      bestFi === null ||
+      dist < bestDist - 0.5 ||
+      (dist <= bestDist + 0.5 && vz > bestViewZ)
+
+    if (isCloser) {
+      bestDist = dist
+      bestViewZ = vz
+      bestFi = group.faceIndices[0] ?? null
+    }
+  }
+
+  return bestFi
+}
+
 export function pickMeshComponent(
   mode: SelectionMode,
   clientX: number,
@@ -361,6 +399,16 @@ export function pickMeshComponent(
   const faceHit = pickClosestObject(objects, ray, preferredObjectId)
 
   if (mode === 'face') {
+    // Blender X-Ray: select faces via center dots, including occluded/back faces.
+    if (!cullBackVertices) {
+      const targetId = preferredObjectId ?? faceHit?.objectId
+      const obj = targetId ? objects.find((o) => o.id === targetId) : null
+      if (obj) {
+        const fi = pickNearestFace(obj, clientX, clientY, rect, camera, 18, false)
+        if (fi !== null) return { objectId: obj.id, face: fi }
+      }
+      return null
+    }
     if (!faceHit) return null
     return { objectId: faceHit.objectId, face: faceHit.faceIndex }
   }

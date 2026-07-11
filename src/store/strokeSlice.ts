@@ -16,6 +16,7 @@ import { isNearPoint } from '../vector/penTool'
 import { extrudeValueFromScreenDelta } from '../mesh/meshOps'
 import { planeToWorld3D } from '../utils/screenToWorld'
 import type { ViewType } from '../scene/viewTypes'
+import { emaSmoothPoint, movingAverageSmoothStroke } from '../stroke/strokeCapture'
 
 export type StrokeMode = 'outline' | 'centerline' | 'blob'
 export type DrawInputMode = 'regular' | 'vector-pen'
@@ -30,6 +31,8 @@ export interface StrokeLayoutState {
   strokeMode: StrokeMode
   drawInputMode: DrawInputMode
   autoConnectPaths: boolean
+  /** Soften freehand mouse/pen input for steadier sketch strokes. */
+  smoothDrawing: boolean
   lastStrokeEndpoint: { view: ViewType; position: { x: number; y: number } } | null
   sketchExtrudeMode: boolean
   penExtrudeMode: boolean
@@ -65,6 +68,7 @@ export interface StrokeLayoutActions {
   setDrawInputMode: (mode: DrawInputMode) => void
   setAutoConnectPaths: (on: boolean) => void
   toggleAutoConnectPaths: () => void
+  setSmoothDrawing: (on: boolean) => void
 }
 
 export type StrokeSlice = StrokeLayoutState & StrokeLayoutActions
@@ -73,6 +77,7 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   strokeMode: 'outline',
   drawInputMode: 'regular',
   autoConnectPaths: true,
+  smoothDrawing: true,
   lastStrokeEndpoint: null,
   sketchExtrudeMode: false,
   penExtrudeMode: false,
@@ -268,10 +273,14 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
           s.currentStroke.length >= 3 &&
           isSketchNearClose(s.currentStroke, point, store().closeThreshold)
         ) {
-          p = { ...s.currentStroke[0] }
+          p = { ...s.currentStroke[0]! }
+        } else if (s.smoothDrawing && s.currentStroke.length > 0) {
+          const last = s.currentStroke[s.currentStroke.length - 1]!
+          p = emaSmoothPoint(last, point, 0.3)
         }
         const last = s.currentStroke[s.currentStroke.length - 1]
-        if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1.5) {
+        const minDist = s.smoothDrawing ? 2.4 : 1.5
+        if (last && Math.hypot(p.x - last.x, p.y - last.y) < minDist) {
           return { currentStrokePreview: p } as Partial<T>
         }
         return {
@@ -291,7 +300,11 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
           s.currentStroke.length >= 3 &&
           isSketchNearClose(s.currentStroke, point, store().closeThreshold)
         ) {
-          return { currentStrokePreview: { ...s.currentStroke[0] } } as Partial<T>
+          return { currentStrokePreview: { ...s.currentStroke[0]! } } as Partial<T>
+        }
+        if (s.smoothDrawing && s.currentStroke.length > 0) {
+          const last = s.currentStroke[s.currentStroke.length - 1]!
+          return { currentStrokePreview: emaSmoothPoint(last, point, 0.35) } as Partial<T>
         }
         return { currentStrokePreview: point } as Partial<T>
       })
@@ -317,6 +330,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         sketchLatheMode,
         sketchLatheCaps,
         extrudeAmount,
+        smoothDrawing,
       } = store()
 
       if (currentStrokeView !== view || currentStroke.length < 2) {
@@ -329,7 +343,10 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         return
       }
 
-      const snappedStroke = snapSketchStrokeClosed(currentStroke, closeThreshold)
+      const stabilizedStroke = smoothDrawing
+        ? movingAverageSmoothStroke(currentStroke, 2)
+        : currentStroke
+      const snappedStroke = snapSketchStrokeClosed(stabilizedStroke, closeThreshold)
 
       const strokeInput = {
         points: snappedStroke,
@@ -354,10 +371,15 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       ) {
         const target = objects.find((o) => o.id === selectedObjectId) ?? objects[objects.length - 1]
         if (target) {
-          const start = planeToWorld3D(currentStroke[0].x, currentStroke[0].y, view, defaultDepth)
+          const start = planeToWorld3D(
+            snappedStroke[0]!.x,
+            snappedStroke[0]!.y,
+            view,
+            defaultDepth
+          )
           const end = planeToWorld3D(
-            currentStroke[currentStroke.length - 1].x,
-            currentStroke[currentStroke.length - 1].y,
+            snappedStroke[snappedStroke.length - 1]!.x,
+            snappedStroke[snappedStroke.length - 1]!.y,
             view,
             defaultDepth
           )
@@ -404,7 +426,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         }
       }
 
-      const lastPt = currentStroke[currentStroke.length - 1]
+      const lastPt = snappedStroke[snappedStroke.length - 1]!
 
       if (obj) {
         store().addObject(obj)
@@ -444,5 +466,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
 
     toggleAutoConnectPaths: () =>
       set((s) => ({ autoConnectPaths: !s.autoConnectPaths }) as Partial<T>),
+
+    setSmoothDrawing: (on) => set({ smoothDrawing: on } as Partial<T>),
   }
 }

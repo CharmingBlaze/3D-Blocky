@@ -10,6 +10,7 @@ import {
   type ViewportDisplayMode,
 } from '../rendering/viewportDisplay'
 import { useAppStore } from '../store/appStore'
+import { VIEWPORT_XRAY_OPACITY } from '../store/viewportSlice'
 import { ensureObjectUVs } from '../uv/uvObject'
 import { resolveSubdivisionPreview } from '../mesh/subdivisionSurface'
 import { useLoadedTexture, usePixelDocumentTexture } from '../rendering/textureCache'
@@ -88,6 +89,7 @@ function MeshMaterial({
   useTexture,
   textureAlpha = false,
   pixelTextureBlend = false,
+  xray = false,
 }: {
   config: (typeof VIEWPORT_DISPLAY_CONFIG)[ViewportDisplayMode]
   flatShading: boolean
@@ -101,21 +103,25 @@ function MeshMaterial({
   useTexture: boolean
   textureAlpha?: boolean
   pixelTextureBlend?: boolean
+  xray?: boolean
 }) {
   const onBeforeCompile = pixelTextureBlend ? patchPixelTextureBlendShader : undefined
   const customProgramCacheKey = pixelTextureBlend
     ? () => PIXEL_TEXTURE_BLEND_CACHE_KEY
     : undefined
 
+  const isTransparent = xray || (pixelTextureBlend ? opacity < 1 : opacity < 1 || textureAlpha)
   const common = {
     vertexColors: useVertexColors,
     flatShading,
     side,
     wireframe: wireframe ?? config.wireframe,
-    transparent: pixelTextureBlend ? opacity < 1 : opacity < 1 || textureAlpha,
+    transparent: isTransparent,
     opacity,
-    alphaTest: pixelTextureBlend ? undefined : textureAlpha ? 0.02 : undefined,
-    depthWrite: pixelTextureBlend ? opacity >= 1 : undefined,
+    alphaTest: pixelTextureBlend ? undefined : !xray && textureAlpha ? 0.02 : undefined,
+    // X-Ray: don't write depth so occluded mesh/overlays remain visible (Blender-like).
+    depthWrite: xray ? false : pixelTextureBlend ? opacity >= 1 : opacity >= 1,
+    depthTest: true,
     map: useTexture ? (map ?? undefined) : undefined,
     color: useTexture && !pixelTextureBlend ? '#ffffff' : undefined,
     onBeforeCompile,
@@ -193,6 +199,11 @@ export const MeshRenderer = memo(function MeshRenderer({
   const meshSide =
     usePixelTexture && !materialSettings.doubleSided ? THREE.FrontSide : THREE.DoubleSide
   const meshOpacity = materialSettings.opacity
+  const viewportXRay = useAppStore((s) => s.viewportXRay)
+  const xrayOpacity = viewportXRay
+    ? Math.min(meshOpacity, meshOpacity * VIEWPORT_XRAY_OPACITY)
+    : meshOpacity
+  const xraySide = viewportXRay ? THREE.DoubleSide : meshSide
 
   const renderObject = useMemo(() => {
     const base = useTexture ? ensureObjectUVs(object) : object
@@ -316,21 +327,22 @@ export const MeshRenderer = memo(function MeshRenderer({
           flatShading={flatShading}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
-          opacity={meshOpacity}
-          side={meshSide}
+          opacity={xrayOpacity}
+          side={xraySide}
           map={texture}
           useVertexColors={useVertexColors}
           useTexture={useTexture}
           textureAlpha={useTexture}
           pixelTextureBlend={false}
+          xray={viewportXRay}
         />
         {config.showEdgeOutline && topologyEdgeGeometry && (
           <lineSegments geometry={topologyEdgeGeometry} renderOrder={2}>
             <lineBasicMaterial
               color={edgeColor}
               transparent
-              opacity={0.88}
-              depthTest
+              opacity={viewportXRay ? 0.95 : 0.88}
+              depthTest={!viewportXRay}
               depthWrite={false}
               polygonOffset
               polygonOffsetFactor={-1}

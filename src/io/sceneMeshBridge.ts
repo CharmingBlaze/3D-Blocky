@@ -47,9 +47,9 @@ function createDataTextureFromDocument(
   tex.colorSpace = THREE.SRGBColorSpace
   tex.wrapS = THREE.ClampToEdgeWrapping
   tex.wrapT = THREE.ClampToEdgeWrapping
-  // glTF/Blender use top-left image origin with v=1 at the top. Runtime preview uses
-  // flipY=true for Three.js; export must leave rows unflipped so GLTFExporter does not
-  // mirror the PNG away from our UV convention (pixel/canvas y=0 ↔ uv.v=1).
+  // Keep pixel rows unflipped (canvas/PNG top = row 0). Export UVs are flipped in
+  // sceneObjectToThreeMesh to match glTF's top-left UV origin. Do not rely on flipY —
+  // GLTFExporter uses putImageData for DataTexture, which ignores the canvas transform.
   tex.flipY = false
   tex.minFilter = THREE.NearestFilter
   tex.magFilter = THREE.NearestFilter
@@ -82,8 +82,16 @@ export function sceneObjectToThreeMesh(
   if (!useTexture && data.faceColors.length > 0) {
     geometry.setAttribute('color', new THREE.BufferAttribute(data.faceColors, 3))
   }
+  // glTF UV origin is top-left (v=0 = image top). Our app/OpenGL UVs use v=1 = image
+  // top (see uvToPixel). flipY on DataTexture does not help — GLTFExporter's putImageData
+  // ignores the canvas transform — so flip V here for GLB/GLTF consumers (e.g. Blender).
   if (data.uvs && data.uvs.length > 0) {
-    geometry.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2))
+    const exportUvs = new Float32Array(data.uvs.length)
+    for (let i = 0; i < data.uvs.length; i += 2) {
+      exportUvs[i] = data.uvs[i]!
+      exportUvs[i + 1] = 1 - data.uvs[i + 1]!
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(exportUvs, 2))
   }
   setFlatNormalsFromIndices(geometry)
 

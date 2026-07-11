@@ -1,3 +1,4 @@
+import { isLightHex } from './colorUtils'
 import { getTheme, type ThemeId } from './themes'
 
 export function applyTheme(themeId: ThemeId): void {
@@ -7,4 +8,6 @@ export function applyTheme(themeId: ThemeId): void {
     root.style.setProperty(key, value)
   }
   root.dataset.theme = themeId
+  // Drive contrast-aware chrome: light panels get dark text, dark panels get light text.
+  root.dataset.themeContrast = isLightHex(css['--bg-panel']) ? 'light' : 'dark'
 }

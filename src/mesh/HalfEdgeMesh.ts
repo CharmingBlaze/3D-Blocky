@@ -153,6 +153,8 @@ export class HalfEdgeMesh {
       smoothShading: meta.smoothShading ?? false,
       facetExaggeration: meta.facetExaggeration ?? 0,
       color: meta.color ?? 0x6ecbf5,
+      uvMappingMode: meta.uvMappingMode,
+      uvAutoPacked: meta.uvAutoPacked,
       pivot: meta.pivot ? { ...meta.pivot } : undefined,
       transform: meta.transform
         ? {

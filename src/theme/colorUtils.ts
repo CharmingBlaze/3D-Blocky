@@ -8,6 +8,24 @@ function parseHexColor(hex: string): [number, number, number] | null {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
 }
 
+function channelToLinear(channel: number): number {
+  const s = channel / 255
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+}
+
+/** Relative luminance 0–1 (WCAG). Higher = lighter surface. */
+export function relativeLuminance(hex: string): number {
+  const rgb = parseHexColor(hex)
+  if (!rgb) return 0
+  const [r, g, b] = rgb.map(channelToLinear)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** True when a surface hex is light enough that dark text is needed. */
+export function isLightHex(hex: string): boolean {
+  return relativeLuminance(hex) > 0.45
+}
+
 /** Darken a hex color toward black. `amount` is 0 (unchanged) to 1 (black). */
 export function darkenHex(hex: string, amount: number): string {
   const rgb = parseHexColor(hex)

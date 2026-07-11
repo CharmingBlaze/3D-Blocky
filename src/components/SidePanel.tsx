@@ -252,6 +252,8 @@ export function SidePanel() {
     setDrawInputMode,
     autoConnectPaths,
     setAutoConnectPaths,
+    smoothDrawing,
+    setSmoothDrawing,
     sketchExtrudeMode,
     penExtrudeMode,
     sketchLatheMode,
@@ -365,6 +367,8 @@ export function SidePanel() {
       setDrawInputMode: s.setDrawInputMode,
       autoConnectPaths: s.autoConnectPaths,
       setAutoConnectPaths: s.setAutoConnectPaths,
+      smoothDrawing: s.smoothDrawing,
+      setSmoothDrawing: s.setSmoothDrawing,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
       sketchLatheMode: s.sketchLatheMode,
@@ -698,6 +702,30 @@ export function SidePanel() {
               onNewDocument={(width, height) => openPixelEditor({ width, height })}
               onShowCanvas={togglePixelEditor}
             />
+            <button
+              className={`side-btn side-btn-wide ${uvEditorOpen ? 'active' : ''}`}
+              onClick={toggleUvEditor}
+              disabled={selectionCount === 0 && !selectedObjectId}
+              title={
+                uvEditorOpen && uvEditorPanel.minimized
+                  ? 'Restore UV Editor'
+                  : 'UV Editor — edit texture coordinates for selected object'
+              }
+            >
+              UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
+            </button>
+            <button
+              className={`side-btn side-btn-wide ${materialEditorOpen ? 'active' : ''}`}
+              onClick={toggleMaterialEditor}
+              disabled={selectionCount === 0 && !selectedObjectId}
+              title={
+                materialEditorOpen && materialEditorPanel.minimized
+                  ? 'Restore Material Editor'
+                  : 'Material Editor — colors, palettes, gradients'
+              }
+            >
+              Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
+            </button>
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
@@ -717,14 +745,27 @@ export function SidePanel() {
                 Vector Pen
               </button>
             </SideBtnGroup>
-            <label className="side-checkbox" title="Snap to path endpoints">
-              <input
-                type="checkbox"
-                checked={autoConnectPaths}
-                onChange={(e) => setAutoConnectPaths(e.target.checked)}
-              />
-              <span>Auto-connect</span>
-            </label>
+            <div className="side-checkbox-row">
+              <label className="side-checkbox" title="Snap to path endpoints">
+                <input
+                  type="checkbox"
+                  checked={autoConnectPaths}
+                  onChange={(e) => setAutoConnectPaths(e.target.checked)}
+                />
+                <span>Auto-connect</span>
+              </label>
+              <label
+                className="side-checkbox"
+                title="Steady freehand drawing — softens mouse jitter for smoother sketch strokes"
+              >
+                <input
+                  type="checkbox"
+                  checked={smoothDrawing}
+                  onChange={(e) => setSmoothDrawing(e.target.checked)}
+                />
+                <span>Smooth draw</span>
+              </label>
+            </div>
             <div className="side-shape-menus">
               <SidePanelPrimitivesMenu
                 activePrimitiveKind={activePrimitiveKind}
@@ -964,14 +1005,6 @@ export function SidePanel() {
             >
               X-ray
             </button>
-            <p className="side-color-hint muted">
-              X: toggle — see vertices, edges, and faces through the mesh.
-            </p>
-            {selectionMode === 'object' && (
-              <p className="side-color-hint muted">
-                Shift+click to add or remove objects from the selection. Drag any selected object to move the group.
-              </p>
-            )}
             {selectionMode === 'vertex' && (
               <p className="side-color-hint muted">
                 Click to select vertices · drag to move · Shift+click to add/remove. F: face from selection. M: merge · hold M and click a second vertex.
@@ -1058,30 +1091,6 @@ export function SidePanel() {
                 Rot 90°
               </button>
             </SideBtnGroup>
-            <button
-              className={`side-btn side-btn-wide ${uvEditorOpen ? 'active' : ''}`}
-              onClick={toggleUvEditor}
-              disabled={selectionCount === 0 && !selectedObjectId}
-              title={
-                uvEditorOpen && uvEditorPanel.minimized
-                  ? 'Restore UV Editor'
-                  : 'UV Editor — edit texture coordinates for selected object'
-              }
-            >
-              UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
-            </button>
-            <button
-              className={`side-btn side-btn-wide ${materialEditorOpen ? 'active' : ''}`}
-              onClick={toggleMaterialEditor}
-              disabled={selectionCount === 0 && !selectedObjectId}
-              title={
-                materialEditorOpen && materialEditorPanel.minimized
-                  ? 'Restore Material Editor'
-                  : 'Material Editor — colors, palettes, gradients'
-              }
-            >
-              Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
-            </button>
           </SideSection>
 
           <SideSection title="Symmetry" order={23} collapsible defaultCollapsed>

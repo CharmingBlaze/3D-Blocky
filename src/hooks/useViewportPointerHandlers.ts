@@ -307,7 +307,7 @@ export function useViewportPointerHandlers({
           rect,
           camera,
           store.objects,
-          store.selectedObjectId,
+          store.meshSelection?.objectId ?? store.selectedObjectId,
           { cullBackVertices: !store.viewportXRay }
         )
 
@@ -820,7 +820,7 @@ export function useViewportPointerHandlers({
             rect,
             camera,
             objects,
-            selectedObjectId,
+            store.meshSelection?.objectId ?? selectedObjectId,
             { cullBackVertices: !viewportXRay }
           )
 
@@ -1570,7 +1570,7 @@ export function useViewportPointerHandlers({
             rect,
             camera,
             objects,
-            selectedObjectId,
+            useAppStore.getState().meshSelection?.objectId ?? selectedObjectId,
             { cullBackVertices: !viewportXRay }
           )
           const hasComponent =

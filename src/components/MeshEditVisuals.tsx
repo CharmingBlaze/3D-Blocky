@@ -26,6 +26,7 @@ import {
 } from '../mesh/vertexOverlay'
 import {
   allFaceOverlayIndices,
+  buildFaceOverlayGroups,
   collectHighlightedFaceIndices,
   resolveFaceOverlayGroupState,
 } from '../mesh/faceOverlay'
@@ -312,6 +313,51 @@ function FaceRegionHighlight({
   )
 }
 
+function FaceCenterDot({
+  object,
+  centroid,
+  state,
+}: {
+  object: SceneObject
+  centroid: { x: number; y: number; z: number }
+  state: 'idle' | 'hover' | 'selected'
+}) {
+  const theme = useTheme()
+  const FACE = faceColors(theme)
+  const { camera, size } = useThree()
+  const rootRef = useRef<THREE.Group>(null)
+  const scaleRef = useRef<THREE.Group>(null)
+  const pixelSize = state === 'selected' ? 9 : state === 'hover' ? 8 : 6
+  const fill =
+    state === 'selected' ? FACE.selectedWire : state === 'hover' ? FACE.hoverWire : FACE.idleWire
+
+  useFrame(() => {
+    const root = rootRef.current
+    const group = scaleRef.current
+    if (!root || !group) return
+    const world = worldPointFromObject(object, centroid)
+    _scratchWorld.set(world.x, world.y, world.z)
+    const worldSize = worldUnitsForScreenPixels(camera, _scratchWorld, pixelSize, size.height)
+    group.scale.setScalar(worldSize)
+    root.position.set(centroid.x, centroid.y, centroid.z)
+  })
+
+  return (
+    <group ref={rootRef} position={[centroid.x, centroid.y, centroid.z]} renderOrder={OVERLAY_RENDER + 5}>
+      <group ref={scaleRef}>
+        <mesh geometry={UNIT_VERTEX_CUBE}>
+          <meshBasicMaterial
+            color={fill}
+            depthTest={false}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
 function resolveVertexGroupState(
   indices: number[],
   objectId: string,
@@ -499,6 +545,7 @@ export function MeshEditVisuals({
   }
 
   if (selectionMode === 'face') {
+    const xray = !cullBackfaces
     const activeGroups = faceGroupMap.groups.filter((group) => {
       const state = resolveFaceOverlayGroupState(
         group,
@@ -517,7 +564,7 @@ export function MeshEditVisuals({
             <meshBasicMaterial
               color={FACE.idleFill}
               transparent
-              opacity={0.1}
+              opacity={xray ? 0.06 : 0.1}
               depthTest={cullBackfaces}
               depthWrite={false}
               polygonOffset={cullBackfaces}
@@ -548,6 +595,27 @@ export function MeshEditVisuals({
             />
           )
         })}
+
+        {/* Blender-style face selection dots (X-Ray / see-through pick targets). */}
+        {showPickableOverlay &&
+          xray &&
+          buildFaceOverlayGroups(object).map((group) => {
+            const state = resolveFaceOverlayGroupState(
+              group,
+              objectId,
+              meshSelection,
+              meshHover,
+              faceGroupMap.faceToGroup
+            )
+            return (
+              <FaceCenterDot
+                key={`fd-${group.id}`}
+                object={object}
+                centroid={group.centroid}
+                state={state}
+              />
+            )
+          })}
       </group>
     )
   }

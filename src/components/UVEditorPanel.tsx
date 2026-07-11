@@ -2604,7 +2604,6 @@ export function UVEditorPanel() {
                   bottom: '2px',
                   width: `${trackW}px`,
                   height: '8px',
-                  background: 'rgba(0, 0, 0, 0.15)',
                   borderRadius: '4px',
                   zIndex: 10,
                 }}
@@ -2618,16 +2617,8 @@ export function UVEditorPanel() {
                     top: '1px',
                     width: `${thumbW}px`,
                     height: '6px',
-                    background: 'rgba(255, 255, 255, 0.25)',
                     borderRadius: '3px',
                     cursor: 'pointer',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.45)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
                   }}
                 />
               </div>
@@ -2643,7 +2634,6 @@ export function UVEditorPanel() {
                   top: '2px',
                   width: '8px',
                   height: `${trackH}px`,
-                  background: 'rgba(0, 0, 0, 0.15)',
                   borderRadius: '4px',
                   zIndex: 10,
                 }}
@@ -2657,16 +2647,8 @@ export function UVEditorPanel() {
                     left: '1px',
                     width: '6px',
                     height: `${thumbHSize}px`,
-                    background: 'rgba(255, 255, 255, 0.25)',
                     borderRadius: '3px',
                     cursor: 'pointer',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.45)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)'
                   }}
                 />
               </div>

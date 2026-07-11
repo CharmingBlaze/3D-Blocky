@@ -89,6 +89,36 @@ function clamp01(t: number): number {
   return Math.max(0, Math.min(1, t))
 }
 
+/** Exponential moving average — steady freehand tracking toward the pointer. */
+export function emaSmoothPoint(prev: Vec2, next: Vec2, alpha = 0.32): Vec2 {
+  const a = Math.max(0.05, Math.min(1, alpha))
+  return {
+    x: prev.x + (next.x - prev.x) * a,
+    y: prev.y + (next.y - prev.y) * a,
+  }
+}
+
+/** Light centered moving average for a finished stroke (keeps endpoints fixed). */
+export function movingAverageSmoothStroke(points: Vec2[], radius = 2): Vec2[] {
+  if (points.length < 3 || radius <= 0) return points.map((p) => ({ ...p }))
+  const out: Vec2[] = [{ ...points[0]! }]
+  for (let i = 1; i < points.length - 1; i++) {
+    let sx = 0
+    let sy = 0
+    let count = 0
+    const lo = Math.max(0, i - radius)
+    const hi = Math.min(points.length - 1, i + radius)
+    for (let j = lo; j <= hi; j++) {
+      sx += points[j]!.x
+      sy += points[j]!.y
+      count++
+    }
+    out.push({ x: sx / count, y: sy / count })
+  }
+  out.push({ ...points[points.length - 1]! })
+  return out
+}
+
 /** Measure total absolute turning angle along a path (radians) */
 export function totalCurvature(points: Vec2[]): number {
   if (points.length < 3) return 0

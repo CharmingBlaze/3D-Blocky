@@ -50,6 +50,9 @@ export interface ViewportLayoutActions {
 
 export type ViewportSlice = ViewportLayoutState & ViewportLayoutActions
 
+/** Blender-like solid X-Ray surface opacity (0–1). */
+export const VIEWPORT_XRAY_OPACITY = 0.5
+
 export const viewportLayoutInitialState: ViewportLayoutState = {
   activeView: 'front',
   maximizedSlot: null,

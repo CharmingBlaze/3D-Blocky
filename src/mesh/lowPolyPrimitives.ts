@@ -22,6 +22,7 @@ import {
   type RoundedBoxParams,
 } from './roundedBox'
 import { finalizeProjectedShapeMesh } from './meshWinding'
+import { uv2 } from '../uv/uvTypes'
 
 export interface ShapeMeshOptions {
   view: ViewType
@@ -228,7 +229,7 @@ export function generateLowPolyBox(a: Vec2, b: Vec2, color: number): HalfEdgeMes
   return mesh
 }
 
-/** Single quad matching the drag rect in the work plane */
+/** Single double-sided quad matching the drag rect — front and back share one UV island. */
 export function generateLowPolyPlane(a: Vec2, b: Vec2, color: number): HalfEdgeMesh {
   const { minU, maxU, minV, maxV } = dragBounds(a, b)
   const mesh = new HalfEdgeMesh()
@@ -238,6 +239,12 @@ export function generateLowPolyPlane(a: Vec2, b: Vec2, color: number): HalfEdgeM
   const v3 = addVertex(mesh, minU, maxV, 0)
   pushQuad(mesh, v0, v1, v2, v3, color)
   pushQuad(mesh, v0, v3, v2, v1, color)
+  // Same UV corners for both faces so painting / textures match front and back.
+  mesh.uvs = [uv2(0, 1), uv2(1, 1), uv2(1, 0), uv2(0, 0)]
+  mesh.faceUvIndices = [
+    [0, 1, 2, 3],
+    [0, 3, 2, 1],
+  ]
   mesh.buildHalfEdges()
   return mesh
 }
@@ -464,16 +471,48 @@ export function vectorShapeToObject(
     finalizeProjectedShapeMesh(mesh, options.view, kind === 'circle')
   }
 
-  return mesh.toObject(generateId(), options.name ?? SHAPE_NAMES[kind], {
+  const obj = mesh.toObject(generateId(), options.name ?? SHAPE_NAMES[kind], {
     polyBudget: options.polyBudget,
     color: options.color,
     polyBudgetMode: 'strict',
+    ...(kind === 'plane'
+      ? {
+          uvMappingMode: 'box' as const,
+          uvAutoPacked: true,
+        }
+      : {}),
     transform: {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },
       scale: { ...IDENTITY_TRANSFORM.scale },
     },
   })
+  return kind === 'plane' ? assignSharedDoubleSidedPlaneUVs(obj) : obj
+}
+
+/**
+ * Keep front/back plane faces on one UV island (same texel per shared vertex)
+ * so paint and textures look identical from either side.
+ */
+function assignSharedDoubleSidedPlaneUVs(obj: SceneObject): SceneObject {
+  if (obj.faces.length !== 2 || obj.positions.length !== 4) return obj
+  const front = obj.faces[0]
+  const back = obj.faces[1]
+  if (!front || !back || front.length !== 4 || back.length !== 4) return obj
+
+  const uvs = [uv2(0, 1), uv2(1, 1), uv2(1, 0), uv2(0, 0)]
+  const frontUv = [0, 1, 2, 3]
+  const uvByVert = new Map<number, number>()
+  front.forEach((vi, i) => uvByVert.set(vi, frontUv[i]!))
+  const backUv = back.map((vi) => uvByVert.get(vi) ?? 0)
+
+  return {
+    ...obj,
+    uvs,
+    faceUvIndices: [frontUv, backUv],
+    uvMappingMode: 'box',
+    uvAutoPacked: true,
+  }
 }
 
 export function isEllipseDragShape(kind: ShapeKind): boolean {
