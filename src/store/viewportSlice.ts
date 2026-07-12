@@ -141,7 +141,12 @@ export function createViewportSlice<T extends ViewportLayoutState>(
 
     setShowGrid: (show) => set({ showGrid: show } as Partial<T>),
 
-    setViewportDisplayMode: (mode) => set({ viewportDisplayMode: mode } as Partial<T>),
+    setViewportDisplayMode: (mode) =>
+      set(
+        (mode === 'normals'
+          ? { viewportDisplayMode: mode, selectionMode: 'face' }
+          : { viewportDisplayMode: mode }) as Partial<T>
+      ),
 
     setViewportXRay: (enabled) => set({ viewportXRay: enabled } as Partial<T>),
 

@@ -163,6 +163,8 @@ export function useViewportPointerHandlers({
     setMeshHover,
     clearMeshSelection,
     translateMeshSelection,
+    flipFaceNormal,
+    viewportDisplayMode,
     startVectorStroke,
     continueVectorStroke,
     endVectorStroke,
@@ -227,6 +229,8 @@ export function useViewportPointerHandlers({
       setMeshHover: s.setMeshHover,
       clearMeshSelection: s.clearMeshSelection,
       translateMeshSelection: s.translateMeshSelection,
+      flipFaceNormal: s.flipFaceNormal,
+      viewportDisplayMode: s.viewportDisplayMode,
       startVectorStroke: s.startVectorStroke,
       continueVectorStroke: s.continueVectorStroke,
       endVectorStroke: s.endVectorStroke,
@@ -847,6 +851,17 @@ export function useViewportPointerHandlers({
 
             applyMeshPick(hit, e.shiftKey)
 
+            if (
+              viewportDisplayMode === 'normals' &&
+              e.altKey &&
+              !e.shiftKey &&
+              selectionMode === 'face' &&
+              hit.face !== undefined
+            ) {
+              flipFaceNormal(hit.objectId, hit.face)
+              return
+            }
+
             if (!e.shiftKey && obj) {
               const selAfter = useAppStore.getState().meshSelection
               if (
@@ -1150,6 +1165,8 @@ export function useViewportPointerHandlers({
       selectReferenceImage,
       applyMeshPick,
       clearMeshSelection,
+      flipFaceNormal,
+      viewportDisplayMode,
       startVectorStroke,
       penPointerDown,
       penFinishPath,

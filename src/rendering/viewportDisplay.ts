@@ -7,6 +7,7 @@ export type ViewportDisplayMode =
   | 'solid-wire'
   | 'outline'
   | 'unlit'
+  | 'normals'
 
 export interface ViewportDisplayConfig {
   label: string
@@ -21,6 +22,8 @@ export interface ViewportDisplayConfig {
   gameLighting: boolean
   /** When true, imported UV textures are shown on meshes in this mode. */
   supportsTexture: boolean
+  /** When true, face-normal arrows are drawn on every mesh. */
+  showNormals: boolean
   background: string
 }
 
@@ -33,6 +36,7 @@ export const VIEWPORT_DISPLAY_MODES: ViewportDisplayMode[] = [
   'solid-wire',
   'outline',
   'unlit',
+  'normals',
 ]
 
 export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDisplayConfig> = {
@@ -48,6 +52,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: true,
     gameLighting: false,
     supportsTexture: true,
+    showNormals: false,
     background: '#0e1118',
   },
   game: {
@@ -62,6 +67,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: false,
     gameLighting: true,
     supportsTexture: true,
+    showNormals: false,
     background: '#141820',
   },
   flat: {
@@ -76,6 +82,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: true,
     gameLighting: false,
     supportsTexture: true,
+    showNormals: false,
     background: '#0a0c10',
   },
   smooth: {
@@ -90,6 +97,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: true,
     gameLighting: false,
     supportsTexture: true,
+    showNormals: false,
     background: '#0a0c10',
   },
   wireframe: {
@@ -104,6 +112,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: false,
     gameLighting: false,
     supportsTexture: false,
+    showNormals: false,
     background: '#0a0c10',
   },
   'solid-wire': {
@@ -118,6 +127,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: false,
     gameLighting: true,
     supportsTexture: true,
+    showNormals: false,
     background: '#0a0c10',
   },
   outline: {
@@ -132,6 +142,7 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: false,
     gameLighting: true,
     supportsTexture: true,
+    showNormals: false,
     background: '#141820',
   },
   unlit: {
@@ -146,6 +157,22 @@ export const VIEWPORT_DISPLAY_CONFIG: Record<ViewportDisplayMode, ViewportDispla
     selectionEmissive: false,
     gameLighting: false,
     supportsTexture: true,
+    showNormals: false,
+    background: '#0a0c10',
+  },
+  normals: {
+    label: 'Normals',
+    hint: 'Flat shading with face normals — green outward, red inverted. Alt+click to flip · F flips selection',
+    forceFlat: true,
+    forceSmooth: false,
+    material: 'lambert',
+    wireframe: false,
+    wireOverlay: false,
+    showEdgeOutline: false,
+    selectionEmissive: true,
+    gameLighting: true,
+    supportsTexture: false,
+    showNormals: true,
     background: '#0a0c10',
   },
 }

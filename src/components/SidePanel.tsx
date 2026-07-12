@@ -316,8 +316,6 @@ export function SidePanel() {
     setBrushDensity,
     brushStrength,
     setBrushStrength,
-    facetExaggeration,
-    setFacetExaggeration,
     selectedObjectId,
     selectionObjectIds,
     meshSelection,
@@ -434,8 +432,6 @@ export function SidePanel() {
       setBrushDensity: s.setBrushDensity,
       brushStrength: s.brushStrength,
       setBrushStrength: s.setBrushStrength,
-      facetExaggeration: s.facetExaggeration,
-      setFacetExaggeration: s.setFacetExaggeration,
       selectedObjectId: s.selectedObjectId,
       selectionObjectIds: s.selectionObjectIds,
       meshSelection: s.meshSelection,
@@ -760,6 +756,11 @@ export function SidePanel() {
               alwaysShowLabel
               active
             />
+            {viewportDisplayMode === 'normals' && (
+              <p className="side-color-hint muted">
+                Green outward · red inverted · Alt+click face to flip · F flips selection
+              </p>
+            )}
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
@@ -927,17 +928,6 @@ export function SidePanel() {
               <div className="side-chips">
                 <span className="lock-indicator">Locked</span>
               </div>
-            )}
-            {strokeMode === 'blob' && (
-              <SideSlider
-                label="Stylize"
-                value={facetExaggeration}
-                display={`${(facetExaggeration * 100).toFixed(0)}%`}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={setFacetExaggeration}
-              />
             )}
           </SideSection>
 

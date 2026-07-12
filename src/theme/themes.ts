@@ -2991,6 +2991,7 @@ const DEEP_VIEWPORT_MODES = new Set([
   'wireframe',
   'solid-wire',
   'unlit',
+  'normals',
 ])
 
 export function getViewportBackground(

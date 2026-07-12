@@ -7,8 +7,10 @@ import { ensureTransform, getObjectPivot, cloneTransform, transformFromObject3D,
 import { registerPickTarget, unregisterPickTarget } from '../select/pickRegistry'
 import { MeshRenderer } from './MeshRenderer'
 import { MeshEditVisuals } from './MeshEditVisuals'
+import { NormalVisuals } from './NormalVisuals'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { ViewportDisplayMode } from '../rendering/viewportDisplay'
+import { VIEWPORT_DISPLAY_CONFIG } from '../rendering/viewportDisplay'
 
 function isComponentSelectionMode(mode: SelectionMode): boolean {
   return mode === 'vertex' || mode === 'edge' || mode === 'face'
@@ -38,10 +40,12 @@ function ObjectMeshEditOverlay({
   object,
   selectionMode,
   isSelected,
+  showNormals,
 }: {
   object: SceneObject
   selectionMode: SelectionMode
   isSelected: boolean
+  showNormals: boolean
 }) {
   const activeTool = useAppStore((s) => s.activeTool)
   const meshSelection = useAppStore((s) =>
@@ -52,23 +56,43 @@ function ObjectMeshEditOverlay({
   )
 
   // Knife / loop-cut use their own overlays — hide edit handles so the view stays clean.
-  if (activeTool === 'knife' || activeTool === 'loop-cut') return null
+  if (activeTool === 'knife' || activeTool === 'loop-cut') {
+    if (!showNormals) return null
+    return (
+      <NormalVisuals
+        object={object}
+        meshSelection={meshSelection}
+        meshHover={meshHover}
+      />
+    )
+  }
 
   const inComponentMode = isComponentSelectionMode(selectionMode)
   const showMeshEdit =
     inComponentMode &&
     (isSelected || meshSelection !== null || meshHover !== null)
 
-  if (!showMeshEdit) return null
+  if (!showMeshEdit && !showNormals) return null
 
   return (
-    <MeshEditVisuals
-      object={object}
-      selectionMode={selectionMode}
-      meshSelection={meshSelection}
-      meshHover={meshHover}
-      showPickableOverlay={isSelected && inComponentMode}
-    />
+    <>
+      {showMeshEdit && (
+        <MeshEditVisuals
+          object={object}
+          selectionMode={selectionMode}
+          meshSelection={meshSelection}
+          meshHover={meshHover}
+          showPickableOverlay={isSelected && inComponentMode}
+        />
+      )}
+      {showNormals && (
+        <NormalVisuals
+          object={object}
+          meshSelection={meshSelection}
+          meshHover={meshHover}
+        />
+      )}
+    </>
   )
 }
 
@@ -142,6 +166,7 @@ function ObjectNodeInner({
             object={object}
             selectionMode={selectionMode}
             isSelected={isSelected}
+            showNormals={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].showNormals}
           />
         </group>
       </group>

@@ -38,6 +38,8 @@ export interface MeshEditLayoutActions {
   mergeSelectedVertices: (indices?: number[]) => void
   setVertexMergeModifierHeld: (held: boolean) => void
   flipSelectedNormals: () => void
+  /** Flip winding on a single face (normals overlay Alt+click). */
+  flipFaceNormal: (objectId: string, faceIndex: number) => void
   recalculateOutwardNormals: () => void
   makeSelectedDoubleSided: () => void
   transformSelectionInViewPlane: (op: SelectionPlaneTransformOp) => void
@@ -159,6 +161,22 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
       store().updateObject(obj.id, { faces: flipped.faces, faceUvIndices: flipped.faceUvIndices })
       store().commitHistory('Flip normals')
+    },
+
+    flipFaceNormal: (objectId, faceIndex) => {
+      const { objects } = store()
+      const obj = objects.find((o) => o.id === objectId)
+      if (!obj || obj.topologyLocked) return
+      if (faceIndex < 0 || faceIndex >= obj.faces.length) return
+      const selection: MeshComponentSelection = {
+        objectId,
+        vertices: [],
+        edges: [],
+        faces: [faceIndex],
+      }
+      const flipped = flipSelectionNormals(obj, selection, 'face')
+      store().updateObject(obj.id, { faces: flipped.faces, faceUvIndices: flipped.faceUvIndices })
+      store().commitHistory('Flip normal')
     },
 
     recalculateOutwardNormals: () => {
