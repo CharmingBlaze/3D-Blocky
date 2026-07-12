@@ -3,7 +3,7 @@ import type { SceneObject } from './HalfEdgeMesh'
 import { ensureTransform, worldPointFromObject } from './objectTransform'
 import { boundsCenterHalf } from './roundedBox'
 import { faceNormal3D } from '../uv/uvObject'
-import { edgeKey } from './meshSelection'
+import { getMeshAdjacency } from './meshAdjacencyCache'
 
 const _euler = new THREE.Euler()
 const _normal = new THREE.Vector3()
@@ -90,39 +90,10 @@ export function isFaceFrontFacing(
   return _normal.dot(_viewDir) > threshold
 }
 
-function buildVertexToFaces(object: SceneObject): Map<number, number[]> {
-  const map = new Map<number, number[]>()
-  for (let fi = 0; fi < object.faces.length; fi++) {
-    for (const vi of object.faces[fi]!) {
-      const list = map.get(vi)
-      if (list) list.push(fi)
-      else map.set(vi, [fi])
-    }
-  }
-  return map
-}
-
-function buildEdgeToFaces(object: SceneObject): Map<string, number[]> {
-  const map = new Map<string, number[]>()
-  for (let fi = 0; fi < object.faces.length; fi++) {
-    const face = object.faces[fi]!
-    const n = face.length
-    for (let i = 0; i < n; i++) {
-      const a = face[i]!
-      const b = face[(i + 1) % n]!
-      const key = edgeKey(a, b)
-      const list = map.get(key)
-      if (list) list.push(fi)
-      else map.set(key, [fi])
-    }
-  }
-  return map
-}
-
 export function buildVertexToFacesMap(object: SceneObject): Map<number, number[]> {
-  return buildVertexToFaces(object)
+  return getMeshAdjacency(object).vertexToFaces
 }
 
 export function buildEdgeToFacesMap(object: SceneObject): Map<string, number[]> {
-  return buildEdgeToFaces(object)
+  return getMeshAdjacency(object).edgeToFaces
 }

@@ -76,6 +76,15 @@ describe('sceneHistory', () => {
     expect(second.objects[1]).toBe(first.objects[1])
   })
 
+  it('reuses the captured clone when the immutable source object is unchanged', () => {
+    const base = emptySnapshot()
+    base.objects = [boxObject('stable')]
+    const first = captureSceneSnapshot(base)
+    const second = captureSceneSnapshot(base, first)
+    expect(second.objects[0]).toBe(first.objects[0])
+    expect(snapshotsEqual(first, second)).toBe(true)
+  })
+
   it('reuses unchanged pixel documents between consecutive snapshots', () => {
     const doc = createPixelDocument(4, 4, 'tex-a')
     doc.layers[0].pixels[0] = 255
@@ -115,6 +124,36 @@ describe('sceneHistory', () => {
     })
     edited.pixelDocuments[doc.id].layers[0].pixels[0] = 99
     expect(snapshotsEqual(base, edited)).toBe(false)
+  })
+
+  it('detects face appearance edits as unequal snapshots', () => {
+    const base = emptySnapshot()
+    base.objects = [boxObject('colored')]
+    const first = captureSceneSnapshot(base)
+    const editedObject = cloneSceneObject(base.objects[0])
+    editedObject.faceColors[0] = 0x00ff00
+    const edited = captureSceneSnapshot({ ...base, objects: [editedObject] })
+    expect(snapshotsEqual(first, edited)).toBe(false)
+  })
+
+  it('does not round away precise vertex edits', () => {
+    const base = emptySnapshot()
+    base.objects = [boxObject('precise')]
+    const first = captureSceneSnapshot(base)
+    const editedObject = cloneSceneObject(base.objects[0])
+    editedObject.positions[0].x += 0.000001
+    const edited = captureSceneSnapshot({ ...base, objects: [editedObject] })
+    expect(snapshotsEqual(first, edited)).toBe(false)
+  })
+
+  it('reuses mesh content across new object identity without JSON.stringify', () => {
+    const base = emptySnapshot()
+    base.objects = [boxObject('reuse')]
+    const first = captureSceneSnapshot(base)
+    const twin = cloneSceneObject(base.objects[0])
+    const second = captureSceneSnapshot({ ...base, objects: [twin] }, first)
+    expect(second.objects[0]).toBe(first.objects[0])
+    expect(snapshotsEqual(first, second)).toBe(true)
   })
 
   it('push skips duplicate snapshots unless forced', () => {

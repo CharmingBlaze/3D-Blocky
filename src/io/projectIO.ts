@@ -45,6 +45,47 @@ export interface SerializedProjectFile {
   meshSelection: SceneSnapshot['meshSelection']
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function validateProjectObject(value: unknown, index: number): void {
+  if (!isRecord(value)) throw new Error(`Invalid project file: object ${index + 1} is malformed.`)
+  if (typeof value.id !== 'string' || value.id.length === 0) {
+    throw new Error(`Invalid project file: object ${index + 1} has no valid id.`)
+  }
+  if (!Array.isArray(value.positions) || !Array.isArray(value.faces)) {
+    throw new Error(`Invalid project file: object "${value.id}" has invalid mesh data.`)
+  }
+  const positions = value.positions
+  const faces = value.faces
+  for (const position of positions) {
+    if (
+      !isRecord(position) ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)
+    ) {
+      throw new Error(`Invalid project file: object "${value.id}" contains an invalid vertex.`)
+    }
+  }
+  for (const face of faces) {
+    if (
+      !Array.isArray(face) ||
+      face.length < 3 ||
+      face.some(
+        (vertexIndex) =>
+          !Number.isInteger(vertexIndex) || vertexIndex < 0 || vertexIndex >= positions.length
+      )
+    ) {
+      throw new Error(`Invalid project file: object "${value.id}" contains an invalid face.`)
+    }
+  }
+  if (value.faceColors !== undefined && !Array.isArray(value.faceColors)) {
+    throw new Error(`Invalid project file: object "${value.id}" has invalid face colors.`)
+  }
+}
+
 async function blobUrlToDataUrl(url: string): Promise<string | null> {
   if (!url) return null
   if (url.startsWith('data:')) return url
@@ -139,11 +180,14 @@ export async function serializeProjectFromSnapshot(
 }
 
 export function parseProjectFile(text: string): SerializedProjectFile {
-  let parsed: SerializedProjectFile
+  let parsed: unknown
   try {
-    parsed = JSON.parse(text) as SerializedProjectFile
+    parsed = JSON.parse(text)
   } catch {
     throw new Error('Invalid project file: not valid JSON.')
+  }
+  if (!isRecord(parsed)) {
+    throw new Error('Invalid project file: expected a project object.')
   }
   if (parsed.version !== 1) {
     throw new Error('Unsupported project file version.')
@@ -154,7 +198,19 @@ export function parseProjectFile(text: string): SerializedProjectFile {
   if (!Array.isArray(parsed.objects)) {
     throw new Error('Invalid project file: missing objects.')
   }
-  return parsed
+  parsed.objects.forEach(validateProjectObject)
+  if (parsed.objectTextures !== undefined && !isRecord(parsed.objectTextures)) {
+    throw new Error('Invalid project file: invalid texture data.')
+  }
+  for (const key of ['pixelDocuments', 'referenceImages', 'billboardImages'] as const) {
+    if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
+      throw new Error(`Invalid project file: invalid ${key}.`)
+    }
+  }
+  if (parsed.selectionObjectIds !== undefined && !Array.isArray(parsed.selectionObjectIds)) {
+    throw new Error('Invalid project file: invalid object selection.')
+  }
+  return parsed as unknown as SerializedProjectFile
 }
 
 export async function snapshotFromProjectFile(file: SerializedProjectFile): Promise<SceneSnapshot> {

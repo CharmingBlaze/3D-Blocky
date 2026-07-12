@@ -28,6 +28,11 @@ export interface MeshData {
   faceColors: Float32Array
   /** Blender-style shade-smooth normals (topology-averaged); length = vertexCount * 3 */
   normals?: Float32Array
+  /**
+   * Topology vertex index for each render corner (parallel to positions/3).
+   * Used for density heatmap and other per-topology attributes under flat/smooth export.
+   */
+  sourceVertexIndices?: Uint32Array
   flatShading: boolean
 }
 
@@ -115,8 +120,6 @@ export class HalfEdgeMesh {
     mesh.faceUvIndices = (obj.faceUvIndices ?? []).map((f) => [...f])
     mesh.cornerColors = (obj.cornerColors ?? []).map((c) => [...c] as CornerColor)
     mesh.faceColorIndices = (obj.faceColorIndices ?? []).map((f) => [...f])
-    mesh.cornerColors = (obj.cornerColors ?? []).map((c) => [...c] as CornerColor)
-    mesh.faceColorIndices = (obj.faceColorIndices ?? []).map((f) => [...f])
     mesh.faceGroups = (obj.faceGroups ?? []).map((g) => [...g])
     mesh.topologyLocked = obj.topologyLocked
     mesh.buildHalfEdges()
@@ -153,6 +156,8 @@ export class HalfEdgeMesh {
       polyBudget: meta.polyBudget ?? 128,
       polyBudgetMode: meta.polyBudgetMode ?? 'strict',
       smoothShading: meta.smoothShading ?? false,
+      subdEnabled: meta.subdEnabled,
+      subdLevels: meta.subdLevels,
       facetExaggeration: meta.facetExaggeration ?? 0,
       color: meta.color ?? 0x6ecbf5,
       uvMappingMode: meta.uvMappingMode,
@@ -232,12 +237,23 @@ export class HalfEdgeMesh {
   }
 
   getVertexNeighbors(vi: number): number[] {
+    if (this.halfEdges.length > 0) {
+      const neighbors = new Set<number>()
+      for (let i = 0; i < this.halfEdges.length; i++) {
+        const he = this.halfEdges[i]!
+        if (he.origin !== vi) continue
+        const next = this.halfEdges[he.next]
+        if (next) neighbors.add(next.origin)
+      }
+      if (neighbors.size > 0) return [...neighbors]
+    }
+
     const neighbors = new Set<number>()
     for (const face of this.faces) {
       const idx = face.indexOf(vi)
       if (idx >= 0) {
-        neighbors.add(face[(idx + face.length - 1) % face.length])
-        neighbors.add(face[(idx + 1) % face.length])
+        neighbors.add(face[(idx + face.length - 1) % face.length]!)
+        neighbors.add(face[(idx + 1) % face.length]!)
       }
     }
     return [...neighbors]
@@ -276,6 +292,7 @@ export class HalfEdgeMesh {
     const indices: number[] = []
     const uvs: number[] = []
     const faceColors: number[] = []
+    const sourceVertexIndices: number[] = []
     const hasUv =
       this.uvs.length > 0 && this.faceUvIndices.length === this.faces.length
     const hasCornerColors =
@@ -321,6 +338,7 @@ export class HalfEdgeMesh {
         for (let ci = 0; ci < verts.length; ci++) {
           const v = verts[ci]
           positions.push(v.x, v.y, v.z)
+          sourceVertexIndices.push(face[ci]!)
           if (hasUv) {
             const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
             const uv = this.uvs[uvIdx] ?? { u: 0, v: 0 }
@@ -336,81 +354,82 @@ export class HalfEdgeMesh {
           }
         }
       }
-    } else {
-      // Blender-style shade smooth: weld for UVs/colors, but keep topology normals
-      // so UV seams don't create hard shading edges.
-      const topoNormals = this.positions.map((_, vi) => this.getVertexNormal(vi, true))
-      const normals: number[] = []
-      const weldMap = new Map<string, number>()
-
-      const weldKey = (vi: number, fi: number, ci: number): string => {
-        if (!hasUv && !hasCornerColors) return String(vi)
-        if (hasCornerColors) {
-          const poolIdx = this.faceColorIndices[fi]?.[ci] ?? 0
-          const uvIdx = hasUv ? (this.faceUvIndices[fi]?.[ci] ?? 0) : 0
-          return `${vi}:${poolIdx}:${uvIdx}`
-        }
-        if (hasUv) {
-          const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
-          return `${vi}:${uvIdx}`
-        }
-        const faceColor = this.faceColors[fi] ?? 0
-        return `${vi}:${faceColor}`
-      }
-
-      const getOrCreateCorner = (vi: number, fi: number, ci: number): number => {
-        const key = weldKey(vi, fi, ci)
-        const existing = weldMap.get(key)
-        if (existing !== undefined) return existing
-
-        const renderIdx = positions.length / 3
-        const p = this.positions[vi]!
-        positions.push(p.x, p.y, p.z)
-        const n = topoNormals[vi]!
-        normals.push(n.x, n.y, n.z)
-        if (hasUv) {
-          const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
-          const uv = this.uvs[uvIdx] ?? { u: 0, v: 0 }
-          uvs.push(uv.u, uv.v)
-        }
-        const color = this.faceColors[fi] ?? 0x6ecbf5
-        const r = ((color >> 16) & 255) / 255
-        const g = ((color >> 8) & 255) / 255
-        const b = (color & 255) / 255
-        if (hasCornerColors) {
-          const poolIdx = this.faceColorIndices[fi]?.[ci] ?? 0
-          const c = this.cornerColors[poolIdx] ?? [r, g, b, 1]
-          faceColors.push(c[0], c[1], c[2])
-        } else {
-          faceColors.push(r, g, b)
-        }
-        weldMap.set(key, renderIdx)
-        return renderIdx
-      }
-
-      for (let fi = 0; fi < this.faces.length; fi++) {
-        const face = this.faces[fi]!
-        const cornerIdx: number[] = []
-        for (let ci = 0; ci < face.length; ci++) {
-          cornerIdx.push(getOrCreateCorner(face[ci]!, fi, ci))
-        }
-
-        if (face.length === 3) {
-          indices.push(cornerIdx[0]!, cornerIdx[1]!, cornerIdx[2]!)
-        } else {
-          for (let i = 1; i < face.length - 1; i++) {
-            indices.push(cornerIdx[0]!, cornerIdx[i]!, cornerIdx[i + 1]!)
-          }
-        }
-      }
 
       return {
         positions: new Float32Array(positions),
         indices: new Uint32Array(indices),
         uvs: uvs.length > 0 ? new Float32Array(uvs) : undefined,
         faceColors: new Float32Array(faceColors),
-        normals: new Float32Array(normals),
+        sourceVertexIndices: new Uint32Array(sourceVertexIndices),
         flatShading,
+      }
+    }
+
+    // Blender-style shade smooth: weld for UVs/colors, but keep topology normals
+    // so UV seams don't create hard shading edges.
+    const topoNormals = this.positions.map((_, vi) => this.getVertexNormal(vi, true))
+    const normals: number[] = []
+    const weldMap = new Map<string, number>()
+
+    const weldKey = (vi: number, fi: number, ci: number): string => {
+      if (!hasUv && !hasCornerColors) return String(vi)
+      if (hasCornerColors) {
+        const poolIdx = this.faceColorIndices[fi]?.[ci] ?? 0
+        const uvIdx = hasUv ? (this.faceUvIndices[fi]?.[ci] ?? 0) : 0
+        return `${vi}:${poolIdx}:${uvIdx}`
+      }
+      if (hasUv) {
+        const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
+        return `${vi}:${uvIdx}`
+      }
+      const faceColor = this.faceColors[fi] ?? 0
+      return `${vi}:${faceColor}`
+    }
+
+    const getOrCreateCorner = (vi: number, fi: number, ci: number): number => {
+      const key = weldKey(vi, fi, ci)
+      const existing = weldMap.get(key)
+      if (existing !== undefined) return existing
+
+      const renderIdx = positions.length / 3
+      const p = this.positions[vi]!
+      positions.push(p.x, p.y, p.z)
+      sourceVertexIndices.push(vi)
+      const n = topoNormals[vi]!
+      normals.push(n.x, n.y, n.z)
+      if (hasUv) {
+        const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
+        const uv = this.uvs[uvIdx] ?? { u: 0, v: 0 }
+        uvs.push(uv.u, uv.v)
+      }
+      const color = this.faceColors[fi] ?? 0x6ecbf5
+      const r = ((color >> 16) & 255) / 255
+      const g = ((color >> 8) & 255) / 255
+      const b = (color & 255) / 255
+      if (hasCornerColors) {
+        const poolIdx = this.faceColorIndices[fi]?.[ci] ?? 0
+        const c = this.cornerColors[poolIdx] ?? [r, g, b, 1]
+        faceColors.push(c[0], c[1], c[2])
+      } else {
+        faceColors.push(r, g, b)
+      }
+      weldMap.set(key, renderIdx)
+      return renderIdx
+    }
+
+    for (let fi = 0; fi < this.faces.length; fi++) {
+      const face = this.faces[fi]!
+      const cornerIdx: number[] = []
+      for (let ci = 0; ci < face.length; ci++) {
+        cornerIdx.push(getOrCreateCorner(face[ci]!, fi, ci))
+      }
+
+      if (face.length === 3) {
+        indices.push(cornerIdx[0]!, cornerIdx[1]!, cornerIdx[2]!)
+      } else {
+        for (let i = 1; i < face.length - 1; i++) {
+          indices.push(cornerIdx[0]!, cornerIdx[i]!, cornerIdx[i + 1]!)
+        }
       }
     }
 
@@ -419,6 +438,8 @@ export class HalfEdgeMesh {
       indices: new Uint32Array(indices),
       uvs: uvs.length > 0 ? new Float32Array(uvs) : undefined,
       faceColors: new Float32Array(faceColors),
+      normals: new Float32Array(normals),
+      sourceVertexIndices: new Uint32Array(sourceVertexIndices),
       flatShading,
     }
   }

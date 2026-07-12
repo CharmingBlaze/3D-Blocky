@@ -113,7 +113,12 @@ function ViewportSceneInvalidator({
   objects,
   themeId,
   meshSelection,
+  selectionObjectIds,
+  selectedObjectId,
   viewportDisplayMode,
+  viewportXRay,
+  activeTool,
+  showGrid,
   facetExaggeration,
   showDensityHeatmap,
   pixelTextureRevision,
@@ -122,12 +127,18 @@ function ViewportSceneInvalidator({
   objects: unknown
   themeId: unknown
   meshSelection: unknown
+  selectionObjectIds: unknown
+  selectedObjectId: unknown
   viewportDisplayMode: unknown
+  viewportXRay: unknown
+  activeTool: unknown
+  showGrid: unknown
   facetExaggeration: unknown
   showDensityHeatmap: unknown
   pixelTextureRevision: unknown
   cadPreviewSignal: unknown
 }) {
+  const meshHover = useAppStore((s) => s.meshHover)
   const { layoutVisible, continuousFrames } = useViewportRender()
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
@@ -136,7 +147,13 @@ function ViewportSceneInvalidator({
     objects,
     themeId,
     meshSelection,
+    meshHover,
+    selectionObjectIds,
+    selectedObjectId,
     viewportDisplayMode,
+    viewportXRay,
+    activeTool,
+    showGrid,
     facetExaggeration,
     showDensityHeatmap,
     pixelTextureRevision,
@@ -452,8 +469,10 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
     cadPreview.meshModal != null ||
     cadPreview.objectTransformModal != null
 
+  // Continuous only while interacting or while the focused slot has a live CAD/tool preview.
+  // Idle focused slots stay on demand — OrbitControls push/pop covers damping (~260ms).
   const continuousFrames =
-    layoutVisible && (isActive || interactionActive || cadPreviewActive)
+    layoutVisible && (interactionActive || (isActive && cadPreviewActive))
 
   const handleSelectView = useCallback(
     (nextView: SelectableViewType) => {
@@ -490,6 +509,10 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
   const vertCount = useMemo(
     () => objects.reduce((s, o) => s + o.positions.length, 0),
     [objects]
+  )
+  const selectedObjectSet = useMemo(
+    () => new Set(selectionObjectIds),
+    [selectionObjectIds]
   )
   const gizmoTargetId = isActiveViewport
     ? selectionHasComponents(meshSelection) && isComponentSelectionMode(selectionMode)
@@ -687,7 +710,12 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           objects={objects}
           themeId={themeId}
           meshSelection={meshSelection}
+          selectionObjectIds={selectionObjectIds}
+          selectedObjectId={selectedObjectId}
           viewportDisplayMode={viewportDisplayMode}
+          viewportXRay={viewportXRay}
+          activeTool={activeTool}
+          showGrid={showGrid}
           facetExaggeration={facetExaggeration}
           showDensityHeatmap={showDensityHeatmap}
           pixelTextureRevision={pixelTextureRevision}
@@ -717,7 +745,7 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           <ObjectNode
             key={obj.id}
             object={obj}
-            isSelected={selectionObjectIds.includes(obj.id)}
+            isSelected={selectedObjectSet.has(obj.id)}
             isPrimary={obj.id === selectedObjectId}
             isGizmoTarget={obj.id === gizmoTargetId}
             facetExaggeration={facetExaggeration}
@@ -743,12 +771,14 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           />
         )}
 
-        {(activeTool === 'primitive-box' || primitiveBoxDraft) && <PrimitiveBoxCanvas />}
-        {activeTool === 'poly-draw' && <PolyDrawVisuals />}
-        {activeTool === 'knife' && <KnifeVisuals />}
-        {activeTool === 'bend' && <BendVisuals />}
-        {activeTool === 'loop-cut' && <LoopCutVisuals />}
-        <DrawVertexOverlay />
+        {(isActiveViewport && (activeTool === 'primitive-box' || primitiveBoxDraft)) && (
+          <PrimitiveBoxCanvas />
+        )}
+        {isActiveViewport && activeTool === 'poly-draw' && <PolyDrawVisuals />}
+        {isActiveViewport && activeTool === 'knife' && <KnifeVisuals />}
+        {isActiveViewport && activeTool === 'bend' && <BendVisuals />}
+        {isActiveViewport && activeTool === 'loop-cut' && <LoopCutVisuals />}
+        {isActiveViewport && <DrawVertexOverlay />}
         {billboardImages.length > 0 && <BillboardImages />}
 
         {view !== 'perspective' && (

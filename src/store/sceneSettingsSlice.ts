@@ -1,6 +1,7 @@
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { simplifyMesh } from '../mesh/simplification'
 import { applySculpt, type SculptTool } from '../sculpt/sculptTools'
+import { clearSculptSession, getSculptSessionMesh } from '../sculpt/sculptSessionCache'
 import type { Vec3 } from '../utils/math'
 import {
   paintColorOnObjects,
@@ -19,6 +20,7 @@ import { readStoredThemeId } from '../theme/bootstrapTheme'
 import { hexToRgba4 } from '../material/materialTypes'
 import { mirrorWorldPoint } from '../symmetry/symmetry'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
+import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
 import type { SelectionMode } from './selectionSlice'
 
@@ -250,7 +252,7 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
       const obj = objects.find((o) => o.id === targetId)
       if (!obj || obj.topologyLocked) return
 
-      const mesh = HalfEdgeMesh.fromObject(obj)
+      const mesh = getSculptSessionMesh(obj)
       applySculpt(mesh, {
         tool,
         center,
@@ -272,6 +274,7 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
 
       const updated = mesh.toObject(obj.id, obj.name, obj)
       invalidateFaceGroupCache(targetId)
+      invalidateSubdivisionPreviewCache(targetId)
       setPartial((s) => {
         const st = s as unknown as SettingsStore
         return {
@@ -289,10 +292,12 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
       const obj = objects.find((o) => o.id === targetId)
       if (!obj || obj.topologyLocked) return
 
+      clearSculptSession(targetId)
       const mesh = HalfEdgeMesh.fromObject(obj)
       const simplified = simplifyMesh(mesh, Math.floor(polyBudget * 0.75))
       const updated = simplified.toObject(obj.id, obj.name, obj)
       invalidateFaceGroupCache(targetId)
+      invalidateSubdivisionPreviewCache(targetId)
       setPartial((s) => {
         const st = s as unknown as SettingsStore
         return {

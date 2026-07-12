@@ -9,7 +9,7 @@ function notifyInteraction(): void {
   for (const listener of listeners) listener()
 }
 
-/** Boost all visible viewports to continuous rendering during drag/orbit/gizmo use. */
+/** Boost visible viewports to continuous rendering during drag/orbit/gizmo use. Idle slots stay on demand. */
 export function pushViewportInteraction(): void {
   interactionRefCount += 1
   if (interactionRefCount === 1) notifyInteraction()

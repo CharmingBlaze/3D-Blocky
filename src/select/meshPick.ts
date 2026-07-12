@@ -4,20 +4,22 @@ import type { Vec3 } from '../utils/math'
 import type { SelectionMode } from '../store/appStore'
 import { ensureTransform, getObjectPivot, worldPointFromObject } from '../mesh/objectTransform'
 import {
-  buildEdgeOverlays,
   isEdgeOverlayPickable,
 } from '../mesh/edgeOverlay'
 import {
-  buildFaceOverlayGroups,
   isFaceOverlayGroupPickable,
 } from '../mesh/faceOverlay'
 import {
-  buildVertexOverlayGroups,
   isVertexOverlayGroupPickable,
   viewSpaceZ,
 } from '../mesh/vertexOverlay'
-import { buildEdgeToFacesMap, buildVertexToFacesMap } from '../mesh/overlayVisibility'
 import { objectsInScreenRect, pickObjectAt } from './objectPick'
+import {
+  getFaceTriangulation,
+  getLocalAabb,
+  rayIntersectsLocalAabb,
+} from './meshPickGeometryCache'
+import { getOverlayPickData } from './overlayPickCache'
 
 export interface MeshPickHit {
   objectId: string
@@ -69,36 +71,36 @@ interface FaceHit {
 }
 
 function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
+  const aabb = getLocalAabb(obj)
+  if (!aabb) return null
+
   getObjectLocalMatrix(obj, _matrix)
   _invMatrix.copy(_matrix).invert()
   _rayLocal.origin.copy(rayWorld.origin).applyMatrix4(_invMatrix)
-  _rayLocal.direction.copy(rayWorld.direction).transformDirection(_invMatrix)
+  _rayLocal.direction.copy(rayWorld.direction).transformDirection(_invMatrix).normalize()
 
+  if (!rayIntersectsLocalAabb(_rayLocal, aabb)) return null
+
+  const tris = getFaceTriangulation(obj)
   let bestT = Infinity
   let bestFace = -1
   let bestPoint: THREE.Vector3 | null = null
 
-  for (let fi = 0; fi < obj.faces.length; fi++) {
-    const face = obj.faces[fi]
-    if (face.length < 3) continue
+  const pos = tris.positions
+  for (let ti = 0; ti < tris.triangleCount; ti++) {
+    const o = ti * 9
+    _v0.set(pos[o]!, pos[o + 1]!, pos[o + 2]!)
+    _v1.set(pos[o + 3]!, pos[o + 4]!, pos[o + 5]!)
+    _v2.set(pos[o + 6]!, pos[o + 7]!, pos[o + 8]!)
 
-    for (let i = 1; i < face.length - 1; i++) {
-      const a = obj.positions[face[0]]
-      const b = obj.positions[face[i]]
-      const c = obj.positions[face[i + 1]]
-      _v0.set(a.x, a.y, a.z)
-      _v1.set(b.x, b.y, b.z)
-      _v2.set(c.x, c.y, c.z)
+    const hit = _rayLocal.intersectTriangle(_v0, _v1, _v2, false, _hitLocal)
+    if (!hit) continue
 
-      const hit = _rayLocal.intersectTriangle(_v0, _v1, _v2, false, _hitLocal)
-      if (!hit) continue
-
-      const t = _rayLocal.origin.distanceTo(hit)
-      if (t < bestT) {
-        bestT = t
-        bestFace = fi
-        bestPoint = _bestPointLocal.copy(hit)
-      }
+    const t = _rayLocal.origin.distanceTo(hit)
+    if (t < bestT) {
+      bestT = t
+      bestFace = tris.faceIndices[ti]!
+      bestPoint = _bestPointLocal.copy(hit)
     }
   }
 
@@ -144,8 +146,7 @@ function pickNearestVertex(
   thresholdPx = 14,
   cullBackVertices = false
 ): number | null {
-  const groups = buildVertexOverlayGroups(obj)
-  const vertexFaces = buildVertexToFacesMap(obj)
+  const { vertexGroups: groups, vertexToFaces } = getOverlayPickData(obj)
 
   let bestVi: number | null = null
   let bestDist = thresholdPx
@@ -155,7 +156,7 @@ function pickNearestVertex(
     const vi = group.indices[0]!
     if (
       cullBackVertices &&
-      !isVertexOverlayGroupPickable(obj, group, camera, vertexFaces)
+      !isVertexOverlayGroupPickable(obj, group, camera, vertexToFaces)
     ) {
       continue
     }
@@ -207,14 +208,14 @@ function pickNearestEdge(
   thresholdPx = 12,
   cullBackEdges = false
 ): [number, number] | null {
-  const edgeFaces = buildEdgeToFacesMap(obj)
+  const { edgeOverlays, edgeToFaces } = getOverlayPickData(obj)
   let best: [number, number] | null = null
   let bestDist = thresholdPx
   let bestViewZ = -Infinity
 
-  for (const overlay of buildEdgeOverlays(obj)) {
+  for (const overlay of edgeOverlays) {
     const [a, b] = overlay.edge
-    if (cullBackEdges && !isEdgeOverlayPickable(obj, overlay, camera, edgeFaces)) {
+    if (cullBackEdges && !isEdgeOverlayPickable(obj, overlay, camera, edgeToFaces)) {
       continue
     }
 
@@ -442,7 +443,7 @@ function pickNearestFace(
   let bestDist = thresholdPx
   let bestViewZ = -Infinity
 
-  for (const group of buildFaceOverlayGroups(obj)) {
+  for (const group of getOverlayPickData(obj).faceGroups) {
     if (cullBackFaces && !isFaceOverlayGroupPickable(obj, group, camera)) {
       continue
     }
@@ -467,6 +468,10 @@ function pickNearestFace(
   return bestFi
 }
 
+function isSubdivisionPreviewActive(obj: SceneObject): boolean {
+  return Boolean(obj.subdEnabled && (obj.subdLevels ?? 0) > 0)
+}
+
 export function pickMeshComponent(
   mode: SelectionMode,
   clientX: number,
@@ -484,12 +489,23 @@ export function pickMeshComponent(
   const faceHit = pickClosestObject(objects, ray, preferredObjectId)
 
   if (mode === 'face') {
-    // Blender X-Ray: select faces via center dots, including occluded/back faces.
-    if (!cullBackVertices) {
-      const targetId = preferredObjectId ?? faceHit?.objectId
-      const obj = targetId ? objects.find((o) => o.id === targetId) : null
+    const targetId = preferredObjectId ?? faceHit?.objectId
+    const obj = targetId ? objects.find((o) => o.id === targetId) : null
+
+    // X-ray: centroid dots including back faces.
+    // SubD preview (X-ray off): cage raycast mismatches the smooth surface — use
+    // cage centroid pick (same indices overlays use) instead of cage triangle hits.
+    if (!cullBackVertices || (obj && isSubdivisionPreviewActive(obj))) {
       if (obj) {
-        const fi = pickNearestFace(obj, clientX, clientY, rect, camera, 18, false)
+        const fi = pickNearestFace(
+          obj,
+          clientX,
+          clientY,
+          rect,
+          camera,
+          18,
+          cullBackVertices
+        )
         if (fi !== null) return { objectId: obj.id, face: fi }
       }
       return null
@@ -562,12 +578,12 @@ export function meshComponentsInScreenRect(
   const faces: number[] = []
 
   if (mode === 'vertex') {
-    const vertexFaces = buildVertexToFacesMap(obj)
-    for (const group of buildVertexOverlayGroups(obj)) {
+    const { vertexGroups, vertexToFaces } = getOverlayPickData(obj)
+    for (const group of vertexGroups) {
       const vi = group.indices[0]!
       if (
         cullBackVertices &&
-        !isVertexOverlayGroupPickable(obj, group, camera, vertexFaces)
+        !isVertexOverlayGroupPickable(obj, group, camera, vertexToFaces)
       ) {
         continue
       }
@@ -580,12 +596,12 @@ export function meshComponentsInScreenRect(
   }
 
   if (mode === 'edge') {
-    const edgeFaces = buildEdgeToFacesMap(obj)
-    for (const overlay of buildEdgeOverlays(obj)) {
+    const { edgeOverlays, edgeToFaces } = getOverlayPickData(obj)
+    for (const overlay of edgeOverlays) {
       const [a, b] = overlay.edge
       if (
         cullBackVertices &&
-        !isEdgeOverlayPickable(obj, overlay, camera, edgeFaces)
+        !isEdgeOverlayPickable(obj, overlay, camera, edgeToFaces)
       ) {
         continue
       }
@@ -603,7 +619,7 @@ export function meshComponentsInScreenRect(
   }
 
   if (mode === 'face') {
-    for (const group of buildFaceOverlayGroups(obj)) {
+    for (const group of getOverlayPickData(obj).faceGroups) {
       if (
         cullBackVertices &&
         !isFaceOverlayGroupPickable(obj, group, camera)

@@ -3,6 +3,7 @@ import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { ensurePositiveVolume } from '../mesh/meshWinding'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
+import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import type { FloatingPanelState } from '../components/FloatingPanel'
 import {
   applyGradientOnObjects,
@@ -53,7 +54,7 @@ import { resolveEffectiveMaterial, ensureObjectMaterial } from '../material/mate
 import type { CustomPalette, GradientDirection, GradientHandle2D, HarmonyScheme, MaterialMode, Rgba4 } from '../material/materialTypes'
 import { rgba4ToHex } from '../material/materialTypes'
 import { PRESET_PALETTES, generateHarmonyPalette, savePixelPenPalettes, loadCustomPalettes, loadPixelPenPalettes } from '../material/palettes'
-import { assignUvMappingForMode } from '../uv/uvObject'
+import { assignUvMappingForMode, ensureObjectUVs } from '../uv/uvObject'
 import { sanitizeSceneSnapshot, type SceneSnapshot } from '../history/sceneHistory'
 import { reconcilePixelDocumentCache } from '../rendering/textureCache'
 import {
@@ -354,7 +355,9 @@ function restoreSceneToStore(
 ): void {
   invalidateFaceGroupCache()
   invalidateSubdivisionPreviewCache()
+  clearSculptSession()
   const restored = sanitizeSceneSnapshot(snapshot)
+  const objects = ensureTexturedSceneUvs(restored.objects)
   const imageSelection = sanitizeImageSelectionIds(
     restored.referenceImages,
     restored.billboardImages,
@@ -362,7 +365,7 @@ function restoreSceneToStore(
     get().selectedBillboardImageId
   )
   set({
-    objects: restored.objects,
+    objects,
     objectTextures: restored.objectTextures,
     pixelDocuments: restored.pixelDocuments ?? {},
     referenceImages: restored.referenceImages,
@@ -392,6 +395,24 @@ function textureIdsForObject(obj: SceneObject): string[] {
   const mat = resolveEffectiveMaterial(obj)
   const texId = mat.textureId ?? obj.id
   return texId === obj.id ? [obj.id] : [obj.id, texId]
+}
+
+/** Persist UVs for textured meshes during load / material mode — not from the renderer. */
+function ensureTexturedObjectUvs(obj: SceneObject): SceneObject {
+  const mat = resolveEffectiveMaterial(obj)
+  if (mat.mode !== 'texture') return obj
+  if (obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length) return obj
+  return ensureObjectUVs(obj)
+}
+
+function ensureTexturedSceneUvs(objects: SceneObject[]): SceneObject[] {
+  let changed = false
+  const next = objects.map((obj) => {
+    const ensured = ensureTexturedObjectUvs(obj)
+    if (ensured !== obj) changed = true
+    return ensured
+  })
+  return changed ? next : objects
 }
 
 function purgeTextureResourcesForObjects(
@@ -768,9 +789,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (ids.length === 0) return
     const idSet = new Set(ids)
     set((s) => ({
-      objects: s.objects.map((o) =>
-        idSet.has(o.id) ? setObjectMaterialMode(o, mode, o.id) : o
-      ),
+      objects: s.objects.map((o) => {
+        if (!idSet.has(o.id)) return o
+        const next = setObjectMaterialMode(o, mode, o.id)
+        return mode === 'texture' ? ensureTexturedObjectUvs(next) : next
+      }),
     }))
     get().commitHistory('Material mode')
     if (mode === 'vertexGradient') get().previewMaterialEditorGradient()

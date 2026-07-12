@@ -2,9 +2,11 @@ import * as THREE from 'three'
 import { getPickTargets } from './pickRegistry'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { ensureTransform, worldPointFromObject } from '../mesh/objectTransform'
+import { getLocalAabb } from './meshPickGeometryCache'
 
 const raycaster = new THREE.Raycaster()
 const ndc = new THREE.Vector2()
+const _projected = new THREE.Vector3()
 
 export function pickObjectAt(
   clientX: number,
@@ -36,28 +38,35 @@ export function pickObjectAt(
   return null
 }
 
+/**
+ * Screen-space bounds from the object's local AABB (8 corners).
+ * O(1) in vertex count — used for marquee object culling.
+ */
 export function objectScreenBounds(
   obj: SceneObject,
   camera: THREE.Camera,
   rect: DOMRect
 ): { left: number; top: number; right: number; bottom: number } | null {
-  if (obj.positions.length === 0) return null
-  const v = new THREE.Vector3()
+  const aabb = getLocalAabb(obj)
+  if (!aabb) return null
+
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
 
-  for (const p of obj.positions) {
-    const w = worldPointFromObject(obj, p)
-    v.set(w.x, w.y, w.z)
-    v.project(camera)
-    const sx = rect.left + ((v.x + 1) / 2) * rect.width
-    const sy = rect.top + ((-v.y + 1) / 2) * rect.height
-    minX = Math.min(minX, sx)
-    maxX = Math.max(maxX, sx)
-    minY = Math.min(minY, sy)
-    maxY = Math.max(maxY, sy)
+  for (let i = 0; i < 8; i++) {
+    const lx = i & 1 ? aabb.maxX : aabb.minX
+    const ly = i & 2 ? aabb.maxY : aabb.minY
+    const lz = i & 4 ? aabb.maxZ : aabb.minZ
+    const world = worldPointFromObject(obj, { x: lx, y: ly, z: lz })
+    _projected.set(world.x, world.y, world.z).project(camera)
+    const sx = rect.left + ((_projected.x + 1) / 2) * rect.width
+    const sy = rect.top + ((-_projected.y + 1) / 2) * rect.height
+    if (sx < minX) minX = sx
+    if (sx > maxX) maxX = sx
+    if (sy < minY) minY = sy
+    if (sy > maxY) maxY = sy
   }
 
   return { left: minX, top: minY, right: maxX, bottom: maxY }

@@ -11,6 +11,7 @@ import { cloneSceneObject } from '../mesh/meshOps'
 import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
+import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import { stampDrawMaterial } from '../material/materialEditorSlice'
 import type { UvTextureInfo } from './appStore'
 
@@ -111,7 +112,17 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
     },
 
     updateObject: (id, updates) => {
-      if (updates.faces || updates.positions || updates.faceGroups) invalidateFaceGroupCache(id)
+      if (
+        updates.faces ||
+        updates.positions ||
+        updates.faceGroups ||
+        updates.subdEnabled !== undefined ||
+        updates.subdLevels !== undefined
+      ) {
+        invalidateFaceGroupCache(id)
+        invalidateSubdivisionPreviewCache(id)
+        clearSculptSession(id)
+      }
       setPartial((s) => ({
         objects: s.objects.map((o) => (o.id === id ? { ...o, ...updates } : o)),
       }))
@@ -138,6 +149,7 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
       deps.clearTextureLoadGeneration(id)
       invalidateFaceGroupCache(id)
       invalidateSubdivisionPreviewCache(id)
+      clearSculptSession(id)
       deps.reconcileBlobUrls()
       store().commitHistory('Delete object')
     },

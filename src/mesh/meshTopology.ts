@@ -1,8 +1,6 @@
 import * as THREE from 'three'
-import { mergeVertices, toCreasedNormals } from 'three-stdlib'
 import type { SceneObject } from './HalfEdgeMesh'
-import { HalfEdgeMesh } from './HalfEdgeMesh'
-import { edgeKey } from './meshSelection'
+import { getMeshAdjacency } from './meshAdjacencyCache'
 
 export const COINCIDENT_VERTEX_QUANT = 1e-5
 
@@ -16,16 +14,7 @@ export function vertexPositionKey(
 
 /** Groups mesh vertex indices that share the same local position (unwelded UV corners). */
 export function groupCoincidentVertexIndices(object: SceneObject): Map<string, number[]> {
-  const map = new Map<string, number[]>()
-  for (let vi = 0; vi < object.positions.length; vi++) {
-    const p = object.positions[vi]
-    if (!p) continue
-    const key = vertexPositionKey(p)
-    const list = map.get(key)
-    if (list) list.push(vi)
-    else map.set(key, [vi])
-  }
-  return map
+  return getMeshAdjacency(object).coincidentVertices
 }
 
 export function collectCoincidentVertexGroups(
@@ -49,22 +38,7 @@ export function collectCoincidentVertexGroups(
 }
 
 export function collectUniqueEdges(object: SceneObject): [number, number][] {
-  const seen = new Set<string>()
-  const edges: [number, number][] = []
-
-  for (const face of object.faces) {
-    const n = face.length
-    for (let i = 0; i < n; i++) {
-      const a = face[i]
-      const b = face[(i + 1) % n]
-      const key = edgeKey(a, b)
-      if (seen.has(key)) continue
-      seen.add(key)
-      edges.push(a < b ? [a, b] : [b, a])
-    }
-  }
-
-  return edges
+  return getMeshAdjacency(object).uniqueEdges
 }
 
 export function buildEdgeSegmentsGeometry(
@@ -153,22 +127,4 @@ export function buildFacesFillGeometry(
   geo.setIndex(indices)
   geo.computeVertexNormals()
   return geo
-}
-
-/** Smooth merged hull for object selection outline (silhouette, not per-face). */
-export function buildSelectionOutlineGeometry(
-  object: SceneObject,
-  facetExaggeration: number
-): THREE.BufferGeometry {
-  const mesh = HalfEdgeMesh.fromObject(object)
-  const data = mesh.toMeshData(false, facetExaggeration)
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(data.positions.slice(), 3))
-  geo.setIndex(new THREE.BufferAttribute(data.indices.slice(), 1))
-  geo.computeVertexNormals()
-
-  const merged = mergeVertices(geo)
-  geo.dispose()
-  return toCreasedNormals(merged, Math.PI)
 }

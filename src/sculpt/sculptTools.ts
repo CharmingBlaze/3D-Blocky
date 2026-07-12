@@ -76,26 +76,38 @@ export function applySculpt(mesh: HalfEdgeMesh, params: SculptParams): void {
 }
 
 export function computeVertexDensity(mesh: HalfEdgeMesh): Float32Array {
-  const densities = new Float32Array(mesh.positions.length)
+  const n = mesh.positions.length
+  const densities = new Float32Array(n)
+  const neighbors: number[][] = Array.from({ length: n }, () => [])
 
-  for (let vi = 0; vi < mesh.positions.length; vi++) {
-    const neighbors = mesh.getVertexNeighbors(vi)
-    if (neighbors.length === 0) {
+  for (const face of mesh.faces) {
+    const len = face.length
+    for (let i = 0; i < len; i++) {
+      const a = face[i]!
+      const b = face[(i + 1) % len]!
+      neighbors[a]!.push(b)
+      neighbors[b]!.push(a)
+    }
+  }
+
+  for (let vi = 0; vi < n; vi++) {
+    const list = neighbors[vi]!
+    if (list.length === 0) {
       densities[vi] = 0
       continue
     }
+    const unique = new Set(list)
     let avgDist = 0
-    for (const ni of neighbors) {
-      avgDist += dist3(mesh.positions[vi], mesh.positions[ni])
+    for (const ni of unique) {
+      avgDist += dist3(mesh.positions[vi]!, mesh.positions[ni]!)
     }
-    avgDist /= neighbors.length
+    avgDist /= unique.size
     densities[vi] = avgDist > 0 ? 1 / avgDist : 0
   }
 
-  const max = Math.max(...densities, 0.001)
-  for (let i = 0; i < densities.length; i++) {
-    densities[i] /= max
-  }
+  let max = 0.001
+  for (let i = 0; i < n; i++) max = Math.max(max, densities[i]!)
+  for (let i = 0; i < n; i++) densities[i]! /= max
 
   return densities
 }

@@ -36,6 +36,11 @@ export interface HistoryEntry {
 
 const DEFAULT_MAX_DEPTH = 50
 
+// Scene state is updated immutably throughout the store. Remembering the history
+// clone for a source object avoids serializing an unchanged mesh at every command.
+// Weak keys ensure objects that leave the store can still be garbage collected.
+const capturedSceneObjectCache = new WeakMap<SceneObject, SceneObject>()
+
 export function cloneSceneObject(obj: SceneObject): SceneObject {
   return {
     ...obj,
@@ -164,13 +169,177 @@ function billboardImagesEqual(a: BillboardImage[], b: BillboardImage[]): boolean
   return true
 }
 
+function vec3Equal(
+  a: { x: number; y: number; z: number } | undefined,
+  b: { x: number; y: number; z: number } | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a && !b
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
+function numberGridEqual(a: number[][] | undefined, b: number[][] | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return !a && !b
+  for (let i = 0; i < a.length; i++) {
+    const ai = a[i]!
+    const bi = b[i]!
+    if (ai.length !== bi.length) return false
+    for (let j = 0; j < ai.length; j++) if (ai[j] !== bi[j]) return false
+  }
+  return true
+}
+
+function positionsEqual(
+  a: { x: number; y: number; z: number }[],
+  b: { x: number; y: number; z: number }[]
+): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!vec3Equal(a[i], b[i])) return false
+  }
+  return true
+}
+
+function uvsEqual(
+  a: { u: number; v: number }[] | undefined,
+  b: { u: number; v: number }[] | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return !a && !b
+  for (let i = 0; i < a.length; i++) {
+    if (a[i]!.u !== b[i]!.u || a[i]!.v !== b[i]!.v) return false
+  }
+  return true
+}
+
+function rgbaEqual(
+  a: [number, number, number, number] | undefined,
+  b: [number, number, number, number] | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a && !b
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3]
+}
+
+function materialEqual(
+  a: SceneObject['material'],
+  b: SceneObject['material']
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a && !b
+  return (
+    a.mode === b.mode &&
+    a.opacity === b.opacity &&
+    a.doubleSided === b.doubleSided &&
+    a.textureId === b.textureId &&
+    rgbaEqual(a.solidColor, b.solidColor)
+  )
+}
+
+function transformEqual(
+  a: SceneObject['transform'],
+  b: SceneObject['transform']
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a && !b
+  return (
+    vec3Equal(a.position, b.position) &&
+    vec3Equal(a.rotation, b.rotation) &&
+    vec3Equal(a.scale, b.scale)
+  )
+}
+
+/**
+ * Structural equality for history dedup — avoids JSON.stringify on large meshes.
+ * Must cover every field that cloneSceneObject persists.
+ */
+export function sceneObjectsContentEqual(a: SceneObject, b: SceneObject): boolean {
+  if (a === b) return true
+  if (
+    a.id !== b.id ||
+    a.name !== b.name ||
+    a.color !== b.color ||
+    a.topologyLocked !== b.topologyLocked ||
+    a.polyBudget !== b.polyBudget ||
+    a.polyBudgetMode !== b.polyBudgetMode ||
+    a.smoothShading !== b.smoothShading ||
+    a.facetExaggeration !== b.facetExaggeration ||
+    a.uvMappingMode !== b.uvMappingMode ||
+    a.uvAutoPacked !== b.uvAutoPacked ||
+    a.subdEnabled !== b.subdEnabled ||
+    a.subdLevels !== b.subdLevels
+  ) {
+    return false
+  }
+
+  if (!positionsEqual(a.positions, b.positions)) return false
+  if (!numberGridEqual(a.faces, b.faces)) return false
+  if (a.faceColors.length !== b.faceColors.length) return false
+  for (let i = 0; i < a.faceColors.length; i++) {
+    if (a.faceColors[i] !== b.faceColors[i]) return false
+  }
+  if (!numberGridEqual(a.faceGroups, b.faceGroups)) return false
+  if (!uvsEqual(a.uvs, b.uvs)) return false
+  if (!numberGridEqual(a.faceUvIndices, b.faceUvIndices)) return false
+  if (!numberGridEqual(a.faceColorIndices, b.faceColorIndices)) return false
+
+  if ((a.cornerColors?.length ?? 0) !== (b.cornerColors?.length ?? 0)) return false
+  if (a.cornerColors && b.cornerColors) {
+    for (let i = 0; i < a.cornerColors.length; i++) {
+      if (!rgbaEqual(a.cornerColors[i], b.cornerColors[i])) return false
+    }
+  }
+
+  if (!materialEqual(a.material, b.material)) return false
+  if ((a.faceMaterials?.length ?? 0) !== (b.faceMaterials?.length ?? 0)) return false
+  if (a.faceMaterials && b.faceMaterials) {
+    for (let i = 0; i < a.faceMaterials.length; i++) {
+      if (!materialEqual(a.faceMaterials[i] ?? undefined, b.faceMaterials[i] ?? undefined)) {
+        return false
+      }
+    }
+  }
+
+  if (!vec3Equal(a.pivot, b.pivot)) return false
+  if (!transformEqual(a.transform, b.transform)) return false
+
+  // Rare rebuild sources — compare by stable JSON only when present.
+  if (a.sketchSource !== b.sketchSource) {
+    if (!a.sketchSource || !b.sketchSource) return !a.sketchSource && !b.sketchSource
+    if (JSON.stringify(a.sketchSource) !== JSON.stringify(b.sketchSource)) return false
+  }
+  if (a.vectorSource !== b.vectorSource) {
+    if (!a.vectorSource || !b.vectorSource) return !a.vectorSource && !b.vectorSource
+    if (JSON.stringify(a.vectorSource) !== JSON.stringify(b.vectorSource)) return false
+  }
+
+  return true
+}
+
 function captureObjects(input: SceneObject[], previous?: SceneObject[]): SceneObject[] {
-  if (!previous) return cloneSceneObjects(input)
+  if (!previous) {
+    return input.map((obj) => {
+      const cached = capturedSceneObjectCache.get(obj)
+      if (cached) return cached
+      const clone = cloneSceneObject(obj)
+      capturedSceneObjectCache.set(obj, clone)
+      return clone
+    })
+  }
   const prevById = new Map(previous.map((obj) => [obj.id, obj]))
   return input.map((obj) => {
+    const cached = capturedSceneObjectCache.get(obj)
+    if (cached) return cached
     const prevObj = prevById.get(obj.id)
-    if (prevObj && objectDataSignature(prevObj) === objectDataSignature(obj)) return prevObj
-    return cloneSceneObject(obj)
+    if (prevObj && sceneObjectsContentEqual(prevObj, obj)) {
+      capturedSceneObjectCache.set(obj, prevObj)
+      return prevObj
+    }
+    const clone = cloneSceneObject(obj)
+    capturedSceneObjectCache.set(obj, clone)
+    return clone
   })
 }
 
@@ -220,19 +389,6 @@ export function captureSceneSnapshot(input: SceneSnapshot, previous?: SceneSnaps
   }
 }
 
-function objectDataSignature(obj: SceneObject): string {
-  const pos = obj.positions
-    .map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`)
-    .join(';')
-  const face = obj.faces.map((f) => f.join(',')).join('|')
-  const uv =
-    obj.uvs?.map((u) => `${u.u.toFixed(5)},${u.v.toFixed(5)}`).join(';') ?? ''
-  const tr = obj.transform
-    ? `${obj.transform.position.x},${obj.transform.position.y},${obj.transform.position.z}|${obj.transform.rotation.x},${obj.transform.rotation.y},${obj.transform.rotation.z}|${obj.transform.scale.x},${obj.transform.scale.y},${obj.transform.scale.z}`
-    : ''
-  return `${obj.id}:${obj.smoothShading}:${obj.color}:${obj.topologyLocked}:${pos}#${face}#${uv}#${tr}`
-}
-
 export function snapshotsEqual(a: SceneSnapshot, b: SceneSnapshot): boolean {
   if (a.selectedObjectId !== b.selectedObjectId) return false
   if (a.selectionObjectIds.length !== b.selectionObjectIds.length) return false
@@ -247,7 +403,8 @@ export function snapshotsEqual(a: SceneSnapshot, b: SceneSnapshot): boolean {
   const sortedB = [...b.objects].sort((x, y) => x.id.localeCompare(y.id))
   for (let i = 0; i < sortedA.length; i++) {
     if (sortedA[i].id !== sortedB[i].id) return false
-    if (objectDataSignature(sortedA[i]) !== objectDataSignature(sortedB[i])) return false
+    if (sortedA[i] === sortedB[i]) continue
+    if (!sceneObjectsContentEqual(sortedA[i]!, sortedB[i]!)) return false
   }
 
   if (!referenceImagesEqual(a.referenceImages, b.referenceImages)) return false

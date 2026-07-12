@@ -39,7 +39,75 @@ interface MeshRendererProps {
   viewportXRay?: boolean
 }
 
-export function buildViewportMeshGeometry(
+const VIEWPORT_GEOMETRY_CACHE_WINDOW_MS = 16
+const viewportGeometryBuildCache = new Map<SceneObject, Map<string, THREE.BufferGeometry>>()
+let viewportGeometryCacheTimer: ReturnType<typeof setTimeout> | null = null
+
+const viewportEdgeOutlineCache = new Map<SceneObject, THREE.BufferGeometry>()
+let viewportEdgeOutlineCacheTimer: ReturnType<typeof setTimeout> | null = null
+
+function geometryBuildKey(
+  flatShading: boolean,
+  facetExaggeration: number,
+  showDensityHeatmap: boolean,
+  omitVertexColors: boolean
+): string {
+  return `${flatShading ? 1 : 0}:${facetExaggeration}:${showDensityHeatmap ? 1 : 0}:${omitVertexColors ? 1 : 0}`
+}
+
+/** Clears CPU templates used only to share one geometry-build wave across viewports. */
+export function clearViewportGeometryBuildCache(): void {
+  if (viewportGeometryCacheTimer !== null) {
+    clearTimeout(viewportGeometryCacheTimer)
+    viewportGeometryCacheTimer = null
+  }
+  for (const variants of viewportGeometryBuildCache.values()) {
+    for (const geometry of variants.values()) geometry.dispose()
+  }
+  viewportGeometryBuildCache.clear()
+
+  if (viewportEdgeOutlineCacheTimer !== null) {
+    clearTimeout(viewportEdgeOutlineCacheTimer)
+    viewportEdgeOutlineCacheTimer = null
+  }
+  for (const geometry of viewportEdgeOutlineCache.values()) geometry.dispose()
+  viewportEdgeOutlineCache.clear()
+}
+
+function scheduleViewportGeometryCacheClear(): void {
+  if (viewportGeometryCacheTimer !== null) return
+  viewportGeometryCacheTimer = setTimeout(() => {
+    viewportGeometryCacheTimer = null
+    for (const variants of viewportGeometryBuildCache.values()) {
+      for (const geometry of variants.values()) geometry.dispose()
+    }
+    viewportGeometryBuildCache.clear()
+  }, VIEWPORT_GEOMETRY_CACHE_WINDOW_MS)
+}
+
+function scheduleViewportEdgeOutlineCacheClear(): void {
+  if (viewportEdgeOutlineCacheTimer !== null) return
+  viewportEdgeOutlineCacheTimer = setTimeout(() => {
+    viewportEdgeOutlineCacheTimer = null
+    for (const geometry of viewportEdgeOutlineCache.values()) geometry.dispose()
+    viewportEdgeOutlineCache.clear()
+  }, VIEWPORT_GEOMETRY_CACHE_WINDOW_MS)
+}
+
+/**
+ * Topology edge outline for Model display — share one CPU build across viewports, clone per canvas.
+ */
+export function buildViewportEdgeOutlineGeometry(object: SceneObject): THREE.BufferGeometry {
+  let template = viewportEdgeOutlineCache.get(object)
+  if (!template) {
+    template = buildEdgeSegmentsGeometry(object, collectUniqueEdges(object))
+    viewportEdgeOutlineCache.set(object, template)
+  }
+  scheduleViewportEdgeOutlineCacheClear()
+  return template.clone()
+}
+
+function buildViewportMeshGeometryUncached(
   object: SceneObject,
   flatShading: boolean,
   facetExaggeration: number,
@@ -60,8 +128,10 @@ export function buildViewportMeshGeometry(
   if (showDensityHeatmap) {
     const densities = computeVertexDensity(mesh)
     const colors = new Float32Array(data.positions.length)
-    for (let i = 0; i < data.positions.length / 3; i++) {
-      const vi = Math.floor(i / (data.positions.length / 3 / object.positions.length))
+    const sources = data.sourceVertexIndices
+    const cornerCount = data.positions.length / 3
+    for (let i = 0; i < cornerCount; i++) {
+      const vi = sources?.[i] ?? Math.min(i, densities.length - 1)
       const d = densities[Math.min(vi, densities.length - 1)] ?? 0
       colors[i * 3] = d
       colors[i * 3 + 1] = 0.2
@@ -79,6 +149,43 @@ export function buildViewportMeshGeometry(
     geo.computeVertexNormals()
   }
   return geo
+}
+
+/**
+ * Build isolated geometry for one viewport while sharing the expensive editable-mesh
+ * conversion across canvases rendering the same immutable SceneObject in one frame.
+ */
+export function buildViewportMeshGeometry(
+  object: SceneObject,
+  flatShading: boolean,
+  facetExaggeration: number,
+  showDensityHeatmap: boolean,
+  omitVertexColors = false
+): THREE.BufferGeometry {
+  const key = geometryBuildKey(
+    flatShading,
+    facetExaggeration,
+    showDensityHeatmap,
+    omitVertexColors
+  )
+  let variants = viewportGeometryBuildCache.get(object)
+  if (!variants) {
+    variants = new Map()
+    viewportGeometryBuildCache.set(object, variants)
+  }
+  let template = variants.get(key)
+  if (!template) {
+    template = buildViewportMeshGeometryUncached(
+      object,
+      flatShading,
+      facetExaggeration,
+      showDensityHeatmap,
+      omitVertexColors
+    )
+    variants.set(key, template)
+  }
+  scheduleViewportGeometryCacheClear()
+  return template.clone()
 }
 
 function MeshMaterial({
@@ -199,11 +306,16 @@ export const MeshRenderer = memo(function MeshRenderer({
   const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
   const textureUrl = textureMeta?.url ?? null
   const config = VIEWPORT_DISPLAY_CONFIG[displayMode]
+  const subdPreviewActive = Boolean(
+    object.subdEnabled && object.subdLevels && object.subdLevels > 0
+  )
   const flatShading = resolveFlatShading(
-    object.subdEnabled ? true : object.smoothShading,
+    subdPreviewActive ? true : object.smoothShading,
     displayMode
   )
+  // SubD preview strips UVs (weld + Catmull-Clark) — use vertex colors until Apply SubD.
   const useTexture =
+    !subdPreviewActive &&
     materialSettings.mode === 'texture' &&
     config.supportsTexture &&
     Boolean(pixelDoc || textureUrl)
@@ -217,38 +329,19 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   const renderObject = useMemo(() => {
     const base = useTexture ? ensureObjectUVs(object) : object
+    if (!subdPreviewActive) return base
     const preview = resolveSubdivisionPreview(base)
-    if (object.subdEnabled && object.subdLevels && object.subdLevels > 0) {
-      return { ...preview, smoothShading: true }
-    }
-    return base
-  }, [object, useTexture])
+    return { ...preview, smoothShading: true }
+  }, [object, useTexture, subdPreviewActive])
 
   const urlTexture = useLoadedTexture(useTexture && !pixelDoc && textureUrl ? textureUrl : null)
   const dataTexture = usePixelDocumentTexture(pixelDoc ? texId : null)
   const texture = pixelDoc ? dataTexture : urlTexture
 
-  useEffect(() => {
-    if (!textureUrl || object.uvs?.length) return
-    const withUvs = ensureObjectUVs(object)
-    useAppStore.getState().updateObject(object.id, {
-      uvs: withUvs.uvs,
-      faceUvIndices: withUvs.faceUvIndices,
-    })
-  }, [object.id, object.uvs?.length, textureUrl, object])
-
   const cageGeometry = useMemo(() => {
-    if (!object.subdEnabled || !object.subdLevels || object.subdLevels <= 0) return null
-    const cage = useTexture ? ensureObjectUVs(object) : object
-    return buildViewportMeshGeometry(cage, true, 0, false, true)
-  }, [
-    object,
-    object.subdEnabled,
-    object.subdLevels,
-    object.positions,
-    object.faces,
-    useTexture,
-  ])
+    if (!subdPreviewActive) return null
+    return buildViewportMeshGeometry(object, true, 0, false, true)
+  }, [object, subdPreviewActive, object.positions, object.faces])
 
   useEffect(() => () => cageGeometry?.dispose(), [cageGeometry])
 
@@ -317,7 +410,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   // (drei <Edges> fails to draw reliably on smooth/welded meshes.)
   const topologyEdgeGeometry = useMemo(() => {
     if (!config.showEdgeOutline) return null
-    return buildEdgeSegmentsGeometry(renderObject, collectUniqueEdges(renderObject))
+    return buildViewportEdgeOutlineGeometry(renderObject)
   }, [
     config.showEdgeOutline,
     renderObject.positions,
@@ -380,7 +473,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         )}
       </mesh>
 
-      {object.subdEnabled && object.subdLevels && object.subdLevels > 0 && cageGeometry && (
+      {subdPreviewActive && cageGeometry && (
         <mesh geometry={cageGeometry} renderOrder={3}>
           <meshBasicMaterial
             wireframe
@@ -419,5 +512,6 @@ export const MeshRenderer = memo(function MeshRenderer({
   prev.objectSelectionOutline === next.objectSelectionOutline &&
   prev.facetExaggeration === next.facetExaggeration &&
   prev.showDensityHeatmap === next.showDensityHeatmap &&
-  prev.displayMode === next.displayMode
+  prev.displayMode === next.displayMode &&
+  prev.viewportXRay === next.viewportXRay
 )

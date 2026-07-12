@@ -96,6 +96,65 @@ function ObjectMeshEditOverlay({
   )
 }
 
+/** Subscribes to activeTool only for the gizmo target — keeps other ObjectNodes memo-stable. */
+function ObjectTransformGizmo({
+  object,
+  rootRef,
+  draggingRef,
+}: {
+  object: SceneObject
+  rootRef: RefObject<THREE.Group | null>
+  draggingRef: React.MutableRefObject<boolean>
+}) {
+  const activeTool = useAppStore((s) => s.activeTool)
+  const updateObjectTransform = useAppStore((s) => s.updateObjectTransform)
+  const commitHistory = useAppStore((s) => s.commitHistory)
+  const glDomElement = useThree((s) => s.gl.domElement)
+  const dragBaseTransformRef = useRef<ReturnType<typeof cloneTransform> | null>(null)
+
+  if (!TRANSFORM_TOOLS.includes(activeTool)) return null
+
+  const syncFromGroup = () => {
+    const g = rootRef.current
+    if (!g) return
+    const next = transformFromObject3D(g)
+    const live = useAppStore.getState().objects.find((o) => o.id === object.id)
+    const current = live ? ensureTransform(live) : null
+    if (current && transformsEqual(next, current)) return
+    updateObjectTransform(object.id, next)
+  }
+
+  return (
+    <ThemedTransformControls
+      object={rootRef as RefObject<THREE.Object3D>}
+      domElement={glDomElement}
+      mode={toolToMode(activeTool)}
+      space="world"
+      size={1.2}
+      onMouseDown={() => {
+        draggingRef.current = true
+        dragBaseTransformRef.current = cloneTransform(ensureTransform(object))
+      }}
+      onMouseUp={() => {
+        draggingRef.current = false
+        const base = dragBaseTransformRef.current
+        const g = rootRef.current
+        if (base && g) {
+          const final = transformFromObject3D(g)
+          if (!transformsEqual(base, final)) {
+            syncFromGroup()
+            commitHistory('Transform')
+          }
+        }
+        dragBaseTransformRef.current = null
+      }}
+      onObjectChange={() => {
+        syncFromGroup()
+      }}
+    />
+  )
+}
+
 function ObjectNodeInner({
   object,
   isSelected,
@@ -109,19 +168,11 @@ function ObjectNodeInner({
 }: ObjectNodeProps) {
   const rootRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
-  const dragBaseTransformRef = useRef<ReturnType<typeof cloneTransform> | null>(null)
-  const activeTool = useAppStore((s) => s.activeTool)
-  const updateObjectTransform = useAppStore((s) => s.updateObjectTransform)
-  const commitHistory = useAppStore((s) => s.commitHistory)
-  const glDomElement = useThree((s) => s.gl.domElement)
 
   const tr = ensureTransform(object)
   const pivot = getObjectPivot(object)
   const showObjectGizmo =
-    isGizmoTarget &&
-    isSelected &&
-    selectionMode === 'object' &&
-    TRANSFORM_TOOLS.includes(activeTool)
+    isGizmoTarget && isSelected && selectionMode === 'object'
 
   useEffect(() => {
     const g = rootRef.current
@@ -137,16 +188,6 @@ function ObjectNodeInner({
     registerPickTarget(object.id, g)
     return () => unregisterPickTarget(object.id)
   }, [object.id])
-
-  const syncFromGroup = () => {
-    const g = rootRef.current
-    if (!g) return
-    const next = transformFromObject3D(g)
-    const live = useAppStore.getState().objects.find((o) => o.id === object.id)
-    const current = live ? ensureTransform(live) : null
-    if (current && transformsEqual(next, current)) return
-    updateObjectTransform(object.id, next)
-  }
 
   return (
     <>
@@ -172,33 +213,7 @@ function ObjectNodeInner({
       </group>
 
       {showObjectGizmo && (
-        <ThemedTransformControls
-          object={rootRef as RefObject<THREE.Object3D>}
-          domElement={glDomElement}
-          mode={toolToMode(activeTool)}
-          space="world"
-          size={1.2}
-          onMouseDown={() => {
-            draggingRef.current = true
-            dragBaseTransformRef.current = cloneTransform(ensureTransform(object))
-          }}
-          onMouseUp={() => {
-            draggingRef.current = false
-            const base = dragBaseTransformRef.current
-            const g = rootRef.current
-            if (base && g) {
-              const final = transformFromObject3D(g)
-              if (!transformsEqual(base, final)) {
-                syncFromGroup()
-                commitHistory('Transform')
-              }
-            }
-            dragBaseTransformRef.current = null
-          }}
-          onObjectChange={() => {
-            syncFromGroup()
-          }}
-        />
+        <ObjectTransformGizmo object={object} rootRef={rootRef} draggingRef={draggingRef} />
       )}
     </>
   )

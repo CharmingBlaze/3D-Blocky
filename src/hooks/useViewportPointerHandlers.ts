@@ -42,6 +42,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { ObjectTransform } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SculptTool } from '../sculpt/sculptTools'
+import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import { cloneTransform, ensureTransform, localPointFromWorld, selectionWorldCenter } from '../mesh/objectTransform'
 import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
@@ -1713,6 +1714,9 @@ export function useViewportPointerHandlers({
         }
         if (componentDragRef.current?.moved) {
           commitHistory('Move components')
+        }
+        if (SCULPT_TOOLS.includes(storeAtUp.activeTool)) {
+          clearSculptSession(storeAtUp.selectedObjectId ?? undefined)
         }
         selectDragRef.current = null
         componentDragRef.current = null

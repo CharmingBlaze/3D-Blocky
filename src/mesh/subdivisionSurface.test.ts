@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { primitiveBoxToSceneObject } from '../primitives/primitiveBoxCommit'
 import { heightAxisForView } from '../primitives/viewAxes'
+import { HalfEdgeMesh } from './HalfEdgeMesh'
 import { prepareSceneObject } from './objectTransform'
 import {
   subdivideSurfaceLevels,
@@ -51,5 +52,38 @@ describe('subdivisionSurface', () => {
     }
     expect(maxX - minX).toBeLessThan(8)
     expect(maxX - minX).toBeGreaterThan(3)
+  })
+
+  it('SubD preview strips UVs (viewport must not texture the preview)', () => {
+    const obj = prepareSceneObject(
+      primitiveBoxToSceneObject(
+        'box',
+        { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } },
+        heightAxisForView('front'),
+        0xffffff,
+        64
+      )!
+    )
+    expect(obj.uvs?.length).toBeGreaterThan(0)
+    const preview = subdivideSurfaceLevels(obj, 1)
+    expect(preview.uvs).toBeUndefined()
+    expect(preview.faceUvIndices).toBeUndefined()
+  })
+
+  it('toObject preserves SubD modifier flags from meta', () => {
+    const obj = prepareSceneObject(
+      primitiveBoxToSceneObject(
+        'box',
+        { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } },
+        heightAxisForView('front'),
+        0xffffff,
+        64
+      )!
+    )
+    const withSubd = { ...obj, subdEnabled: true, subdLevels: 2 }
+    const mesh = HalfEdgeMesh.fromObject(withSubd)
+    const roundTrip = mesh.toObject(withSubd.id, withSubd.name, withSubd)
+    expect(roundTrip.subdEnabled).toBe(true)
+    expect(roundTrip.subdLevels).toBe(2)
   })
 })
