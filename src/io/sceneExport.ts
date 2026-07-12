@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js'
 import { STLExporter } from 'three/addons/exporters/STLExporter.js'
-import type { SceneObject } from '../mesh/HalfEdgeMesh'
+import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { resolveEffectiveMaterial } from '../material/materials'
 import {
   bakeSceneObjectForExport,
@@ -64,6 +64,7 @@ export function exportSceneOBJ(
   let mtlText = `# ${APP_NAME} Materials\n`
   let vertexOffset = 0
   let uvOffset = 0
+  let normalOffset = 0
   const materialNames = new Map<string, string>()
 
   for (const raw of objects) {
@@ -78,9 +79,12 @@ export function exportSceneOBJ(
       effMat.mode === 'texture' &&
       withUvs.uvs?.length &&
       withUvs.faceUvIndices?.length
+    const writeSmoothNormals = Boolean(withUvs.smoothShading)
 
     objText += `\no ${withUvs.name}\n`
     objText += `g ${withUvs.name}\n`
+    // Blender reads Wavefront smooth groups — keep shared topology so Shade Smooth works.
+    objText += writeSmoothNormals ? `s 1\n` : `s off\n`
 
     for (const pos of withUvs.positions) {
       objText += `v ${pos.x.toFixed(6)} ${pos.y.toFixed(6)} ${pos.z.toFixed(6)}\n`
@@ -90,6 +94,35 @@ export function exportSceneOBJ(
       for (const uv of withUvs.uvs) {
         objText += `vt ${uv.u.toFixed(6)} ${uv.v.toFixed(6)}\n`
       }
+    }
+
+    let vertexNormals: { x: number; y: number; z: number }[] | null = null
+    if (writeSmoothNormals) {
+      const heMesh = HalfEdgeMesh.fromObject(withUvs)
+      vertexNormals = withUvs.positions.map((_, vi) => heMesh.getVertexNormal(vi, true))
+      for (const n of vertexNormals) {
+        objText += `vn ${n.x.toFixed(6)} ${n.y.toFixed(6)} ${n.z.toFixed(6)}\n`
+      }
+    }
+
+    const formatFaceCorner = (vi: number, ci: number, uvFace: number[]) => {
+      const v = vi + 1 + vertexOffset
+      if (hasTexture && writeSmoothNormals) {
+        const uvIdx = uvFace[ci] ?? 0
+        const vt = uvIdx + 1 + uvOffset
+        const vn = vi + 1 + normalOffset
+        return `${v}/${vt}/${vn}`
+      }
+      if (hasTexture) {
+        const uvIdx = uvFace[ci] ?? 0
+        const vt = uvIdx + 1 + uvOffset
+        return `${v}/${vt}`
+      }
+      if (writeSmoothNormals) {
+        const vn = vi + 1 + normalOffset
+        return `${v}//${vn}`
+      }
+      return `${v}`
     }
 
     if (hasTexture) {
@@ -110,14 +143,7 @@ export function exportSceneOBJ(
       for (let fi = 0; fi < withUvs.faces.length; fi++) {
         const face = withUvs.faces[fi]!
         const uvFace = withUvs.faceUvIndices?.[fi] ?? []
-        const corners = face
-          .map((vi, ci) => {
-            const v = vi + 1 + vertexOffset
-            const uvIdx = uvFace[ci] ?? 0
-            const vt = uvIdx + 1 + uvOffset
-            return `${v}/${vt}`
-          })
-          .join(' ')
+        const corners = face.map((vi, ci) => formatFaceCorner(vi, ci, uvFace)).join(' ')
         objText += `f ${corners}\n`
       }
     } else {
@@ -145,14 +171,15 @@ export function exportSceneOBJ(
         objText += `usemtl ${mtlName}\n`
         for (const fi of faceIndices) {
           const face = withUvs.faces[fi]!
-          const indices = face.map((vi) => vi + 1 + vertexOffset).join(' ')
-          objText += `f ${indices}\n`
+          const corners = face.map((vi, ci) => formatFaceCorner(vi, ci, [])).join(' ')
+          objText += `f ${corners}\n`
         }
       }
     }
 
     vertexOffset += withUvs.positions.length
     if (hasTexture && withUvs.uvs) uvOffset += withUvs.uvs.length
+    if (vertexNormals) normalOffset += vertexNormals.length
   }
 
   return { obj: objText, mtl: mtlText }

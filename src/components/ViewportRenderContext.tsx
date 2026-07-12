@@ -16,11 +16,11 @@ export function useViewportRender(): ViewportRenderState {
   return useContext(ViewportRenderContext)
 }
 
-/** Schedule a draw for visible viewports only (demand frameloop). */
+/** Schedule a draw for visible viewports (safe under both demand and always). */
 export function requestViewportFrame(
   invalidate: () => void,
   layoutVisible: boolean,
-  continuousFrames: boolean
+  _continuousFrames?: boolean
 ): void {
-  if (layoutVisible && !continuousFrames) invalidate()
+  if (layoutVisible) invalidate()
 }

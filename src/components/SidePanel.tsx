@@ -1244,7 +1244,7 @@ export function SidePanel() {
                   !selectionHasComponents(meshSelection) ||
                   !!selectedObj?.topologyLocked
                 }
-                title="Duplicate selected faces with reversed normals and identical UV coordinates to make them double-sided"
+                title="Face mode: select one or more faces, then duplicate them with reversed normals (shared UVs) so they render from both sides"
               >
                 Double Sided
               </button>

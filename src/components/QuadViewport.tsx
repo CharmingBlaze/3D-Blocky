@@ -469,10 +469,10 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
     cadPreview.meshModal != null ||
     cadPreview.objectTransformModal != null
 
-  // Continuous only while interacting or while the focused slot has a live CAD/tool preview.
-  // Idle focused slots stay on demand — OrbitControls push/pop covers damping (~260ms).
+  // Any live edit/preview/interaction: all *visible* viewports run continuous frames so
+  // ortho peers stay in sync. Idle slots stay on demand (no always-on 4× cost).
   const continuousFrames =
-    layoutVisible && (interactionActive || (isActive && cadPreviewActive))
+    layoutVisible && (interactionActive || cadPreviewActive)
 
   const handleSelectView = useCallback(
     (nextView: SelectableViewType) => {
@@ -771,14 +771,14 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
           />
         )}
 
-        {(isActiveViewport && (activeTool === 'primitive-box' || primitiveBoxDraft)) && (
+        {(activeTool === 'primitive-box' || primitiveBoxDraft) && (
           <PrimitiveBoxCanvas />
         )}
-        {isActiveViewport && activeTool === 'poly-draw' && <PolyDrawVisuals />}
-        {isActiveViewport && activeTool === 'knife' && <KnifeVisuals />}
-        {isActiveViewport && activeTool === 'bend' && <BendVisuals />}
-        {isActiveViewport && activeTool === 'loop-cut' && <LoopCutVisuals />}
-        {isActiveViewport && <DrawVertexOverlay />}
+        {activeTool === 'poly-draw' && <PolyDrawVisuals />}
+        {activeTool === 'knife' && <KnifeVisuals />}
+        {activeTool === 'bend' && <BendVisuals />}
+        {activeTool === 'loop-cut' && <LoopCutVisuals />}
+        <DrawVertexOverlay />
         {billboardImages.length > 0 && <BillboardImages />}
 
         {view !== 'perspective' && (

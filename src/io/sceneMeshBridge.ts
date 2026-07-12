@@ -72,9 +72,10 @@ export function sceneObjectToThreeMesh(
   const useTexture =
     Boolean(options?.textures?.pixelDocuments[texId]) && effMat.mode === 'texture'
   const source = useTexture ? resolveExportObjectWithUvs(obj) : obj
+  const flatShading = !source.smoothShading
 
   const mesh = HalfEdgeMesh.fromObject(source)
-  const data = mesh.toMeshData(true, source.facetExaggeration ?? 0)
+  const data = mesh.toMeshData(flatShading, source.facetExaggeration ?? 0)
 
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3))
@@ -93,7 +94,15 @@ export function sceneObjectToThreeMesh(
     }
     geometry.setAttribute('uv', new THREE.BufferAttribute(exportUvs, 2))
   }
-  setFlatNormalsFromIndices(geometry)
+  // Match viewport: smooth uses topology-averaged normals on welded verts so Blender
+  // Shade Smooth / custom normals look correct. Flat still uses per-face normals.
+  if (flatShading) {
+    setFlatNormalsFromIndices(geometry)
+  } else if (data.normals && data.normals.length === data.positions.length) {
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3))
+  } else {
+    geometry.computeVertexNormals()
+  }
 
   let material: THREE.MeshStandardMaterial
   if (useTexture && options?.textures) {
@@ -103,7 +112,7 @@ export function sceneObjectToThreeMesh(
       color: 0xffffff,
       metalness: 0.05,
       roughness: 0.85,
-      flatShading: true,
+      flatShading,
       transparent: true,
       opacity: effMat.opacity,
       alphaTest: 0.02,
@@ -115,7 +124,7 @@ export function sceneObjectToThreeMesh(
       color: data.faceColors.length > 0 ? 0xffffff : source.color,
       metalness: 0.05,
       roughness: 0.85,
-      flatShading: true,
+      flatShading,
       transparent: effMat.opacity < 0.999,
       opacity: effMat.opacity,
       side: effMat.doubleSided ? THREE.DoubleSide : THREE.FrontSide,

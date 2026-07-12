@@ -138,6 +138,7 @@ type ToolStore = ToolActivationLayoutState & {
   simplifySelected: () => void
   subdivideSelected: () => void
   flipSelectedNormals: () => void
+  makeSelectedDoubleSided: () => void
   toggleSubDSelected: () => void
   setSelectionSmoothShading: (smooth: boolean) => void
   toggleUvEditor: () => void
@@ -288,6 +289,9 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
               return true
             case 'flip-normals':
               store().flipSelectedNormals()
+              return true
+            case 'double-sided':
+              store().makeSelectedDoubleSided()
               return true
             case 'subd':
               store().toggleSubDSelected()

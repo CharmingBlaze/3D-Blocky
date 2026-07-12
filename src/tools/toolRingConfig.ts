@@ -97,6 +97,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'tool', tool: 'loop-cut', label: 'Loop Cut (Ctrl+R)' },
     { kind: 'action', id: 'subdivide', label: 'Subdivide' },
     { kind: 'action', id: 'flip-normals', label: 'Flip Normals' },
+    { kind: 'action', id: 'double-sided', label: 'Double Sided' },
     { kind: 'action', id: 'subd', label: 'Toggle SubD' },
     { kind: 'action', id: 'shade-flat', label: 'Shade Flat' },
     { kind: 'action', id: 'shade-smooth', label: 'Shade Smooth' },
@@ -161,6 +162,7 @@ export function isToolRingEntryDisabled(state: ToolRingStateSlice, entry: ToolRi
       case 'shade-flat':
         return !hasObjectSelection || topologyLocked
       case 'flip-normals':
+      case 'double-sided':
         return state.selectionMode === 'object' || !hasMeshComponents || topologyLocked
       case 'knife':
       case 'loop-cut':

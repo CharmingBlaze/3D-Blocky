@@ -210,13 +210,29 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       if (!meshSelection || selectionMode === 'object') return
       const obj = objects.find((o) => o.id === meshSelection.objectId)
       if (!obj || obj.topologyLocked) return
-      const updated = makeSelectionDoubleSided(obj, meshSelection, selectionMode)
+      const { object: updated, addedFaces } = makeSelectionDoubleSided(
+        obj,
+        meshSelection,
+        selectionMode
+      )
+      if (addedFaces.length === 0) return
       store().updateObject(obj.id, {
         faces: updated.faces,
         faceUvIndices: updated.faceUvIndices,
+        faceColorIndices: updated.faceColorIndices,
         faceColors: updated.faceColors,
         faceGroups: updated.faceGroups,
+        faceMaterials: updated.faceMaterials,
       })
+      // Keep original selection and include the new back faces for multi-select follow-up.
+      if (selectionMode === 'face') {
+        setPartial({
+          meshSelection: {
+            ...meshSelection,
+            faces: [...new Set([...meshSelection.faces, ...addedFaces])],
+          },
+        })
+      }
       store().commitHistory('Make double sided')
     },
 

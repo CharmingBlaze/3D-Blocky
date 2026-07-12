@@ -8,6 +8,7 @@ import type { SelectionMode } from '../store/appStore'
 import { cloneSceneObject } from './meshOps'
 import { type Vec3, faceNormal, sub3, dot3 } from '../utils/math'
 import { remapFaceGroupsAfterReplace, splitFaceGroupsAfterCut } from './faceGroups'
+import { cloneMaterial } from '../material/materialTypes'
 
 export function removeUnreferencedVertices(obj: SceneObject): SceneObject {
   const used = new Set<number>()
@@ -639,13 +640,39 @@ export function mergeVertices(
   }
 }
 
+/** True if `faces` already contains a reverse-wound copy of `face` (any start corner). */
+function hasReverseWoundFace(faces: number[][], face: number[]): boolean {
+  if (face.length < 3) return false
+  const rev = [...face].reverse()
+  for (const other of faces) {
+    if (other.length !== rev.length) continue
+    for (let start = 0; start < other.length; start++) {
+      let match = true
+      for (let i = 0; i < rev.length; i++) {
+        if (other[(start + i) % other.length] !== rev[i]) {
+          match = false
+          break
+        }
+      }
+      if (match) return true
+    }
+  }
+  return false
+}
+
+export interface MakeDoubleSidedResult {
+  object: SceneObject
+  /** New back-face indices appended to the mesh. */
+  addedFaces: number[]
+}
+
 /** Duplicate selected faces with reversed winding to make them double-sided, sharing UVs. */
 export function makeSelectionDoubleSided(
   obj: SceneObject,
   selection: MeshComponentSelection | null,
   mode: SelectionMode
-): SceneObject {
-  if (!selection) return cloneSceneObject(obj)
+): MakeDoubleSidedResult {
+  if (!selection) return { object: cloneSceneObject(obj), addedFaces: [] }
 
   let faceSet: Set<number>
   if (mode === 'face' && selection.faces.length > 0) {
@@ -655,44 +682,78 @@ export function makeSelectionDoubleSided(
   } else if (mode === 'vertex' && selection.vertices.length > 0) {
     faceSet = collectFacesForSelection(obj, selection, 'vertex')
   } else {
-    faceSet = new Set(obj.faces.map((_, i) => i))
+    return { object: cloneSceneObject(obj), addedFaces: [] }
   }
 
-  if (faceSet.size === 0) return cloneSceneObject(obj)
+  if (faceSet.size === 0) return { object: cloneSceneObject(obj), addedFaces: [] }
 
-  const newFaces = [...obj.faces]
-  const newFaceUvIndices = obj.faceUvIndices ? [...obj.faceUvIndices] : undefined
-  const newFaceColors = obj.faceColors ? [...obj.faceColors] : undefined
-  const newFaceGroups = obj.faceGroups ? [...obj.faceGroups] : undefined
+  const newFaces = obj.faces.map((f) => [...f])
+  const newFaceUvIndices = obj.faceUvIndices?.map((f) => [...f])
+  const newFaceColorIndices = obj.faceColorIndices?.map((f) => [...f])
+  const newFaceColors = [...obj.faceColors]
+  const newFaceMaterials = obj.faceMaterials?.map((m) => (m ? cloneMaterial(m) : null))
+  const newFaceGroups = obj.faceGroups?.map((g) => [...g])
+  const addedFaces: number[] = []
 
-  // For each face in the set, duplicate it with reversed winding
-  const n = obj.faces.length
-  for (let fi = 0; fi < n; fi++) {
-    if (faceSet.has(fi)) {
-      const origFace = obj.faces[fi]
-      const revFace = [...origFace].reverse()
-      newFaces.push(revFace)
+  const selected = [...faceSet].sort((a, b) => a - b)
+  for (const fi of selected) {
+    const origFace = obj.faces[fi]
+    if (!origFace || origFace.length < 3) continue
+    if (hasReverseWoundFace(newFaces, origFace)) continue
 
-      if (newFaceColors && obj.faceColors?.[fi]) {
-        newFaceColors.push(obj.faceColors[fi])
+    const revFace = [...origFace].reverse()
+    const newFi = newFaces.length
+    newFaces.push(revFace)
+    addedFaces.push(newFi)
+
+    newFaceColors.push(obj.faceColors[fi] ?? obj.color)
+
+    if (newFaceUvIndices && obj.faceUvIndices?.[fi]) {
+      newFaceUvIndices.push([...obj.faceUvIndices[fi]!].reverse())
+    } else if (newFaceUvIndices) {
+      // Keep parallel array length even if this face had no UVs.
+      newFaceUvIndices.push([])
+    }
+
+    if (newFaceColorIndices && obj.faceColorIndices?.[fi]) {
+      newFaceColorIndices.push([...obj.faceColorIndices[fi]!].reverse())
+    } else if (newFaceColorIndices) {
+      newFaceColorIndices.push([])
+    }
+
+    if (newFaceMaterials) {
+      const mat = obj.faceMaterials?.[fi]
+      newFaceMaterials.push(mat ? cloneMaterial(mat) : null)
+    }
+
+    if (newFaceGroups) {
+      // Keep front+back in the same authored group when present; otherwise own group.
+      let grouped = false
+      for (const group of newFaceGroups) {
+        if (group.includes(fi)) {
+          group.push(newFi)
+          grouped = true
+          break
+        }
       }
-      if (newFaceGroups && obj.faceGroups?.[fi] !== undefined) {
-        newFaceGroups.push(obj.faceGroups[fi])
-      }
-
-      if (newFaceUvIndices && obj.faceUvIndices?.[fi]) {
-        const origUv = obj.faceUvIndices[fi]
-        const revUv = [...origUv].reverse()
-        newFaceUvIndices.push(revUv)
-      }
+      if (!grouped) newFaceGroups.push([newFi])
     }
   }
 
+  if (addedFaces.length === 0) {
+    return { object: cloneSceneObject(obj), addedFaces: [] }
+  }
+
   return {
-    ...obj,
-    faces: newFaces,
-    faceColors: newFaceColors ?? obj.faceColors,
-    faceGroups: newFaceGroups ?? obj.faceGroups,
-    faceUvIndices: newFaceUvIndices,
+    object: {
+      ...obj,
+      faces: newFaces,
+      faceColors: newFaceColors,
+      faceGroups: newFaceGroups ?? obj.faceGroups,
+      faceUvIndices: newFaceUvIndices ?? obj.faceUvIndices,
+      faceColorIndices: newFaceColorIndices ?? obj.faceColorIndices,
+      faceMaterials: newFaceMaterials ?? obj.faceMaterials,
+    },
+    addedFaces,
   }
 }
