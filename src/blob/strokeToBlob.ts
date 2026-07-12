@@ -3,7 +3,7 @@ import type { PolylineInput } from '../stroke/polylineToMesh'
 import { polylineToMesh } from '../stroke/polylineToMesh'
 import { softSketchDoodleToObject } from '../stroke/sketchDoodle'
 
-/** Blob-mode stroke — same silhouette as the drawn path, with faceted shading. */
+/** Blob-mode stroke — soft inflated doodle volume (independent of Outline). */
 export function blobStrokeToObject(input: PolylineInput): SceneObject | null {
   if (input.extrudeMode) {
     return polylineToMesh({

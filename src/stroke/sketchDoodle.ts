@@ -1,14 +1,15 @@
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import { generateSoftInflateDome } from '../mesh/softInflate'
-import { extrudeSilhouette } from '../mesh/silhouetteExtrude'
 import { generateTube } from '../mesh/extrusion'
+import { extrudeSilhouette, strokeToFlatOutline } from '../mesh/silhouetteExtrude'
 import { generateId, type Vec2 } from '../utils/math'
 import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
 import { orientTubeFacesOutward } from '../mesh/extrusion'
 import { ensureClosedMeshOutward } from '../mesh/meshWinding'
 import { resampleUniform, resampleUniformClosed } from './strokeCapture'
 import { classifyStroke } from './strokeClassifier'
+import { curvatureSampleClosedLoop } from './rdp'
 import type { PolylineInput } from './polylineToMesh'
 import type { SketchDoodleKind, SketchSource } from './sketchSource'
 
@@ -317,6 +318,38 @@ function buildOpenSoftTube(relative: Vec2[], brushDensity: number): HalfEdgeMesh
   })
 }
 
+/** Filled flat silhouette from a closed outline, or a filled ribbon from an open stroke. */
+function outlineBoundaryBudget(polyBudget: number, pointCount: number, closed: boolean): number {
+  // Flat extrude doubles verts (front+back); keep boundary low–mid poly.
+  const hardCap = closed ? 20 : 14
+  const fromBudget = Math.floor(polyBudget / (closed ? 6 : 8))
+  return Math.max(closed ? 8 : 4, Math.min(pointCount, fromBudget, hardCap))
+}
+
+function buildFilledOutline(
+  relative: Vec2[],
+  brushDensity: number,
+  extrudeDepth: number,
+  closed: boolean,
+  color: number,
+  polyBudget: number
+): HalfEdgeMesh | null {
+  const depth = Math.max(4, extrudeDepth)
+  if (closed) {
+    if (relative.length < 3) return null
+    const maxBoundary = outlineBoundaryBudget(polyBudget, relative.length, true)
+    const boundary = curvatureSampleClosedLoop(relative, 18, maxBoundary)
+    if (boundary.length < 3) return null
+    return extrudeSilhouette(boundary, { depth, color })
+  }
+  const maxPath = outlineBoundaryBudget(polyBudget, relative.length, false)
+  const path = relative.length <= maxPath ? relative : capBoundaryPoints(relative, maxPath)
+  const halfWidth = Math.max(2.5, brushDensity * 0.4)
+  const ribbon = strokeToFlatOutline(path, halfWidth)
+  if (!ribbon || ribbon.length < 3) return null
+  return extrudeSilhouette(ribbon, { depth, color })
+}
+
 function finalizeSketchMesh(
   mesh: HalfEdgeMesh,
   center: Vec2,
@@ -417,6 +450,48 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
     source,
     false,
     isClosed ? undefined : prepared.points
+  )
+}
+
+/** Filled silhouette from the drawn outline — flat sides, not a soft blob or path tube. */
+export function outlineSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    name,
+  } = input
+
+  if (points.length < 2 || view === 'perspective') return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    pathClosed: input.pathClosed,
+  })
+  if (!prepared) return null
+
+  const { relative, center, isClosed } = prepared
+  const extrudeDepth = resolveExtrudeDepth(input, brushDensity)
+  const mesh = buildFilledOutline(relative, brushDensity, extrudeDepth, isClosed, color, polyBudget)
+
+  if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const doodleName = name ?? (isClosed ? 'Outline' : 'Outline Path')
+  const source = makeSketchSource(prepared, input, 'outline', extrudeDepth)
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    doodleName,
+    source,
+    false
   )
 }
 

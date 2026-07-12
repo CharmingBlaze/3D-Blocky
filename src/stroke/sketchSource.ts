@@ -4,6 +4,7 @@ import { generateCapsulePillow } from '../mesh/capsulePillow'
 import { generateCapsuleSweep } from '../mesh/extrusion'
 import { ensureCCW } from '../mesh/concaveTriangulate'
 import { generateSoftInflateDome } from '../mesh/softInflate'
+import { extrudeSilhouette, strokeToFlatOutline } from '../mesh/silhouetteExtrude'
 import type { ViewType } from '../store/appStore'
 import type { Vec2 } from '../utils/math'
 import { curvatureSampleClosedLoop } from './rdp'
@@ -16,7 +17,7 @@ import {
   VECTOR_PEN_RADIAL_SEGMENTS,
 } from '../vector/vectorPenLimits'
 
-export type SketchDoodleKind = 'soft' | 'sharp' | 'path'
+export type SketchDoodleKind = 'soft' | 'sharp' | 'path' | 'outline'
 
 /** Parametric data to rebuild a sketch doodle mesh. */
 export interface SketchSource {
@@ -75,6 +76,34 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     })
   }
 
+  if (kind === 'outline') {
+    const depth = Math.max(4, Math.abs(extrudeDepth))
+    const hardCap = isClosed ? 20 : 14
+    const fromBudget = Math.floor(polyBudget / (isClosed ? 6 : 8))
+    const maxBoundary = Math.max(isClosed ? 8 : 4, Math.min(relative.length, fromBudget, hardCap))
+    if (isClosed) {
+      if (relative.length < 3) return null
+      const boundary = curvatureSampleClosedLoop(ensureCCW(relative), 18, maxBoundary)
+      if (boundary.length < 3) return null
+      return extrudeSilhouette(boundary, { depth, color })
+    }
+    const path =
+      relative.length <= maxBoundary
+        ? relative
+        : (() => {
+            const out: Vec2[] = []
+            const step = relative.length / maxBoundary
+            for (let i = 0; i < maxBoundary; i++) {
+              out.push(relative[Math.min(relative.length - 1, Math.round(i * step))]!)
+            }
+            return out
+          })()
+    const halfWidth = Math.max(2.5, brushDensity * 0.4)
+    const ribbon = strokeToFlatOutline(path, halfWidth)
+    if (!ribbon || ribbon.length < 3) return null
+    return extrudeSilhouette(ribbon, { depth, color })
+  }
+
   if (!isClosed) {
     return generateCapsuleSweep(relative, {
       radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
@@ -130,7 +159,9 @@ export function regenerateSketchObject(obj: SceneObject, extrudeDepth: number): 
   offsetMeshInPlane(mesh, source.center.x, source.center.y)
   projectMeshToView(mesh, source.view, source.defaultDepth)
 
-  if (!source.isClosed) {
+  if (source.kind === 'outline' || (source.isClosed && source.kind !== 'path')) {
+    ensureClosedMeshOutward(mesh)
+  } else {
     const planePath = source.relative.map((p) => ({
       x: p.x + source.center.x,
       y: p.y + source.center.y,
@@ -139,8 +170,6 @@ export function regenerateSketchObject(obj: SceneObject, extrudeDepth: number): 
       mesh,
       planePathToWorld(planePath, source.view, source.defaultDepth)
     )
-  } else {
-    ensureClosedMeshOutward(mesh)
   }
 
   const nextSource: SketchSource = { ...source, extrudeDepth }

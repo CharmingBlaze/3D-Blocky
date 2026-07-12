@@ -12,11 +12,13 @@ function KnifeSquare({
   fill,
   outline = '#111111',
   sizePx,
+  glow = false,
 }: {
   position: [number, number, number]
   fill: string
   outline?: string
   sizePx: number
+  glow?: boolean
 }) {
   const groupRef = useRef<THREE.Group>(null)
   const { camera, size } = useThree()
@@ -39,6 +41,12 @@ function KnifeSquare({
 
   return (
     <group ref={groupRef} position={position} renderOrder={32}>
+      {glow && (
+        <mesh renderOrder={30}>
+          <planeGeometry args={[2.3, 2.3]} />
+          <meshBasicMaterial color={fill} transparent opacity={0.22} depthTest={false} toneMapped={false} />
+        </mesh>
+      )}
       <mesh renderOrder={31} position={[0, 0, -0.02]}>
         <planeGeometry args={[1.4, 1.4]} />
         <meshBasicMaterial color={outline} depthTest={false} toneMapped={false} />
@@ -66,10 +74,10 @@ function dashSizes(pts: [number, number, number][]): { dash: number; gap: number
 
 /**
  * Blockbench-like knife overlay:
- * square vertex markers, perforated preview line, green hover when snapped to an edge.
+ * square vertex markers, high-contrast preview path, and clear snap feedback.
  */
 export function KnifeVisuals() {
-  const { accent, accentGreen } = useTheme()
+  const { accent, accentGreen, accentOrange } = useTheme()
   const { knifeDraft, activeTool } = useAppStore(
     useShallow((s) => ({
       knifeDraft: s.knifeDraft,
@@ -85,6 +93,7 @@ export function KnifeVisuals() {
   }, [accent])
 
   const snapGreen = accentGreen && accentGreen !== '#000000' ? accentGreen : '#2fd15a'
+  const snapOrange = accentOrange && accentOrange !== '#000000' ? accentOrange : '#ffb347'
 
   if (activeTool !== 'knife' || !knifeDraft) return null
 
@@ -111,37 +120,35 @@ export function KnifeVisuals() {
   const previewDash = Math.max(0.06, dash * 1.05)
   const previewGap = Math.max(0.05, gap * 1.15)
 
-  // Bright green square when hovering an edge/vertex — the main snap cue.
   const snapped = hover?.snap === 'edge' || hover?.snap === 'vertex'
-  const hoverFill = snapped ? snapGreen : lineColor
+  const hoverFill =
+    hover?.snap === 'vertex' ? '#ffffff' : hover?.snap === 'edge' ? snapGreen : snapOrange
 
   return (
     <group renderOrder={28}>
       {confirmedPath.length >= 2 && (
-        <Line
-          points={confirmedPath}
-          color={lineColor}
-          lineWidth={2.4}
-          depthTest={false}
-          transparent
-          opacity={1}
-          toneMapped={false}
-        />
+        <>
+          <Line points={confirmedPath} color="#080a0e" lineWidth={5.2} depthTest={false} transparent opacity={0.85} toneMapped={false} />
+          <Line points={confirmedPath} color={lineColor} lineWidth={2.2} depthTest={false} transparent opacity={1} toneMapped={false} />
+        </>
       )}
 
       {previewSegment && (
-        <Line
-          points={previewSegment}
-          color={lineColor}
-          lineWidth={2.1}
-          dashed
-          dashSize={previewDash}
-          gapSize={previewGap}
-          depthTest={false}
-          transparent
-          opacity={0.98}
-          toneMapped={false}
-        />
+        <>
+          <Line points={previewSegment} color="#080a0e" lineWidth={4.6} depthTest={false} transparent opacity={0.78} toneMapped={false} />
+          <Line
+            points={previewSegment}
+            color={hoverFill}
+            lineWidth={2.2}
+            dashed
+            dashSize={previewDash}
+            gapSize={previewGap}
+            depthTest={false}
+            transparent
+            opacity={1}
+            toneMapped={false}
+          />
+        </>
       )}
 
       {placed.map((p, i) => (
@@ -150,7 +157,7 @@ export function KnifeVisuals() {
           position={[p.world.x, p.world.y, p.world.z]}
           fill="#141414"
           outline="#f5f5f5"
-          sizePx={6}
+          sizePx={7}
         />
       ))}
 
@@ -159,7 +166,8 @@ export function KnifeVisuals() {
           position={[hover.world.x, hover.world.y, hover.world.z]}
           fill={hoverFill}
           outline="#111111"
-          sizePx={snapped ? 9 : 6}
+          sizePx={snapped ? 10 : 7}
+          glow={snapped}
         />
       )}
     </group>

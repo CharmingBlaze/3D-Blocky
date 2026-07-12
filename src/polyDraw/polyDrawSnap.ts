@@ -4,7 +4,8 @@ import type { PolyDrawDraftPoint, PolyDrawPointSnap } from '../store/appStore'
 import type { Vec3 } from '../utils/math'
 import { worldPointFromObject } from '../mesh/objectTransform'
 
-export const POLY_DRAW_SNAP_RADIUS_PX = 14
+/** Generous enough for trackpads without making nearby vertices feel ambiguous. */
+export const POLY_DRAW_SNAP_RADIUS_PX = 20
 
 export interface PolyDrawSnapTarget {
   world: Vec3

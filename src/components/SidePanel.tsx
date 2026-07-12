@@ -29,9 +29,9 @@ import { resolveTargetObjectIds } from '../material/materialEditorSlice'
 import { computeSelectionFitFrame } from '../viewport/fitViewports'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
-  { id: 'outline', label: 'Outline', hint: 'Paint 3D soft doodle — close the loop to inflate a 3D shape' },
+  { id: 'outline', label: 'Outline', hint: 'Draw a closed outline → filled flat 3D shape' },
   { id: 'centerline', label: 'Path', hint: 'Open stroke → rounded tube path' },
-  { id: 'blob', label: 'Blob', hint: 'Low-poly faceted volume (alternative doodle style)' },
+  { id: 'blob', label: 'Blob', hint: 'Soft inflated volume — close the loop to fill a 3D shape' },
   {
     id: 'capsule',
     label: 'Capsule',
@@ -763,28 +763,19 @@ export function SidePanel() {
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
-            <SideBtnGroup cols={2}>
-              <button
-                className={`side-btn ${drawInputMode === 'regular' ? 'active' : ''}`}
-                onClick={() => setDrawInputMode('regular')}
-                title="Freehand sketch (D)"
-              >
-                Sketch
-              </button>
-              <button
-                className={`side-btn ${drawInputMode === 'vector-pen' ? 'active' : ''}`}
-                onClick={() => setDrawInputMode('vector-pen')}
-                title="Illustrator-style pen (V)"
-              >
-                Vector Pen
-              </button>
+            <SideBtnGroup cols={3}>
+              {POLY_DRAW_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`side-btn ${activeTool === 'poly-draw' && polyDrawMode === m.id ? 'active' : ''}`}
+                  onClick={() => setPolyDrawMode(m.id)}
+                  title={`Keep drawing connected ${m.label.toLowerCase()} faces`}
+                >
+                  {m.label}
+                </button>
+              ))}
             </SideBtnGroup>
-            {drawInputMode === 'vector-pen' && (
-              <p className="side-color-hint muted">
-                Click to add points · drag for curves · click first point to close · edit
-                anchors/handles · Enter or double-click commits to 3D · Esc cancels
-              </p>
-            )}
             <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
                 <input
@@ -842,33 +833,44 @@ export function SidePanel() {
                 onSelect={handleShapeKindChange}
               />
             </div>
-            <SideBtnGroup cols={3}>
-              {POLY_DRAW_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={`side-btn ${activeTool === 'poly-draw' && polyDrawMode === m.id ? 'active' : ''}`}
-                  onClick={() => setPolyDrawMode(m.id)}
-                  title={`Poly draw · ${m.label}`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </SideBtnGroup>
             {activeTool === 'poly-draw' && (
               <>
-                <label className="side-checkbox" title="Snap to vertices on all scene objects">
+                <label className="side-checkbox" title="Show and snap to vertices on every scene object">
                   <input
                     type="checkbox"
                     checked={polyDrawSnapAllScene}
                     onChange={(e) => setPolyDrawSnapAllScene(e.target.checked)}
                   />
-                  <span>Snap all objects</span>
+                  <span>Show &amp; snap all vertices</span>
                 </label>
                 <p className="side-color-hint muted">
-                  Click points in any view. Snap to vertices to weld faces. Enter or close loop to finish poly. F flips last face normal. Esc cancels.
+                  {polyDrawMode === 'poly'
+                    ? 'Click vertices to build a face · click the first point or press Enter to finish · stays in Poly mode.'
+                    : `${polyDrawMode === 'triangle' ? 'Three' : 'Four'} clicks complete each face · snap to old vertices to grow one connected mesh · stays in ${polyDrawMode === 'triangle' ? 'Triangle' : 'Quad'} mode.`}
                 </p>
               </>
+            )}
+            <SideBtnGroup cols={2}>
+              <button
+                className={`side-btn ${drawInputMode === 'regular' ? 'active' : ''}`}
+                onClick={() => setDrawInputMode('regular')}
+                title="Freehand sketch (D)"
+              >
+                Sketch
+              </button>
+              <button
+                className={`side-btn ${drawInputMode === 'vector-pen' ? 'active' : ''}`}
+                onClick={() => setDrawInputMode('vector-pen')}
+                title="Illustrator-style pen (V)"
+              >
+                Vector Pen
+              </button>
+            </SideBtnGroup>
+            {drawInputMode === 'vector-pen' && (
+              <p className="side-color-hint muted">
+                Click to add points · drag for curves · click first point to close · edit
+                anchors/handles · Enter or double-click commits to 3D · Esc cancels
+              </p>
             )}
             <SideBtnGroup cols={4}>
               {STROKE_MODES.map((m) => (

@@ -8,9 +8,14 @@ import { triangulatePolygon } from '../mesh/geometry2d'
 import { useTheme } from '../theme/useTheme'
 import { hexToNumber } from '../theme/themes'
 
-function pointMarker(world: { x: number; y: number; z: number }, color: string, size = 0.42) {
+function pointMarker(
+  world: { x: number; y: number; z: number },
+  color: string,
+  size = 0.42,
+  key = `${world.x}-${world.y}-${world.z}-${color}-${size}`
+) {
   return (
-    <mesh key={`${world.x}-${world.y}-${world.z}-${color}-${size}`} position={[world.x, world.y, world.z]} renderOrder={25}>
+    <mesh key={key} position={[world.x, world.y, world.z]} renderOrder={25}>
       <sphereGeometry args={[size, 10, 10]} />
       <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.98} />
     </mesh>
@@ -18,13 +23,13 @@ function pointMarker(world: { x: number; y: number; z: number }, color: string, 
 }
 
 export function PolyDrawVisuals() {
-  const { accent, vertexIdle } = useTheme()
-  const placedColor = vertexIdle
+  const { accent, accentGreen, vertexHover } = useTheme()
   const edgeColor = accent
   const fillColor = hexToNumber(accent)
-  const { polyDrawDraft, activeTool } = useAppStore(
+  const { polyDrawDraft, polyDrawHover, activeTool } = useAppStore(
     useShallow((s) => ({
       polyDrawDraft: s.polyDrawDraft,
+      polyDrawHover: s.polyDrawHover,
       activeTool: s.activeTool,
     }))
   )
@@ -74,17 +79,20 @@ export function PolyDrawVisuals() {
   return (
     <group renderOrder={24}>
       {loopPoints.length >= 2 && (
-        <Line
-          points={loopPoints}
-          color={edgeColor}
-          lineWidth={1.5}
-          dashed={!closedPreview}
-          dashSize={3}
-          gapSize={2}
-          transparent
-          opacity={0.9}
-          depthTest={false}
-        />
+        <>
+          <Line points={loopPoints} color="#080a0e" lineWidth={4} depthTest={false} transparent opacity={0.72} />
+          <Line
+            points={loopPoints}
+            color={edgeColor}
+            lineWidth={1.8}
+            dashed={!closedPreview}
+            dashSize={3}
+            gapSize={2}
+            transparent
+            opacity={0.98}
+            depthTest={false}
+          />
+        </>
       )}
 
       {fillGeometry && (
@@ -100,7 +108,19 @@ export function PolyDrawVisuals() {
         </mesh>
       )}
 
-      {previewWorld && !snapHighlight && pointMarker(previewWorld, placedColor, 0.36)}
+      {snapHighlight && pointMarker(
+        snapHighlight.world,
+        snapHighlight.isDraft ? edgeColor : accentGreen,
+        snapHighlight.isDraft ? 0.5 : 0.46,
+        'snap-target'
+      )}
+
+      {polyDrawHover?.snap?.kind === 'mesh' && snapHighlight && (
+        <mesh position={[snapHighlight.world.x, snapHighlight.world.y, snapHighlight.world.z]} renderOrder={26}>
+          <sphereGeometry args={[0.64, 12, 12]} />
+          <meshBasicMaterial color={vertexHover} wireframe transparent opacity={0.9} depthTest={false} />
+        </mesh>
+      )}
     </group>
   )
 }

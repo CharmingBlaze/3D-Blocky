@@ -207,49 +207,77 @@ export function splitEdgeAt(
   return newVi
 }
 
-function stepLoopVertex(obj: SceneObject, prev: number, curr: number): number | null {
-  const candidates: number[] = []
-  for (const face of obj.faces) {
-    const n = face.length
-    for (let i = 0; i < n; i++) {
-      const va = face[i]
-      const vb = face[(i + 1) % n]
-      if (va === prev && vb === curr) {
-        candidates.push(face[(i + 2) % n])
-      } else if (va === curr && vb === prev) {
-        candidates.push(face[(i + n - 1) % n])
-      }
+/** The edge across a quad. Loop cuts intentionally stop at triangles and n-gons. */
+function oppositeQuadEdge(face: number[], edge: string): string | null {
+  if (face.length !== 4) return null
+  const [a, b] = parseEdgeKey(edge)
+  for (let i = 0; i < 4; i++) {
+    const from = face[i]!
+    const to = face[(i + 1) % 4]!
+    if ((from === a && to === b) || (from === b && to === a)) {
+      return edgeKey(face[(i + 2) % 4]!, face[(i + 3) % 4]!)
     }
   }
-  const next = candidates.find((v) => v !== prev)
-  return next ?? null
+  return null
 }
 
-function walkLoopFrom(obj: SceneObject, seedKey: string, forward: boolean): string[] {
-  const [a0, b0] = parseEdgeKey(seedKey)
-  const loop: string[] = [seedKey]
-  let prev = forward ? a0 : b0
-  let curr = forward ? b0 : a0
+function edgeFaceMap(obj: SceneObject): Map<string, number[]> {
+  const map = new Map<string, number[]>()
+  obj.faces.forEach((face, faceIndex) => {
+    for (let i = 0; i < face.length; i++) {
+      const key = edgeKey(face[i]!, face[(i + 1) % face.length]!)
+      const faces = map.get(key) ?? []
+      faces.push(faceIndex)
+      map.set(key, faces)
+    }
+  })
+  return map
+}
 
-  for (let guard = 0; guard < obj.faces.length * 8; guard++) {
-    const next = stepLoopVertex(obj, prev, curr)
-    if (next === null) break
-    const key = edgeKey(curr, next)
-    if (key === seedKey || loop.includes(key)) break
-    loop.push(key)
-    prev = curr
-    curr = next
-    if (curr === a0 || curr === b0) break
+function walkQuadLoopBranch(
+  obj: SceneObject,
+  edgeFaces: Map<string, number[]>,
+  seedKey: string,
+  startFace: number
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>([seedKey])
+  let edge = seedKey
+  let faceIndex = startFace
+
+  for (let guard = 0; guard < obj.faces.length; guard++) {
+    const face = obj.faces[faceIndex]
+    if (!face) break
+    const opposite = oppositeQuadEdge(face, edge)
+    if (!opposite || seen.has(opposite)) break
+    out.push(opposite)
+    seen.add(opposite)
+
+    const nextFace = (edgeFaces.get(opposite) ?? []).find(
+      (candidate) => candidate !== faceIndex && obj.faces[candidate]?.length === 4
+    )
+    if (nextFace === undefined) break
+    edge = opposite
+    faceIndex = nextFace
   }
-  return loop
+  return out
 }
 
-/** Edge loop through quads / general n-gons (Blender-style ring). */
+/**
+ * Blender-style edge ring: cross each quad through its opposite edge, stopping at
+ * boundaries, triangles, n-gons, and poles rather than guessing a non-loop path.
+ */
 export function findEdgeLoop(obj: SceneObject, seedKey: string): string[] {
-  const fwd = walkLoopFrom(obj, seedKey, true)
-  const bwd = walkLoopFrom(obj, seedKey, false)
-  const merged = [...bwd.slice(1).reverse(), ...fwd]
-  return [...new Set(merged)]
+  const [a, b] = parseEdgeKey(seedKey)
+  const edgeFaces = edgeFaceMap(obj)
+  const incident = edgeFaces.get(edgeKey(a, b)) ?? []
+  if (incident.length === 0) return []
+
+  const loop = new Set<string>([edgeKey(a, b)])
+  for (const faceIndex of incident) {
+    for (const edge of walkQuadLoopBranch(obj, edgeFaces, seedKey, faceIndex)) loop.add(edge)
+  }
+  return [...loop]
 }
 
 export function splitFaceAtChord(
@@ -361,6 +389,35 @@ export function loopCutPreviewPositions(
   return out
 }
 
+/** Chords across every affected quad, suitable for a continuous loop-cut preview. */
+export function loopCutPreviewSegments(
+  obj: SceneObject,
+  loopEdges: string[],
+  t: number
+): Array<[Vec3, Vec3]> {
+  const loop = new Set(loopEdges)
+  const u = Math.max(0.001, Math.min(0.999, t))
+  const segments: Array<[Vec3, Vec3]> = []
+  for (const face of obj.faces) {
+    if (face.length !== 4) continue
+    const points: Vec3[] = []
+    for (let i = 0; i < 4; i++) {
+      const a = face[i]!
+      const b = face[(i + 1) % 4]!
+      if (!loop.has(edgeKey(a, b))) continue
+      const pa = obj.positions[a]!
+      const pb = obj.positions[b]!
+      points.push({
+        x: pa.x + (pb.x - pa.x) * u,
+        y: pa.y + (pb.y - pa.y) * u,
+        z: pa.z + (pb.z - pa.z) * u,
+      })
+    }
+    if (points.length === 2) segments.push([points[0]!, points[1]!])
+  }
+  return segments
+}
+
 export function facesUsingEdge(obj: SceneObject, a: number, b: number): number {
   let count = 0
   for (const face of obj.faces) {
@@ -377,7 +434,7 @@ export function isValidLoopSeed(obj: SceneObject, seedKey: string): boolean {
   const [a, b] = parseEdgeKey(seedKey)
   if (a >= obj.positions.length || b >= obj.positions.length) return false
   const loop = findEdgeLoop(obj, seedKey)
-  return loop.length >= 1 && facesUsingEdge(obj, a, b) >= 1
+  return loop.length >= 2 && facesUsingEdge(obj, a, b) >= 1
 }
 
 function facesToSubdivide(
@@ -639,4 +696,3 @@ export function makeSelectionDoubleSided(
     faceUvIndices: newFaceUvIndices,
   }
 }
-

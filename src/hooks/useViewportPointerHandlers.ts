@@ -126,6 +126,7 @@ export function useViewportPointerHandlers({
   const perspectiveHeightDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const perspectiveHeightClickRef = useRef({ t: 0, x: 0, y: 0 })
   const bendClickRef = useRef({ t: 0, x: 0, y: 0 })
+  const knifeClickRef = useRef({ t: 0, x: 0, y: 0 })
   const selectDragRef = useRef<ObjectDragState | null>(null)
   const componentDragRef = useRef<ComponentDragState | null>(null)
   const hoverPickRafRef = useRef<number | null>(null)
@@ -190,6 +191,7 @@ export function useViewportPointerHandlers({
     knifeHover,
     knifeClearHover,
     knifeAddPoint,
+    knifeApply,
     bendBegin,
     bendPointerMove,
     bendPointerUp,
@@ -254,6 +256,7 @@ export function useViewportPointerHandlers({
       knifeHover: s.knifeHover,
       knifeClearHover: s.knifeClearHover,
       knifeAddPoint: s.knifeAddPoint,
+      knifeApply: s.knifeApply,
       bendBegin: s.bendBegin,
       bendPointerMove: s.bendPointerMove,
       bendPointerUp: s.bendPointerUp,
@@ -950,12 +953,25 @@ export function useViewportPointerHandlers({
         if (!hit) return
         e.currentTarget.setPointerCapture(e.pointerId)
         selectObject(hit.objectId)
+        const now = performance.now()
+        const previousClick = knifeClickRef.current
+        const isDoubleClick =
+          store.knifeDraft?.objectId === hit.objectId &&
+          store.knifeDraft.points.length >= 1 &&
+          now - previousClick.t < 350 &&
+          Math.hypot(e.clientX - previousClick.x, e.clientY - previousClick.y) < 10
         knifeAddPoint(
           hit.objectId,
           { world: hit.world, local: hit.local, snap: hit.snap },
           view,
           getCameraViewForward(camera)
         )
+        if (isDoubleClick) {
+          knifeClickRef.current = { t: 0, x: 0, y: 0 }
+          knifeApply(getCameraViewForward(camera))
+        } else {
+          knifeClickRef.current = { t: now, x: e.clientX, y: e.clientY }
+        }
         return
       }
 
@@ -1148,6 +1164,7 @@ export function useViewportPointerHandlers({
       beginPointerInteraction,
       resolveKnifeHit,
       knifeAddPoint,
+      knifeApply,
     ]
   )
 

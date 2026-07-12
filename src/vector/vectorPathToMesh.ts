@@ -1,6 +1,7 @@
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { ViewType, StrokeMode } from '../store/appStore'
 import { blobStrokeToObject } from '../blob/strokeToBlob'
+import { outlineSketchDoodleToObject } from '../stroke/sketchDoodle'
 import { polylineToMesh, type PolylineInput } from '../stroke/polylineToMesh'
 import { flattenVectorPath } from './bezier'
 import type { VectorPath } from './types'
@@ -124,10 +125,7 @@ export function vectorPathToMesh(
   }
 
   if (options.strokeMode === 'outline') {
-    if (!path.closed) {
-      return polylineToMesh({ ...base, strokeMode: 'centerline' })
-    }
-    return polylineToMesh({ ...base, strokeMode: 'outline', extrudeMode: false })
+    return outlineSketchDoodleToObject(base)
   }
 
   return polylineToMesh(base)

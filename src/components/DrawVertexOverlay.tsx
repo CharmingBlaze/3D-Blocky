@@ -97,14 +97,31 @@ export function DrawVertexOverlay() {
         const size = isPolyDraw ? POLY_DRAW_VERTEX_SIZE : VERTEX_SIZE
         const hoverSize = isPolyDraw ? POLY_DRAW_VERTEX_HOVER_SIZE : VERTEX_HOVER_SIZE
         return (
-          <mesh key={m.key} position={[m.x, m.y, m.z]} renderOrder={hovered ? 23 : 21}>
-            <sphereGeometry args={[hovered ? hoverSize : size, 10, 10]} />
-            <meshBasicMaterial
-              color={hovered ? vertexHoverColor : vertexColor}
-              depthTest
-              depthWrite
-            />
-          </mesh>
+          <group key={m.key} position={[m.x, m.y, m.z]} renderOrder={hovered ? 23 : 21}>
+            {isPolyDraw && hovered && (
+              <mesh renderOrder={24}>
+                <sphereGeometry args={[hoverSize * 1.55, 12, 12]} />
+                <meshBasicMaterial
+                  color={vertexHoverColor}
+                  wireframe
+                  transparent
+                  opacity={0.95}
+                  depthTest={false}
+                  depthWrite={false}
+                />
+              </mesh>
+            )}
+            <mesh renderOrder={hovered ? 25 : 21}>
+              <sphereGeometry args={[hovered ? hoverSize : size, 10, 10]} />
+              <meshBasicMaterial
+                color={hovered ? vertexHoverColor : vertexColor}
+                transparent={isPolyDraw}
+                opacity={isPolyDraw && !hovered ? 0.76 : 1}
+                depthTest={!isPolyDraw}
+                depthWrite={!isPolyDraw}
+              />
+            </mesh>
+          </group>
         )
       })}
 
@@ -120,8 +137,8 @@ export function DrawVertexOverlay() {
             <sphereGeometry args={[size, 10, 10]} />
             <meshBasicMaterial
               color={hovered ? draftHoverColor : draftVertexColor}
-              depthTest
-              depthWrite
+              depthTest={false}
+              depthWrite={false}
             />
           </mesh>
         )

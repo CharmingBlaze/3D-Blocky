@@ -179,7 +179,7 @@ export function interpretStroke(
     }
   }
 
-  // Outline mode — Paint 3D-style: soft inflated silhouettes, not dual contouring
+  // Outline mode — filled capsule pillow (used by Extrude / polyline path; Sketch Outline uses tube rings)
   if (!isClosed) {
     if (isStraightLine(points)) {
       return { ...base, intent: 'hole-line', name: 'Hole' }

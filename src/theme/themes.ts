@@ -2973,7 +2973,7 @@ export const THEMES: AppTheme[] = [
   ),
 ]
 
-export const DEFAULT_THEME_ID: ThemeId = 'nes'
+export const DEFAULT_THEME_ID: ThemeId = 'studio-clay'
 
 const themeById = new Map(THEMES.map((t) => [t.id, t]))
 

@@ -74,7 +74,7 @@ export interface StrokeLayoutActions {
 export type StrokeSlice = StrokeLayoutState & StrokeLayoutActions
 
 export const strokeLayoutInitialState: StrokeLayoutState = {
-  strokeMode: 'outline',
+  strokeMode: 'blob',
   drawInputMode: 'regular',
   autoConnectPaths: true,
   smoothDrawing: true,

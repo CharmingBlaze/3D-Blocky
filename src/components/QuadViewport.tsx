@@ -185,6 +185,27 @@ function ViewportFitController({ view }: { view: ViewType }) {
   return null
 }
 
+function resolvePrimaryNavigation(
+  modifiers: { shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean },
+  isPerspective: boolean
+): 'orbit' | 'pan' | null {
+  // Shift stays free for additive selection unless Alt is also held (laptop pan).
+  if (modifiers.ctrlKey || modifiers.metaKey || (modifiers.shiftKey && modifiers.altKey)) {
+    return 'pan'
+  }
+  if (isPerspective && modifiers.altKey) return 'orbit'
+  return null
+}
+
+function leftMouseAction(
+  navigation: 'orbit' | 'pan' | null,
+  isPerspective: boolean
+): (typeof MOUSE)[keyof typeof MOUSE] | undefined {
+  if (navigation === 'pan') return MOUSE.PAN
+  if (navigation === 'orbit' && isPerspective) return MOUSE.ROTATE
+  return undefined
+}
+
 function ViewportControls({
   rootRef,
   view,
@@ -199,7 +220,10 @@ function ViewportControls({
   const { layoutVisible, continuousFrames } = useViewportRender()
   const invalidate = useThree((s) => s.invalidate)
   const [domElement, setDomElement] = useState<HTMLElement | null>(null)
-  const [primaryOrbitModifier, setPrimaryOrbitModifier] = useState(false)
+  const [primaryNavigation, setPrimaryNavigation] = useState<'orbit' | 'pan' | null>(null)
+  const controlsRef = useRef<{ mouseButtons: { LEFT?: number; MIDDLE?: number; RIGHT?: number } } | null>(
+    null
+  )
   const interactionHeldRef = useRef(false)
   const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isPerspective = view === 'perspective'
@@ -217,26 +241,62 @@ function ViewportControls({
   }, [])
 
   useEffect(() => {
-    if (!isPerspective) {
-      setPrimaryOrbitModifier(false)
-      return
-    }
-    // Alt (not Shift) enables temporary LMB orbit — Shift is reserved for multi-select.
-    const setOrbitOnKey = (event: KeyboardEvent) => {
-      if (event.key === 'Alt' || event.key === 'Shift') {
-        setPrimaryOrbitModifier(event.altKey)
+    const syncFromModifiers = (modifiers: {
+      shiftKey: boolean
+      altKey: boolean
+      ctrlKey: boolean
+      metaKey: boolean
+    }) => {
+      const next = resolvePrimaryNavigation(modifiers, isPerspective)
+      // Keep the active camera gesture stable if modifiers are released mid-drag.
+      if (next == null && interactionHeldRef.current) return
+      setPrimaryNavigation(next)
+      const controls = controlsRef.current
+      if (controls) {
+        controls.mouseButtons.LEFT = leftMouseAction(next, isPerspective)
       }
     }
-    const clearOrbit = () => setPrimaryOrbitModifier(false)
-    window.addEventListener('keydown', setOrbitOnKey)
-    window.addEventListener('keyup', setOrbitOnKey)
-    window.addEventListener('blur', clearOrbit)
+
+    const onKey = (event: KeyboardEvent) => {
+      syncFromModifiers(event)
+    }
+    const clearNavigation = () => {
+      if (interactionHeldRef.current) return
+      setPrimaryNavigation(null)
+      const controls = controlsRef.current
+      if (controls) controls.mouseButtons.LEFT = undefined
+    }
+
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
+    window.addEventListener('blur', clearNavigation)
     return () => {
-      window.removeEventListener('keydown', setOrbitOnKey)
-      window.removeEventListener('keyup', setOrbitOnKey)
-      window.removeEventListener('blur', clearOrbit)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
+      window.removeEventListener('blur', clearNavigation)
     }
   }, [isPerspective])
+
+  // Sync LEFT-button mapping from the pointer event itself (before OrbitControls),
+  // so Shift+Alt / Ctrl pan matches middle-mouse pan without waiting on React state.
+  useEffect(() => {
+    if (!domElement) return
+
+    const onPointerDownCapture = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      const next = resolvePrimaryNavigation(event, isPerspective)
+      setPrimaryNavigation(next)
+      const controls = controlsRef.current
+      if (controls) {
+        controls.mouseButtons.LEFT = leftMouseAction(next, isPerspective)
+        controls.mouseButtons.MIDDLE = disableMiddlePan ? undefined : MOUSE.PAN
+        controls.mouseButtons.RIGHT = isPerspective ? MOUSE.ROTATE : undefined
+      }
+    }
+
+    domElement.addEventListener('pointerdown', onPointerDownCapture, true)
+    return () => domElement.removeEventListener('pointerdown', onPointerDownCapture, true)
+  }, [domElement, isPerspective, disableMiddlePan])
 
   const handleControlsChange = useCallback(() => {
     requestViewportFrame(invalidate, layoutVisible, continuousFrames)
@@ -268,6 +328,7 @@ function ViewportControls({
 
   return (
     <OrbitControls
+      ref={controlsRef as never}
       domElement={domElement}
       makeDefault
       enableDamping
@@ -282,9 +343,9 @@ function ViewportControls({
       onStart={handleControlsStart}
       onEnd={handleControlsEnd}
       mouseButtons={{
-        // Laptop-friendly orbit: hold Alt while dragging with the primary button.
-        // Shift is kept free for additive vertex/edge/face/object selection.
-        LEFT: primaryOrbitModifier && isPerspective ? MOUSE.ROTATE : undefined,
+        // Laptop-friendly camera navigation with the primary button.
+        // Shift alone stays free for additive selection; Shift+Alt pans like MMB.
+        LEFT: leftMouseAction(primaryNavigation, isPerspective),
         MIDDLE: disableMiddlePan ? undefined : MOUSE.PAN,
         RIGHT: isPerspective ? MOUSE.ROTATE : undefined,
       }}
@@ -295,7 +356,7 @@ function ViewportControls({
 export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate, layoutVisible }: QuadViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
-  const shiftOrbitGestureRef = useRef(false)
+  const cameraNavigationGestureRef = useRef(false)
   const [interactionDom, setInteractionDom] = useState<HTMLElement | null>(null)
 
   const bindContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -497,34 +558,36 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
               ? 'cursor-sculpt'
               : ''
 
-  // Only Alt+LMB steals the gesture for orbit. Shift+LMB must reach selection
-  // handlers so vertex/edge/face multi-select works.
-  const isOrbitModifierGesture = (e: React.PointerEvent) =>
-    view === 'perspective' && e.altKey && !e.shiftKey && e.button === 0
+  // Shift alone remains available for additive selection. Ctrl/Command or Shift+Alt
+  // pans like middle-mouse in every view; Alt+LMB orbits only in Perspective.
+  const isCameraNavigationGesture = (e: React.PointerEvent) =>
+    e.button === 0 && resolvePrimaryNavigation(e, view === 'perspective') != null
 
   const handleViewportPointerDown = (e: React.PointerEvent) => {
-    if (isOrbitModifierGesture(e)) {
-      shiftOrbitGestureRef.current = true
+    if (isCameraNavigationGesture(e)) {
+      cameraNavigationGestureRef.current = true
+      // Keep Alt from activating OS/browser chrome while navigating.
+      e.preventDefault()
       return
     }
     handlePointerDown(e)
   }
 
   const handleViewportPointerMove = (e: React.PointerEvent) => {
-    if (!shiftOrbitGestureRef.current) handlePointerMove(e)
+    if (!cameraNavigationGestureRef.current) handlePointerMove(e)
   }
 
   const handleViewportPointerUp = (e: React.PointerEvent) => {
-    if (shiftOrbitGestureRef.current) {
-      shiftOrbitGestureRef.current = false
+    if (cameraNavigationGestureRef.current) {
+      cameraNavigationGestureRef.current = false
       return
     }
     handlePointerUp(e)
   }
 
   const handleViewportPointerLeave = (e: React.PointerEvent) => {
-    if (shiftOrbitGestureRef.current) {
-      shiftOrbitGestureRef.current = false
+    if (cameraNavigationGestureRef.current) {
+      cameraNavigationGestureRef.current = false
       return
     }
     handlePointerLeave(e)
@@ -542,7 +605,11 @@ export function QuadViewport({ view, slotIndex, isActive, isHovered, onActivate,
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onContextMenu={view === 'perspective' ? (e) => e.preventDefault() : undefined}
-      title={view === 'perspective' ? 'Alt + left-drag to orbit · right-drag to orbit · Shift+click to multi-select · two-finger scroll to zoom' : undefined}
+      title={
+        view === 'perspective'
+          ? 'Alt + left-drag to orbit · Shift + Alt or Ctrl + left-drag to pan · two-finger scroll to zoom'
+          : 'Shift + Alt or Ctrl + left-drag to pan · two-finger scroll to zoom'
+      }
     >
       <div className="viewport-view-chrome">
         <span className="viewport-stats">
