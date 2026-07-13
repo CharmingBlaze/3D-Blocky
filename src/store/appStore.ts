@@ -295,6 +295,8 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   createNewPixelDocument: (width: number, height: number, linkObjectId?: string) => void
   resizeOpenPixelDocument: (width: number, height: number) => void
   importPixelImage: (file: File, mode: 'new' | 'layer') => Promise<void>
+  /** Import an image as a project texture and set it as the active hair texture. */
+  importHairTextureImage: (file: File) => Promise<string>
   savePixelDocument: () => Promise<void>
   exportPixelDocumentPng: () => Promise<void>
   exportPixelDocumentProject: () => Promise<void>
@@ -1212,6 +1214,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'Unknown error'
       throw new Error(`Could not import "${file.name}": ${detail}`)
+    }
+  },
+
+  importHairTextureImage: async (file) => {
+    try {
+      const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
+      const doc = docs[docId]
+      if (!doc) throw new Error('Imported texture document is missing')
+      set((s) => ({
+        pixelDocuments: docs,
+        objectTextures: {
+          ...s.objectTextures,
+          [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
+        },
+        pixelTextureRevision: s.pixelTextureRevision + 1,
+        hairTextureId: docId,
+      }))
+      reconcileAppBlobUrls(get)
+      get().commitHistory('Import hair texture')
+      return docId
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Unknown error'
+      throw new Error(`Could not import hair texture "${file.name}": ${detail}`)
     }
   },
 

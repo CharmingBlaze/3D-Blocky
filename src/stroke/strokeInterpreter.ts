@@ -18,6 +18,7 @@ import {
   LATHE_RADIAL_SEGMENTS,
   latheAxisHFromPoints,
 } from './latheProfile'
+import { pathSpineBudget } from './sketchSource'
 
 export type StrokeIntent =
   | 'bead'
@@ -132,12 +133,12 @@ export function interpretStroke(
     }
   }
 
-  // Extrude — closed outline becomes a capsule pillow; open stroke sweeps along the path.
+  // Extrude — closed outline becomes a flat prism (CAD-style faces); open stroke sweeps a capsule.
   if (extrudeMode && points.length >= 2) {
     return {
       ...base,
-      intent: isClosed ? 'capsule-pillow' : 'path-capsule',
-      name: isClosed ? 'Doodle' : 'Capsule',
+      intent: isClosed ? 'silhouette-extrude' : 'path-capsule',
+      name: isClosed ? 'Extrude' : 'Capsule',
     }
   }
 
@@ -179,7 +180,22 @@ export function interpretStroke(
     }
   }
 
-  // Outline mode — filled capsule pillow (used by Extrude / polyline path; Sketch Outline uses tube rings)
+  // Hair modes are routed via sketch doodle builders (not polyline intents).
+  // Keep a path-tube fallback if they ever reach the classifier path.
+  if (strokeMode === 'hair-paths' || strokeMode === 'hair-strips' || strokeMode === 'hair-round') {
+    return {
+      ...base,
+      intent: 'path-tube',
+      name:
+        strokeMode === 'hair-strips'
+          ? 'Hair Strips'
+          : strokeMode === 'hair-round'
+            ? 'Rounded Hair'
+            : 'Hair Paths',
+    }
+  }
+
+  // Outline / default closed fill via polyline — capsule pillow (Sketch Outline uses flat extrude)
   if (!isClosed) {
     if (isStraightLine(points)) {
       return { ...base, intent: 'hole-line', name: 'Hole' }
@@ -307,39 +323,45 @@ export function allocateTessellation(
       }
     }
     case 'silhouette-extrude': {
-      const maxBoundary = Math.max(8, Math.min(Math.floor(budget * 0.5), 32))
+      // Flat extrude: 2 verts per boundary point — keep the drawn silhouette.
+      // Cap high so dense freehand Outline/Extrude is not crushed by poly budget.
+      const maxBoundary = Math.max(64, Math.min(Math.max(Math.floor(budget * 2), 256), 512))
       return {
         radialSegments: 0,
         profileRings: 0,
         pathSamples: 0,
         boundaryVerts: maxBoundary,
         extrudeDepth: Math.max(8, cappedDensity),
-        minAngleDeg,
+        minAngleDeg: Math.min(minAngleDeg, 6),
       }
     }
     case 'path-tube':
     case 'path-capsule': {
+      // Prefer centerline fidelity: soft longitudinal budget (not budget/density crush).
+      // Radial stays low-mid poly (6–10). Default 128 → ~56 rings (lower-mid).
+      const radialSegments = Math.max(
+        6,
+        Math.min(
+          10,
+          preserveDetail
+            ? VECTOR_PEN_RADIAL_SEGMENTS
+            : Math.min(cappedDensity, Math.floor(Math.sqrt(budget * 0.5)) || 8)
+        )
+      )
       const pathSamples = preserveDetail
         ? Math.min(
             VECTOR_PEN_MAX_PATH_SAMPLES,
             Math.max(3, Math.min(curvatureRings, profilePoints.length))
           )
-        : Math.max(
-            3,
-            Math.min(curvatureRings, Math.floor(budget / Math.max(5, cappedDensity)))
-          )
+        : pathSpineBudget(budget, profilePoints.length)
       return {
-        radialSegments: preserveDetail
-          ? VECTOR_PEN_RADIAL_SEGMENTS
-          : Math.max(
-              6,
-              Math.min(cappedDensity, Math.floor(budget / Math.max(3, pathSamples)))
-            ),
+        radialSegments,
         profileRings: 0,
         pathSamples,
         boundaryVerts: 0,
         extrudeDepth: Math.max(4, cappedDensity),
-        minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : minAngleDeg,
+        // Unused when preserveSpine; kept low as a safe fallback.
+        minAngleDeg: preserveDetail ? VECTOR_PEN_MIN_ANGLE_DEG : 4,
       }
     }
     case 'capsule-pillow': {

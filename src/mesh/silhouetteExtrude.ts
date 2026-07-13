@@ -1,8 +1,7 @@
 import { earClipTriangulate, ensureCCW } from './concaveTriangulate'
 import { type Vec2 } from '../utils/math'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
-import { reorientFacesOutward } from './meshWinding'
-import { meshCentroid } from './MeshBuilder'
+import { ensurePositiveVolume } from './meshWinding'
 
 function triangulatePolygon(poly: Vec2[]): [number, number, number][] {
   const triangles = earClipTriangulate(poly)
@@ -57,7 +56,8 @@ export function strokeToFlatOutline(points: Vec2[], halfWidth: number): Vec2[] |
 
 /**
  * Extrude a concave 2D silhouette into a 3D solid (canonical XY plane, depth along local Z).
- * Preserves fingers, branches, lobes — no convex hull collapse.
+ * Stores CAD-style topology: one n-gon per cap + one quad per side wall.
+ * Triangulation is deferred to render/export (same as primitive boxes).
  */
 export function extrudeSilhouette(
   polygon: Vec2[],
@@ -70,11 +70,7 @@ export function extrudeSilhouette(
 
   if (poly.length < 3) return mesh
 
-  const triangles = triangulatePolygon(poly)
   const n = poly.length
-  if (triangles.length === 0) return mesh
-
-  // Front cap (z = +half) and back cap (z = -half)
   const frontOffset = 0
   const backOffset = n
 
@@ -85,27 +81,33 @@ export function extrudeSilhouette(
     mesh.positions.push({ x: poly[i].x, y: poly[i].y, z: -half })
   }
 
-  for (const [a, b, c] of triangles) {
-    mesh.faces.push([frontOffset + a, frontOffset + b, frontOffset + c])
-    mesh.faceColors.push(color)
-    mesh.faces.push([backOffset + c, backOffset + b, backOffset + a])
-    mesh.faceColors.push(color)
+  // Cap faces as single planar n-gons (front CCW from +Z, back reversed).
+  const frontCap: number[] = []
+  const backCap: number[] = []
+  for (let i = 0; i < n; i++) {
+    frontCap.push(frontOffset + i)
+    backCap.push(backOffset + (n - 1 - i))
   }
+  mesh.faces.push(frontCap, backCap)
+  mesh.faceColors.push(color, color)
 
-  // Side walls along boundary edges
+  // Side walls — one quad per boundary edge (shared verts with caps).
+  // CCW silhouette: walk front i→j then down; outward is rotate(edge, +90° CW) in XY,
+  // so winding must be [f0, b0, b1, f1]. The old [f0, f1, b1, b0] pointed inward.
+  // Do NOT reorientFacesOutward(centroid) here — ribbon centroids often lie outside
+  // concave outlines and that heuristic flips walls/caps incorrectly under single-sided.
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
     const f0 = frontOffset + i
     const f1 = frontOffset + j
     const b0 = backOffset + i
     const b1 = backOffset + j
-    mesh.faces.push([f0, f1, b1])
-    mesh.faces.push([f0, b1, b0])
-    mesh.faceColors.push(color, color)
+    mesh.faces.push([f0, b0, b1, f1])
+    mesh.faceColors.push(color)
   }
 
   mesh.buildHalfEdges()
-  return reorientFacesOutward(mesh, meshCentroid(mesh.positions))
+  return ensurePositiveVolume(mesh)
 }
 
 /** Merge multiple lobe meshes into one */
@@ -126,7 +128,7 @@ export function mergeMeshes(meshes: HalfEdgeMesh[], color = 0x7ecba1): HalfEdgeM
 }
 
 /**
- * Full concave silhouette pipeline: triangulate + extrude per lobe + merge.
+ * Full concave silhouette pipeline: extrude per lobe + merge.
  */
 export function generateConcaveSilhouette(
   lobes: Vec2[][],

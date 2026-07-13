@@ -450,7 +450,7 @@ describe('MeshBuilder', () => {
     expect(obj!.faces.length).toBeLessThan(220)
   })
 
-  it('closed outline extrude builds a capsule pillow doodle, not a flat prism', () => {
+  it('closed outline extrude builds a flat prism with CAD-style faces', () => {
     const square = [
       { x: -20, y: -20 },
       { x: 20, y: -20 },
@@ -473,9 +473,11 @@ describe('MeshBuilder', () => {
       pathClosed: true,
     })
     expect(obj).not.toBeNull()
-    expect(obj!.name).toBe('Doodle')
-    expect(obj!.positions.length).toBeGreaterThan(8)
-    expect(obj!.faces.length).toBeGreaterThan(12)
+    expect(obj!.name).toBe('Extrude')
+    // Like a CAD box: 8 welded corners, 6 planar faces (2 n-gon caps + 4 side quads).
+    expect(obj!.positions.length).toBe(8)
+    expect(obj!.faces.length).toBe(6)
+    expect(obj!.faces.every((f) => f.length >= 4)).toBe(true)
     const center = meshCentroid(obj!.positions)
     expect(inwardFaceCount(obj!.positions, obj!.faces, center)).toBe(0)
     expect(meshSignedVolume(HalfEdgeMesh.fromObject(obj!))).toBeGreaterThan(0)

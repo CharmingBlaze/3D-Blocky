@@ -12,13 +12,27 @@ interface ExtrudePreviewMeshProps {
 }
 
 export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshProps) {
-  const { extrudeAmount, defaultDepth, brushDensity, closeThreshold, activeColor } = useAppStore(
+  const {
+    extrudeAmount,
+    defaultDepth,
+    brushDensity,
+    closeThreshold,
+    activeColor,
+    strokeMode,
+    polyBudget,
+    hairTipStyle,
+    currentStrokePlane,
+  } = useAppStore(
     useShallow((s) => ({
       extrudeAmount: s.extrudeAmount,
       defaultDepth: s.defaultDepth,
       brushDensity: s.brushDensity,
       closeThreshold: s.closeThreshold,
       activeColor: s.activeColor,
+      strokeMode: s.strokeMode,
+      polyBudget: s.polyBudget,
+      hairTipStyle: s.hairTipStyle,
+      currentStrokePlane: s.currentStrokePlane,
     }))
   )
 
@@ -31,9 +45,22 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       extrudeAmount,
       brushDensity,
       closeThreshold,
-      closed
+      closed,
+      { strokeMode, polyBudget, hairTipStyle, planeFrame: currentStrokePlane }
     )
-  }, [points, view, defaultDepth, extrudeAmount, brushDensity, closeThreshold, closed])
+  }, [
+    points,
+    view,
+    defaultDepth,
+    extrudeAmount,
+    brushDensity,
+    closeThreshold,
+    closed,
+    strokeMode,
+    polyBudget,
+    hairTipStyle,
+    currentStrokePlane,
+  ])
 
   useEffect(() => () => geometry?.dispose(), [geometry])
 

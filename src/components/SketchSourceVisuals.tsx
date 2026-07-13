@@ -56,7 +56,8 @@ export function SketchSourceVisuals() {
         point.x + source.center.x,
         point.y + source.center.y,
         source.view,
-        source.defaultDepth
+        source.defaultDepth,
+        source.planeFrame
       )
       const world = worldPointFromObject(object, local)
       return [world.x, world.y, world.z] as [number, number, number]

@@ -1,8 +1,14 @@
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { ViewType, StrokeMode } from '../store/appStore'
 import { blobStrokeToObject } from '../blob/strokeToBlob'
-import { outlineSketchDoodleToObject } from '../stroke/sketchDoodle'
+import {
+  outlineSketchDoodleToObject,
+  pathSketchDoodleToObject,
+  hairSketchDoodleToObject,
+  roundedHairSketchDoodleToObject,
+} from '../stroke/sketchDoodle'
 import { polylineToMesh, type PolylineInput } from '../stroke/polylineToMesh'
+import type { HairTipStyle } from '../mesh/hairRibbon'
 import { flattenVectorPath } from './bezier'
 import type { VectorPath } from './types'
 import {
@@ -28,6 +34,7 @@ export interface VectorPathMeshOptions {
   latheMode?: boolean
   latheCaps?: boolean
   extrudeAmount?: number
+  hairTipStyle?: HairTipStyle
 }
 
 function meshPointsFromPath(path: VectorPath, latheMode = false): { x: number; y: number }[] {
@@ -53,10 +60,14 @@ export function vectorPathMeshName(
   closed: boolean
 ): string {
   if (latheMode) return 'Lathe'
-  if (extrudeMode) return closed ? 'Doodle' : 'Capsule'
+  if (extrudeMode) return closed ? 'Extrude' : 'Capsule'
   if (strokeMode === 'blob') return 'Blob'
   if (strokeMode === 'centerline') return 'Path'
   if (strokeMode === 'capsule') return 'Capsule'
+  if (strokeMode === 'hair-paths') return 'Hair Paths'
+  if (strokeMode === 'hair-strips') return 'Hair Strips'
+  if (strokeMode === 'hair-round') return 'Rounded Hair'
+  if (strokeMode === 'outline') return closed ? 'Outline' : 'Outline Path'
   return closed ? 'Doodle' : 'Path'
 }
 
@@ -78,7 +89,15 @@ export function vectorPathToMesh(
   const base: PolylineInput = {
     points,
     view: path.view,
-    polyBudget: options.latheMode ? LATHE_POLY_BUDGET : VECTOR_PEN_POLY_BUDGET,
+    polyBudget:
+      options.latheMode
+        ? LATHE_POLY_BUDGET
+        : options.strokeMode === 'hair-paths' ||
+            options.strokeMode === 'hair-strips' ||
+            options.strokeMode === 'hair-round' ||
+            options.strokeMode === 'outline'
+          ? options.polyBudget
+          : VECTOR_PEN_POLY_BUDGET,
     brushDensity: options.brushDensity,
     strokeMode: options.strokeMode,
     rdpTolerance: options.rdpTolerance,
@@ -93,6 +112,7 @@ export function vectorPathToMesh(
     name,
     pathClosed: path.closed,
     preserveDetail: true,
+    hairTipStyle: options.hairTipStyle,
   }
 
   if (options.latheMode) {
@@ -105,6 +125,15 @@ export function vectorPathToMesh(
   }
 
   if (options.extrudeMode) {
+    if (options.strokeMode === 'hair-paths') {
+      return hairSketchDoodleToObject(base, 'path')
+    }
+    if (options.strokeMode === 'hair-strips') {
+      return hairSketchDoodleToObject(base, 'strip')
+    }
+    if (options.strokeMode === 'hair-round') {
+      return roundedHairSketchDoodleToObject(base)
+    }
     return polylineToMesh({
       ...base,
       strokeMode: 'outline',
@@ -117,7 +146,7 @@ export function vectorPathToMesh(
   }
 
   if (options.strokeMode === 'centerline') {
-    return polylineToMesh({ ...base, strokeMode: 'centerline' })
+    return pathSketchDoodleToObject({ ...base, strokeMode: 'centerline' })
   }
 
   if (options.strokeMode === 'capsule') {
@@ -126,6 +155,18 @@ export function vectorPathToMesh(
 
   if (options.strokeMode === 'outline') {
     return outlineSketchDoodleToObject(base)
+  }
+
+  if (options.strokeMode === 'hair-paths') {
+    return hairSketchDoodleToObject(base, 'path')
+  }
+
+  if (options.strokeMode === 'hair-strips') {
+    return hairSketchDoodleToObject(base, 'strip')
+  }
+
+  if (options.strokeMode === 'hair-round') {
+    return roundedHairSketchDoodleToObject(base)
   }
 
   return polylineToMesh(base)

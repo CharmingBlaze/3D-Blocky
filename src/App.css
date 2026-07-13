@@ -2337,6 +2337,154 @@ html[data-theme-contrast='light'] .theme-select {
   margin-bottom: 8px;
 }
 
+.hair-texture-dialog {
+  width: min(480px, 100%);
+  max-height: min(88vh, 720px);
+}
+
+.hair-texture-body {
+  padding: 14px 18px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.hair-texture-active {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.hair-uv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+
+.hair-uv-editor-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hair-uv-editor-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.hair-uv-canvas {
+  width: 220px;
+  height: 220px;
+  max-width: 100%;
+  align-self: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #14161b;
+  touch-action: none;
+}
+
+.hair-uv-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hair-uv-toolbar .side-btn {
+  flex: 1 1 auto;
+  min-width: 64px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.hair-uv-meta {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.hair-texture-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  max-height: min(28vh, 220px);
+  padding-right: 2px;
+}
+
+.hair-texture-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.hair-texture-item:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.hair-texture-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.hair-texture-item-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hair-texture-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hair-texture-item.active .hair-texture-item-meta {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text-muted));
+}
+
+.hair-texture-empty {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hair-texture-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.hair-texture-actions .side-btn {
+  flex: 1;
+}
+
+.hair-texture-btn {
+  width: 100%;
+  margin-top: 2px;
+}
+
 .import-export-status {
   font-size: 12px;
   color: var(--accent-green);

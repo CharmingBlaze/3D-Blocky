@@ -9,7 +9,6 @@ import {
   type Vec2,
   type Vec3,
 } from '../utils/math'
-import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
 
 export interface TubeOptions {
@@ -22,6 +21,11 @@ export interface CapsuleSweepOptions extends TubeOptions {
   closed?: boolean
   hemiRings?: number
   color?: number
+  /**
+   * Skip angular spine decimation — caller already prepared a fidelity centerline.
+   * Use for Sketch Path so gentle freehand bends are not crushed to a few corners.
+   */
+  preserveSpine?: boolean
 }
 
 function faceNormal3(mesh: HalfEdgeMesh, face: number[]): Vec3 {
@@ -221,39 +225,24 @@ export function generateTube(path: Vec2[], options: TubeOptions & { capped?: boo
     ringVerts.push(ring)
   }
 
-  // Three.js TubeGeometry-compatible quad winding (outward-facing in canonical space)
+  // Quad side walls between consecutive rings (outward-facing in canonical space)
   for (let pi = 0; pi < ringVerts.length - 1; pi++) {
     const ringA = ringVerts[pi]!
     const ringB = ringVerts[pi + 1]!
     for (let si = 0; si < segments; si++) {
       const next = (si + 1) % segments
-      mesh.faces.push([ringA[si]!, ringA[next]!, ringB[si]!])
-      mesh.faces.push([ringA[next]!, ringB[next]!, ringB[si]!])
-      mesh.faceColors.push(0xf5a66e, 0xf5a66e)
+      mesh.faces.push([ringA[si]!, ringA[next]!, ringB[next]!, ringB[si]!])
+      mesh.faceColors.push(0xf5a66e)
     }
   }
 
   if (capped && ringVerts.length >= 1) {
     const capColor = 0xf5a66e
-    const startRing = ringVerts[0]!
-    const startCenter = sampled[0]!
-    const startPole = mesh.positions.length
-    mesh.positions.push({ x: startCenter.x, y: startCenter.y, z: 0 })
-    for (let si = 0; si < segments; si++) {
-      const next = (si + 1) % segments
-      mesh.faces.push([startPole, startRing[si]!, startRing[next]!])
-      mesh.faceColors.push(capColor)
-    }
-
-    const endRing = ringVerts[ringVerts.length - 1]!
-    const endCenter = sampled[sampled.length - 1]!
-    const endPole = mesh.positions.length
-    mesh.positions.push({ x: endCenter.x, y: endCenter.y, z: 0 })
-    for (let si = 0; si < segments; si++) {
-      const next = (si + 1) % segments
-      mesh.faces.push([endPole, endRing[next]!, endRing[si]!])
-      mesh.faceColors.push(capColor)
-    }
+    // Flat n-gon disks — no polar triangle fans.
+    mesh.faces.push([...ringVerts[0]!].reverse())
+    mesh.faceColors.push(capColor)
+    mesh.faces.push([...ringVerts[ringVerts.length - 1]!])
+    mesh.faceColors.push(capColor)
   }
 
   mesh.buildHalfEdges()
@@ -343,9 +332,9 @@ function connectRingQuads(
 ): void {
   for (let si = 0; si < segments; si++) {
     const next = (si + 1) % segments
-    mesh.faces.push([ringA[si]!, ringA[next]!, ringB[si]!])
-    mesh.faces.push([ringA[next]!, ringB[next]!, ringB[si]!])
-    mesh.faceColors.push(color, color)
+    // One quad per circumferential step (tris deferred to render).
+    mesh.faces.push([ringA[si]!, ringA[next]!, ringB[next]!, ringB[si]!])
+    mesh.faceColors.push(color)
   }
 }
 
@@ -368,7 +357,23 @@ function fanPoleRing(
   }
 }
 
-/** Faceted hemisphere cap at an open sweep end (multi-ring, not a flat disk). */
+/** Flat n-gon disk at an open sweep end — no needle tip / triangle fan. */
+function appendFlatEndCap(
+  mesh: HalfEdgeMesh,
+  equatorRing: number[],
+  atStart: boolean,
+  color: number
+): void {
+  // Match prior fanPoleRing rim winding: start walks ring reverse, end walks forward.
+  const face = atStart ? [...equatorRing].reverse() : [...equatorRing]
+  mesh.faces.push(face)
+  mesh.faceColors.push(color)
+}
+
+/**
+ * End cap at an open sweep.
+ * hemiRings <= 0 → flat n-gon disk; otherwise faceted hemisphere (capsule).
+ */
 function appendSweepEndCap(
   mesh: HalfEdgeMesh,
   frame: SweepFrame,
@@ -379,6 +384,11 @@ function appendSweepEndCap(
   atStart: boolean,
   color: number
 ): void {
+  if (hemiRings <= 0) {
+    appendFlatEndCap(mesh, equatorRing, atStart, color)
+    return
+  }
+
   const bands = Math.max(1, hemiRings)
   const sign = atStart ? -1 : 1
   const pole = add3(frame.center, scale3(frame.tangent, sign * radius))
@@ -416,8 +426,10 @@ function normalizeClosedSpine(path: Vec2[], closed: boolean): Vec2[] {
 }
 
 /**
- * Sweep a low-poly pill cross-section along a 2D path.
- * Canonical space: path in XY, cross-section in the plane perpendicular to tangent.
+ * Sweep a low-poly circular cross-section along a 2D path.
+ * Side walls are quads between rings; open ends use flat n-gon disks when hemiRings <= 0
+ * (default for Path), or faceted hemispheres when hemiRings > 0 (Capsule).
+ * Canonical space: path in XY, cross-section perpendicular to tangent.
  */
 export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions): HalfEdgeMesh {
   const {
@@ -425,8 +437,9 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
     radialSegments,
     minAngleDeg = 15,
     closed = false,
-    hemiRings = LOW_POLY_CAPSULE_HEMI_RINGS,
+    hemiRings = 0,
     color = 0xf5a66e,
+    preserveSpine = false,
   } = options
 
   const mesh = new HalfEdgeMesh()
@@ -434,7 +447,9 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
   if (path.length < 2 || radius < 1e-6) return mesh
 
   const spine = normalizeClosedSpine(path, closed)
-  const sampled = curvatureSampleProfile(spine, minAngleDeg)
+  // Angle sampling drops gentle freehand turns (e.g. 14° → 2 samples on a sine).
+  // Path passes a prepared centerline with preserveSpine; Capsule/vector keep sampling.
+  const sampled = preserveSpine ? spine : curvatureSampleProfile(spine, minAngleDeg)
   if (sampled.length < 2) return mesh
 
   const curve = sampled.map(vec2To3)
@@ -462,6 +477,180 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
       false,
       color
     )
+  }
+
+  mesh.buildHalfEdges()
+  return mesh
+}
+
+function pushTubeUv(mesh: HalfEdgeMesh, u: number, v: number): number {
+  const idx = mesh.uvs.length
+  mesh.uvs.push({ u, v })
+  return idx
+}
+
+function arcLengthParams(curve: Vec3[]): number[] {
+  const params = [0]
+  let total = 0
+  for (let i = 1; i < curve.length; i++) {
+    total += dist3(curve[i]!, curve[i - 1]!)
+    params.push(total)
+  }
+  const denom = Math.max(total, 1e-8)
+  return params.map((p) => p / denom)
+}
+
+/**
+ * Smooth radius scale: 0 at both tips, 1 through the mid section (smoothstep end zones).
+ * Same profile as stylized hair tip taper.
+ */
+export function tubeTaperScale(t: number, taperFraction = 0.35): number {
+  const f = Math.max(0.05, Math.min(0.49, taperFraction))
+  const clamped = Math.max(0, Math.min(1, t))
+  if (clamped < f) {
+    const x = clamped / f
+    return x * x * (3 - 2 * x)
+  }
+  if (clamped > 1 - f) {
+    const x = (1 - clamped) / f
+    return x * x * (3 - 2 * x)
+  }
+  return 1
+}
+
+export interface TaperedPointedTubeOptions extends TubeOptions {
+  color?: number
+  preserveSpine?: boolean
+  /** Fraction of arc length at each end that tapers (0–0.49). Default 0.35. Ignored when tipStyle is square. */
+  taperFraction?: number
+  /** Pointed = needle tips; square = full radius with flat disk caps. Default pointed. */
+  tipStyle?: 'pointed' | 'square'
+  /** Override radius scale along normalized arc length. */
+  radiusScaleAtT?: (t: number) => number
+}
+
+/**
+ * Low-mid poly circular tube for Rounded Hair.
+ * Pointed: radius tapers to needle tips (triangle fans to poles).
+ * Square: full radius to both ends with flat disk caps.
+ * Side walls are quads. UVs: U along length, V around the circumference.
+ */
+export function generateTaperedPointedTube(
+  path: Vec2[],
+  options: TaperedPointedTubeOptions
+): HalfEdgeMesh {
+  const {
+    radius,
+    radialSegments,
+    minAngleDeg = 15,
+    color = 0x7ecba1,
+    preserveSpine = true,
+    taperFraction = 0.35,
+    tipStyle = 'pointed',
+    radiusScaleAtT,
+  } = options
+
+  const mesh = new HalfEdgeMesh()
+  // Rounded hair stays low-mid poly radially (hex–oct).
+  const segments = Math.max(6, Math.min(8, radialSegments))
+  if (path.length < 2 || radius < 1e-6) return mesh
+
+  const sampled = preserveSpine ? path : curvatureSampleProfile(path, minAngleDeg)
+  if (sampled.length < 2) return mesh
+
+  const curve = sampled.map(vec2To3)
+  const frames = buildSweepFrames(curve, false)
+  if (frames.length < 2) return mesh
+
+  const ts = arcLengthParams(curve)
+  const square = tipStyle === 'square'
+  const scaleAt =
+    radiusScaleAtT ?? (square ? () => 1 : (t: number) => tubeTaperScale(t, taperFraction))
+
+  // Near-zero but non-zero so the first/last body rings stay valid for quads (pointed only).
+  const minR = square ? radius : Math.max(1e-3, radius * 0.002)
+  const radii = ts.map((t) => Math.max(minR, radius * scaleAt(t)))
+
+  let startPole = -1
+  let endPole = -1
+  if (!square) {
+    // Poles at the true tips (radius → 0); body rings along the strand.
+    startPole = mesh.positions.length
+    mesh.positions.push({ ...frames[0]!.center })
+    endPole = mesh.positions.length
+    mesh.positions.push({ ...frames[frames.length - 1]!.center })
+  }
+
+  const ringVerts: number[][] = frames.map((frame, i) => addRing(mesh, frame, radii[i]!, segments))
+  const ringCount = ringVerts.length
+
+  if (square) {
+    // Flat n-gon disk caps — blunt ends at full radius.
+    {
+      const ring = ringVerts[0]!
+      const uvIndices = ring.map((_, si) => pushTubeUv(mesh, 0, si / segments))
+      mesh.faces.push([...ring].reverse())
+      mesh.faceUvIndices.push([...uvIndices].reverse())
+      mesh.faceColors.push(color)
+    }
+    {
+      const last = ringCount - 1
+      const ring = ringVerts[last]!
+      const uvIndices = ring.map((_, si) => pushTubeUv(mesh, 1, si / segments))
+      mesh.faces.push([...ring])
+      mesh.faceUvIndices.push(uvIndices)
+      mesh.faceColors.push(color)
+    }
+  } else {
+    // Tip fans — pointed ends (needle tips)
+    {
+      const u = 0
+      for (let si = 0; si < segments; si++) {
+        const next = (si + 1) % segments
+        const v0 = si / segments
+        const v1 = next / segments
+        const uvP = pushTubeUv(mesh, u, (v0 + v1) * 0.5)
+        const uvA = pushTubeUv(mesh, u, v0)
+        const uvB = pushTubeUv(mesh, u, v1)
+        mesh.faces.push([startPole, ringVerts[0]![next]!, ringVerts[0]![si]!])
+        mesh.faceUvIndices.push([uvP, uvB, uvA])
+        mesh.faceColors.push(color)
+      }
+    }
+    {
+      const u = 1
+      const last = ringCount - 1
+      for (let si = 0; si < segments; si++) {
+        const next = (si + 1) % segments
+        const v0 = si / segments
+        const v1 = next / segments
+        const uvP = pushTubeUv(mesh, u, (v0 + v1) * 0.5)
+        const uvA = pushTubeUv(mesh, u, v0)
+        const uvB = pushTubeUv(mesh, u, v1)
+        mesh.faces.push([endPole, ringVerts[last]![si]!, ringVerts[last]![next]!])
+        mesh.faceUvIndices.push([uvP, uvA, uvB])
+        mesh.faceColors.push(color)
+      }
+    }
+  }
+
+  for (let ri = 0; ri < ringCount - 1; ri++) {
+    const u0 = ts[ri]!
+    const u1 = ts[ri + 1]!
+    const ringA = ringVerts[ri]!
+    const ringB = ringVerts[ri + 1]!
+    for (let si = 0; si < segments; si++) {
+      const next = (si + 1) % segments
+      const v0 = si / segments
+      const v1 = next / segments
+      const uv0 = pushTubeUv(mesh, u0, v0)
+      const uv1 = pushTubeUv(mesh, u0, v1)
+      const uv2 = pushTubeUv(mesh, u1, v1)
+      const uv3 = pushTubeUv(mesh, u1, v0)
+      mesh.faces.push([ringA[si]!, ringA[next]!, ringB[next]!, ringB[si]!])
+      mesh.faceUvIndices.push([uv0, uv1, uv2, uv3])
+      mesh.faceColors.push(color)
+    }
   }
 
   mesh.buildHalfEdges()

@@ -222,3 +222,30 @@ export function stampDrawMaterial(obj: SceneObject, doubleSided: boolean): Scene
     material: { ...base, doubleSided },
   }
 }
+
+/**
+ * If the reference object uses a texture material, copy it onto the new object
+ * so subsequent hair (or other) strokes can reuse the UV Editor texture.
+ */
+export function inheritTextureMaterial(
+  obj: SceneObject,
+  source: SceneObject | undefined | null
+): SceneObject {
+  if (!source?.material || source.material.mode !== 'texture') return obj
+  return {
+    ...obj,
+    material: cloneMaterial(source.material),
+  }
+}
+
+/**
+ * Apply the global hair texture to a newly drawn hair stroke.
+ * When `textureId` is null/undefined, leave the object on the color/material path.
+ */
+export function applyActiveHairTexture(
+  obj: SceneObject,
+  textureId: string | null | undefined
+): SceneObject {
+  if (!textureId) return obj
+  return setObjectMaterialMode(ensureObjectMaterial(obj), 'texture', textureId)
+}

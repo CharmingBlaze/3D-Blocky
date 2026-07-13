@@ -40,6 +40,9 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'stroke', mode: 'centerline', label: 'Stroke · Path' },
     { kind: 'stroke', mode: 'blob', label: 'Stroke · Blob' },
     { kind: 'stroke', mode: 'capsule', label: 'Stroke · Capsule' },
+    { kind: 'stroke', mode: 'hair-paths', label: 'Stroke · Hair Paths' },
+    { kind: 'stroke', mode: 'hair-strips', label: 'Stroke · Hair Strips' },
+    { kind: 'stroke', mode: 'hair-round', label: 'Stroke · Rounded Hair' },
     { kind: 'action', id: 'extrude', label: 'Extrude Sketch' },
   ],
   create: [

@@ -11,11 +11,14 @@ import type { PolyDrawPointSnap } from '../store/appStore'
 import type { PixelShapeTool } from '../pixel/uvPaint'
 import {
   buildCameraDragPlane,
+  buildPerspectiveStrokeFrame,
   clientToCameraPlane,
   clientToGroundPlane,
+  clientToPerspectiveStrokePlane,
   clientToPlane,
   getCameraViewForward,
   planeToWorld3D,
+  type StrokePlaneFrame,
 } from '../utils/screenToWorld'
 import { pickObjectAt, objectsInScreenRect } from '../select/objectPick'
 import {
@@ -370,6 +373,53 @@ export function useViewportPointerHandlers({
       return clientToGroundPlane(clientX, clientY, rect, camera, groundY)
     },
     [defaultDepth]
+  )
+
+  /** Focus for perspective sketch plane: selection center, else world origin at defaultDepth. */
+  const resolvePerspectiveStrokeFocus = useCallback((): Vec3 => {
+    const store = useAppStore.getState()
+    const ids =
+      store.selectionObjectIds.length > 0
+        ? store.selectionObjectIds
+        : store.selectedObjectId
+          ? [store.selectedObjectId]
+          : []
+    if (ids.length > 0) {
+      return selectionWorldCenter(store.objects, ids)
+    }
+    return { x: 0, y: defaultDepth, z: 0 }
+  }, [defaultDepth])
+
+  const beginPerspectiveStrokeFrame = useCallback((): StrokePlaneFrame | null => {
+    const camera = cameraRef.current
+    if (!camera) return null
+    camera.updateMatrixWorld()
+    if ('updateProjectionMatrix' in camera && typeof camera.updateProjectionMatrix === 'function') {
+      camera.updateProjectionMatrix()
+    }
+    return buildPerspectiveStrokeFrame(camera, resolvePerspectiveStrokeFocus())
+  }, [resolvePerspectiveStrokeFocus])
+
+  const getDrawPlanePoint = useCallback(
+    (e: React.PointerEvent, frame?: StrokePlaneFrame | null) => {
+      const rect = containerRef.current?.getBoundingClientRect()
+      const camera = cameraRef.current
+      if (!rect || !camera) return null
+      camera.updateMatrixWorld()
+      if ('updateProjectionMatrix' in camera && typeof camera.updateProjectionMatrix === 'function') {
+        camera.updateProjectionMatrix()
+      }
+      if (view === 'perspective') {
+        const locked =
+          frame ??
+          useAppStore.getState().currentStrokePlane ??
+          beginPerspectiveStrokeFrame()
+        if (!locked) return null
+        return clientToPerspectiveStrokePlane(e.clientX, e.clientY, rect, camera, locked)
+      }
+      return clientToPlane(e.clientX, e.clientY, rect, camera, view, defaultDepth)
+    },
+    [view, defaultDepth, beginPerspectiveStrokeFrame]
   )
 
   const perspectivePrimitiveScrollHeight =
@@ -1142,9 +1192,20 @@ export function useViewportPointerHandlers({
         return
       }
 
-      if (DRAW_TOOLS.includes(activeTool) && view !== 'perspective') {
-        strokeGestureViewRef.current = view
-        startStroke(pt, view)
+      if (DRAW_TOOLS.includes(activeTool)) {
+        if (view === 'perspective') {
+          const frame = beginPerspectiveStrokeFrame()
+          if (!frame) return
+          const pt = getDrawPlanePoint(e, frame)
+          if (!pt) return
+          strokeGestureViewRef.current = view
+          startStroke(pt, view, frame)
+        } else {
+          const pt = getPlanePoint(e)
+          if (!pt) return
+          strokeGestureViewRef.current = view
+          startStroke(pt, view)
+        }
         if (useAppStore.getState().sketchExtrudeMode) {
           beginExtrudeDrag(e.clientX, e.clientY)
         }
@@ -1176,6 +1237,9 @@ export function useViewportPointerHandlers({
       applySculptAt,
       commitPrimitiveBox,
       getPlanePoint,
+      getDrawPlanePoint,
+      getGroundPoint,
+      beginPerspectiveStrokeFrame,
       selectObject,
       selectBillboardImage,
       selectReferenceImage,
@@ -1480,22 +1544,23 @@ export function useViewportPointerHandlers({
 
       if (
         DRAW_TOOLS.includes(store.activeTool) &&
-        view !== 'perspective' &&
         strokeView === view &&
         store.isDrawing
       ) {
+        const drawPt = getDrawPlanePoint(e)
+        if (!drawPt) return
         if (store.sketchExtrudeMode && store.extrudeDragAnchor) {
           updateExtrudeFromPointer(e.clientX, e.clientY)
         }
         if ((e.buttons & 1) === 1) {
-          continueStroke(pt)
+          continueStroke(drawPt)
         } else {
-          setStrokePreview(pt)
+          setStrokePreview(drawPt)
         }
         return
       }
     },
-    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, resolveKnifeHit, knifeHover, knifeClearHover, setPrimitiveBoxScrollHeight]
+    [view, defaultDepth, activeTool, selectionMode, objects, selectedObjectId, continueStroke, continueVectorStroke, applySculptAt, getPlanePoint, getDrawPlanePoint, getGroundPoint, resolvePolyDrawAt, getObjectDragDelta, getComponentDragDelta, translateSelectionByDelta, translateMeshSelection, penPointerMove, scheduleMeshHoverPick, primitiveBoxPointerMove, polyDrawPointerMove, setStrokePreview, updateExtrudeFromPointer, resolveKnifeWorld, resolveKnifeHit, knifeHover, knifeClearHover, setPrimitiveBoxScrollHeight]
   )
 
   const handlePointerUp = useCallback(

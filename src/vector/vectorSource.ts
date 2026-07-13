@@ -1,6 +1,7 @@
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import type { StrokeMode } from '../store/appStore'
+import type { HairTipStyle } from '../mesh/hairRibbon'
 import { cloneAnchors } from './autoConnect'
 import type { VectorPath } from './types'
 import { vectorPathToMesh } from './vectorPathToMesh'
@@ -17,6 +18,8 @@ export interface VectorSource {
   defaultDepth: number
   stylize: number
   extrudeDepth: number
+  /** Hair tip shape for hair stroke modes. Defaults to pointed when missing. */
+  hairTipStyle?: HairTipStyle
 }
 
 export function isVectorDoodleObject(
@@ -68,6 +71,7 @@ export function regenerateVectorObject(
     stylize: source.stylize,
     extrudeMode: source.extrudeMode,
     extrudeAmount: extrudeDepth,
+    hairTipStyle: source.hairTipStyle,
   })
   if (!rebuilt) return null
 

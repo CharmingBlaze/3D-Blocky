@@ -1,17 +1,34 @@
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import { generateSoftInflateDome } from '../mesh/softInflate'
-import { generateTube } from '../mesh/extrusion'
+import { generateCapsuleSweep, generateTaperedPointedTube } from '../mesh/extrusion'
 import { extrudeSilhouette, strokeToFlatOutline } from '../mesh/silhouetteExtrude'
+import {
+  generateHairRibbon,
+  hairHalfWidthFromBrush,
+  resolveHairDepth,
+  resolveRoundedHairRadius,
+  type HairRibbonStyle,
+  type HairTipStyle,
+} from '../mesh/hairRibbon'
 import { generateId, type Vec2 } from '../utils/math'
 import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
 import { orientTubeFacesOutward } from '../mesh/extrusion'
 import { ensureClosedMeshOutward } from '../mesh/meshWinding'
 import { resampleUniform, resampleUniformClosed } from './strokeCapture'
 import { classifyStroke } from './strokeClassifier'
-import { curvatureSampleClosedLoop } from './rdp'
 import type { PolylineInput } from './polylineToMesh'
-import type { SketchDoodleKind, SketchSource } from './sketchSource'
+import {
+  outlineHalfWidthFromBrush,
+  prepareHairPathCenterline,
+  prepareHairStripCenterline,
+  prepareOutlineBoundary,
+  preparePathCenterline,
+  resolveSilhouetteDepth,
+  type SketchDoodleKind,
+  type SketchSource,
+} from './sketchSource'
+import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 
 export interface PreparedSketch {
   points: Vec2[]
@@ -190,11 +207,16 @@ function cleanupDrawnPoints(points: Vec2[], minDistance = 2.0): Vec2[] {
 export interface PrepareSketchStrokeOptions {
   preserveDetail?: boolean
   pathClosed?: boolean
+  /** Denser resample / lighter cleanup so Outline tracks the stroke. */
+  highFidelity?: boolean
+  /** Never treat the stroke as a closed fill loop (Sketch Path centerline). */
+  forceOpen?: boolean
 }
 
 /**
  * Light stroke prep — preserves the drawn path, only snaps closed loops and
- * resamples to even spacing (no RDP simplification that distorts shape).
+ * (non-outline) resamples to even spacing. Outline/highFidelity keeps the
+ * captured polyline so the mesh boundary matches Smooth draw.
  */
 export function prepareSketchStroke(
   points: Vec2[],
@@ -204,18 +226,28 @@ export function prepareSketchStroke(
 ): PreparedSketch | null {
   if (points.length < 2) return null
 
-  const minCleanDist = options.preserveDetail ? 0.8 : 2.0
+  const highFidelity = !!options.highFidelity
+  const forceOpen = !!options.forceOpen
+  const minCleanDist = options.preserveDetail || highFidelity ? 0.8 : 2.0
   const cleaned = cleanupDrawnPoints(points, minCleanDist)
   if (cleaned.length < 2) return null
 
-  if (options.preserveDetail) {
+  if (options.preserveDetail || highFidelity) {
     let work = dedupeConsecutivePoints(cleaned)
-    const threshold = closeThreshold * 2.5
-    let isClosed = options.pathClosed === true || classifyStroke(work, threshold) === 'closed'
+    if (!options.preserveDetail && !forceOpen) {
+      work = snapSketchStrokeClosed(work, closeThreshold)
+    }
+    const threshold =
+      (options.preserveDetail
+        ? closeThreshold * 2.5
+        : effectiveCloseThreshold(work, closeThreshold) * 2.5)
+    let isClosed =
+      !forceOpen &&
+      (options.pathClosed === true || classifyStroke(work, threshold) === 'closed')
     if (isClosed && work.length >= 3) {
       const first = work[0]!
       const last = work[work.length - 1]!
-      if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.01) {
+      if (Math.hypot(first.x - last.x, first.y - last.y) <= (options.preserveDetail ? 0.01 : threshold)) {
         work = work.slice(0, -1)
       }
     }
@@ -306,26 +338,29 @@ function buildClosedSharpExtrusion(
   extrudeDepth: number,
   color: number
 ): HalfEdgeMesh {
-  return extrudeSilhouette(relative, { depth: Math.max(4, extrudeDepth), color })
+  return extrudeSilhouette(relative, {
+    depth: resolveSilhouetteDepth(extrudeDepth),
+    color,
+  })
 }
 
-function buildOpenSoftTube(relative: Vec2[], brushDensity: number): HalfEdgeMesh {
-  return generateTube(relative, {
+function buildOpenSoftTube(
+  relative: Vec2[],
+  brushDensity: number,
+  polyBudget: number
+): HalfEdgeMesh | null {
+  const spine = preparePathCenterline(relative, polyBudget)
+  if (!spine) return null
+  return generateCapsuleSweep(spine, {
     radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
-    radialSegments: 8,
-    minAngleDeg: 14,
-    capped: true,
+    radialSegments: primitiveSegmentsForBudget(polyBudget, 8),
+    closed: false,
+    hemiRings: 0,
+    preserveSpine: true,
   })
 }
 
 /** Filled flat silhouette from a closed outline, or a filled ribbon from an open stroke. */
-function outlineBoundaryBudget(polyBudget: number, pointCount: number, closed: boolean): number {
-  // Flat extrude doubles verts (front+back); keep boundary low–mid poly.
-  const hardCap = closed ? 20 : 14
-  const fromBudget = Math.floor(polyBudget / (closed ? 6 : 8))
-  return Math.max(closed ? 8 : 4, Math.min(pointCount, fromBudget, hardCap))
-}
-
 function buildFilledOutline(
   relative: Vec2[],
   brushDensity: number,
@@ -334,17 +369,15 @@ function buildFilledOutline(
   color: number,
   polyBudget: number
 ): HalfEdgeMesh | null {
-  const depth = Math.max(4, extrudeDepth)
+  const depth = resolveSilhouetteDepth(extrudeDepth)
   if (closed) {
-    if (relative.length < 3) return null
-    const maxBoundary = outlineBoundaryBudget(polyBudget, relative.length, true)
-    const boundary = curvatureSampleClosedLoop(relative, 18, maxBoundary)
-    if (boundary.length < 3) return null
+    const boundary = prepareOutlineBoundary(relative, polyBudget, true)
+    if (!boundary || boundary.length < 3) return null
     return extrudeSilhouette(boundary, { depth, color })
   }
-  const maxPath = outlineBoundaryBudget(polyBudget, relative.length, false)
-  const path = relative.length <= maxPath ? relative : capBoundaryPoints(relative, maxPath)
-  const halfWidth = Math.max(2.5, brushDensity * 0.4)
+  const path = prepareOutlineBoundary(relative, polyBudget, false)
+  if (!path || path.length < 2) return null
+  const halfWidth = outlineHalfWidthFromBrush(brushDensity)
   const ribbon = strokeToFlatOutline(path, halfWidth)
   if (!ribbon || ribbon.length < 3) return null
   return extrudeSilhouette(ribbon, { depth, color })
@@ -360,14 +393,18 @@ function finalizeSketchMesh(
   name: string,
   sketchSource: SketchSource,
   smoothShading = false,
-  tubePathPlane?: Vec2[]
+  tubePathPlane?: Vec2[],
+  uvFlags?: { uvAutoPacked?: boolean; uvMappingMode?: 'box' | 'perFace' }
 ): SceneObject {
   for (let i = 0; i < mesh.faceColors.length; i++) mesh.faceColors[i] = color
   offsetMeshInPlane(mesh, center.x, center.y)
-  projectMeshToView(mesh, view, depth)
+  projectMeshToView(mesh, view, depth, sketchSource.planeFrame)
 
   if (tubePathPlane && tubePathPlane.length >= 2) {
-    orientTubeFacesOutward(mesh, planePathToWorld(tubePathPlane, view, depth))
+    orientTubeFacesOutward(
+      mesh,
+      planePathToWorld(tubePathPlane, view, depth, sketchSource.planeFrame)
+    )
   } else {
     ensureClosedMeshOutward(mesh)
   }
@@ -378,6 +415,8 @@ function finalizeSketchMesh(
     polyBudgetMode: 'strict',
     smoothShading,
     sketchSource,
+    uvAutoPacked: uvFlags?.uvAutoPacked,
+    uvMappingMode: uvFlags?.uvMappingMode,
     transform: {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },
@@ -392,6 +431,10 @@ function makeSketchSource(
   kind: SketchDoodleKind,
   extrudeDepth: number
 ): SketchSource {
+  const hairKind =
+    kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round'
+  const tipStyle: HairTipStyle =
+    input.hairTipStyle === 'square' ? 'square' : 'pointed'
   return {
     relative: prepared.relative.map((p) => ({ ...p })),
     center: { ...prepared.center },
@@ -403,6 +446,8 @@ function makeSketchSource(
     isClosed: prepared.isClosed,
     kind,
     extrudeDepth,
+    planeFrame: input.planeFrame ?? null,
+    ...(hairKind ? { tipStyle } : {}),
   }
 }
 
@@ -419,7 +464,8 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
     name,
   } = input
 
-  if (points.length < 2 || view === 'perspective') return null
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
 
   const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
     preserveDetail: input.preserveDetail,
@@ -433,9 +479,9 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
 
   const mesh = isClosed
     ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth, !!input.preserveDetail)
-    : buildOpenSoftTube(relative, brushDensity)
+    : buildOpenSoftTube(relative, brushDensity, polyBudget)
 
-  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+  if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
 
   const doodleName = name ?? (isClosed ? 'Doodle' : 'Doodle Path')
   const source = makeSketchSource(prepared, input, kind, extrudeDepth)
@@ -466,16 +512,18 @@ export function outlineSketchDoodleToObject(input: PolylineInput): SceneObject |
     name,
   } = input
 
-  if (points.length < 2 || view === 'perspective') return null
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
 
   const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
     preserveDetail: input.preserveDetail,
     pathClosed: input.pathClosed,
+    highFidelity: true,
   })
   if (!prepared) return null
 
   const { relative, center, isClosed } = prepared
-  const extrudeDepth = resolveExtrudeDepth(input, brushDensity)
+  const extrudeDepth = resolveSilhouetteDepth(resolveExtrudeDepth(input, brushDensity))
   const mesh = buildFilledOutline(relative, brushDensity, extrudeDepth, isClosed, color, polyBudget)
 
   if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
@@ -495,6 +543,69 @@ export function outlineSketchDoodleToObject(input: PolylineInput): SceneObject |
   )
 }
 
+/**
+ * Sketch Path — circular tube swept along the stroke with quad side walls
+ * and flat n-gon end caps (not a triangulated needle capsule).
+ */
+export function pathSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    name,
+  } = input
+
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    forceOpen: true,
+    highFidelity: true,
+  })
+  if (!prepared) return null
+
+  const { relative, center } = prepared
+  const extrudeDepth = resolveExtrudeDepth(input, brushDensity)
+  const radius = Math.max(2.5, Math.min(14, brushDensity * 0.55))
+  const spine = preparePathCenterline(relative, polyBudget)
+  if (!spine) return null
+
+  const mesh = generateCapsuleSweep(spine, {
+    radius,
+    radialSegments: primitiveSegmentsForBudget(polyBudget, 8),
+    closed: false,
+    hemiRings: 0,
+    preserveSpine: true,
+    color,
+  })
+
+  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const source = makeSketchSource(
+    { ...prepared, isClosed: false },
+    input,
+    'path',
+    extrudeDepth
+  )
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    name ?? 'Path',
+    source,
+    false,
+    prepared.points
+  )
+}
+
 /** Paint 3D sharp-edge doodle — closed silhouette extruded with flat sides. */
 export function sharpSketchDoodleToObject(input: PolylineInput): SceneObject | null {
   const {
@@ -509,25 +620,58 @@ export function sharpSketchDoodleToObject(input: PolylineInput): SceneObject | n
     name,
   } = input
 
-  if (points.length < 2 || view === 'perspective') return null
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
 
   const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
     preserveDetail: input.preserveDetail,
     pathClosed: input.pathClosed,
+    // Same fidelity as Outline — Extrude must track the drawn loop.
+    highFidelity: true,
   })
   if (!prepared) return null
 
   const { relative, center, isClosed } = prepared
-  const extrudeDepth = Math.max(4, extrudeAmount ?? resolveExtrudeDepth(input, brushDensity))
-  const kind: SketchDoodleKind = isClosed ? 'sharp' : 'path'
+  const extrudeDepth = resolveSilhouetteDepth(
+    extrudeAmount ?? resolveExtrudeDepth(input, brushDensity)
+  )
 
-  const mesh = isClosed
-    ? buildClosedSharpExtrusion(relative, extrudeDepth, color)
-    : buildOpenSoftTube(relative, brushDensity)
+  // Open Extrude/Outline strokes are flat ribbons (not tubes) so line drawings
+  // keep a silhouette underside with outward normals under single-sided shading.
+  if (!isClosed) {
+    const mesh = buildFilledOutline(
+      relative,
+      brushDensity,
+      extrudeDepth,
+      false,
+      color,
+      polyBudget
+    )
+    if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+    const doodleName = name ?? 'Outline Path'
+    const source = makeSketchSource(prepared, input, 'outline', extrudeDepth)
+    return finalizeSketchMesh(
+      mesh,
+      center,
+      view,
+      defaultDepth,
+      color,
+      polyBudget,
+      doodleName,
+      source,
+      false
+    )
+  }
+
+  const kind: SketchDoodleKind = 'sharp'
+
+  const boundary = prepareOutlineBoundary(relative, polyBudget, true)
+  if (!boundary || boundary.length < 3) return null
+  const mesh = buildClosedSharpExtrusion(boundary, extrudeDepth, color)
 
   if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
 
-  const doodleName = name ?? (isClosed ? 'Extrude' : 'Doodle Path')
+  const doodleName = name ?? 'Extrude'
   const source = makeSketchSource(prepared, input, kind, extrudeDepth)
   return finalizeSketchMesh(
     mesh,
@@ -538,8 +682,146 @@ export function sharpSketchDoodleToObject(input: PolylineInput): SceneObject | n
     polyBudget,
     doodleName,
     source,
+    false
+  )
+}
+
+/**
+ * Stylized hair card — tapered ribbon along the stroke.
+ * Hair Paths = thin prism ribbon; Hair Strips = flat double-sided low-poly cards.
+ * (Rounded Hair is a separate doodle — see roundedHairSketchDoodleToObject.)
+ */
+export function hairSketchDoodleToObject(
+  input: PolylineInput,
+  style: HairRibbonStyle
+): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    name,
+  } = input
+
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    forceOpen: true,
+    highFidelity: style === 'path',
+  })
+  if (!prepared) return null
+
+  const { relative, center } = prepared
+  const spine =
+    style === 'strip'
+      ? prepareHairStripCenterline(relative, polyBudget)
+      : prepareHairPathCenterline(relative, polyBudget)
+  if (!spine) return null
+
+  const extrudeDepth = resolveHairDepth(input.extrudeAmount, brushDensity, style)
+  const tipStyle: HairTipStyle = input.hairTipStyle === 'square' ? 'square' : 'pointed'
+  const mesh = generateHairRibbon(spine, {
+    halfWidth: hairHalfWidthFromBrush(brushDensity, style),
+    depth: extrudeDepth,
+    color,
+    flat: style === 'strip',
+    tipStyle,
+  })
+
+  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const kind: SketchDoodleKind = style === 'strip' ? 'hair-strip' : 'hair-path'
+  const doodleName = name ?? (style === 'strip' ? 'Hair Strips' : 'Hair Paths')
+  const source = makeSketchSource(
+    { ...prepared, isClosed: false },
+    input,
+    kind,
+    extrudeDepth
+  )
+
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    doodleName,
+    source,
     false,
-    isClosed ? undefined : prepared.points
+    undefined,
+    { uvAutoPacked: true, uvMappingMode: 'box' }
+  )
+}
+
+/**
+ * Rounded Hair — low-mid poly tapered tube with needle tips (not a flat ribbon).
+ * Separate from Hair Paths / Hair Strips.
+ */
+export function roundedHairSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const {
+    points,
+    view,
+    polyBudget,
+    brushDensity,
+    closeThreshold,
+    defaultDepth,
+    color,
+    name,
+  } = input
+
+  if (points.length < 2) return null
+  if (view === 'perspective' && !input.planeFrame) return null
+
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    forceOpen: true,
+    highFidelity: true,
+  })
+  if (!prepared) return null
+
+  const { relative, center } = prepared
+  const spine = prepareHairPathCenterline(relative, polyBudget)
+  if (!spine) return null
+
+  const extrudeDepth =
+    input.extrudeAmount != null && Number.isFinite(input.extrudeAmount)
+      ? input.extrudeAmount
+      : 12
+  const mesh = generateTaperedPointedTube(spine, {
+    radius: resolveRoundedHairRadius(input.extrudeAmount, brushDensity),
+    radialSegments: Math.max(6, Math.min(8, primitiveSegmentsForBudget(polyBudget, 7))),
+    preserveSpine: true,
+    color,
+    tipStyle: input.hairTipStyle === 'square' ? 'square' : 'pointed',
+  })
+
+  if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
+
+  const source = makeSketchSource(
+    { ...prepared, isClosed: false },
+    input,
+    'hair-round',
+    extrudeDepth
+  )
+
+  return finalizeSketchMesh(
+    mesh,
+    center,
+    view,
+    defaultDepth,
+    color,
+    polyBudget,
+    name ?? 'Rounded Hair',
+    source,
+    false,
+    undefined,
+    { uvAutoPacked: true, uvMappingMode: 'box' }
   )
 }
 

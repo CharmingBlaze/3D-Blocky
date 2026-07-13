@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   useAppStore,
@@ -28,15 +28,32 @@ import { SideButtonDropdown } from './SideButtonDropdown'
 import { resolveTargetObjectIds } from '../material/materialEditorSlice'
 import { computeSelectionFitFrame } from '../viewport/fitViewports'
 import { boxCenterSize } from '../primitives/primitiveBoxMath'
+import { HairTextureDialog } from './HairTextureDialog'
+import { listSceneTextures } from '../uv/sceneTextures'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Draw a closed outline → filled flat 3D shape' },
-  { id: 'centerline', label: 'Path', hint: 'Open stroke → rounded tube path' },
+  { id: 'centerline', label: 'Path', hint: 'Open stroke → tube path along the stroke (quad rings)' },
   { id: 'blob', label: 'Blob', hint: 'Soft inflated volume — close the loop to fill a 3D shape' },
   {
     id: 'capsule',
     label: 'Capsule',
     hint: 'Closed loop → silhouette capsule; open stroke → bend a capsule along the path',
+  },
+  {
+    id: 'hair-paths',
+    label: 'Hair Paths',
+    hint: 'Draw a stroke → smooth hair ribbon (Pointed or Square tips); color or UV texture',
+  },
+  {
+    id: 'hair-strips',
+    label: 'Hair Strips',
+    hint: 'Draw a stroke → low-poly hair cards (Pointed or Square tips); color or UV texture',
+  },
+  {
+    id: 'hair-round',
+    label: 'Rounded Hair',
+    hint: 'Draw a stroke → rounded tube strand (Pointed needle tips or Square blunt ends)',
   },
 ]
 
@@ -267,6 +284,8 @@ export function SidePanel() {
     setSmoothDrawing,
     drawDoubleSided,
     setDrawDoubleSided,
+    hairTipStyle,
+    setHairTipStyle,
     sketchExtrudeMode,
     penExtrudeMode,
     sketchLatheMode,
@@ -395,6 +414,8 @@ export function SidePanel() {
       setSmoothDrawing: s.setSmoothDrawing,
       drawDoubleSided: s.drawDoubleSided,
       setDrawDoubleSided: s.setDrawDoubleSided,
+      hairTipStyle: s.hairTipStyle,
+      setHairTipStyle: s.setHairTipStyle,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
       sketchLatheMode: s.sketchLatheMode,
@@ -506,6 +527,19 @@ export function SidePanel() {
       removeBillboardImage: s.removeBillboardImage,
     }))
   )
+
+  const hairTextureId = useAppStore((s) => s.hairTextureId)
+  const pixelDocuments = useAppStore((s) => s.pixelDocuments)
+  const objectTextures = useAppStore((s) => s.objectTextures)
+  const [showHairTextureDialog, setShowHairTextureDialog] = useState(false)
+
+  const hairTextureLabel = useMemo(() => {
+    if (!hairTextureId) return null
+    const entry = listSceneTextures(pixelDocuments, objectTextures, objects).find(
+      (t) => t.id === hairTextureId
+    )
+    return entry?.label ?? 'Texture'
+  }, [hairTextureId, pixelDocuments, objectTextures, objects])
 
   const selectedReference = referenceImages.find((r) => r.id === selectedReferenceImageId)
   const selectedBillboard = billboardImages.find((b) => b.id === selectedBillboardImageId)
@@ -915,6 +949,44 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
+            <button
+              type="button"
+              className={`side-btn hair-texture-btn ${hairTextureId ? 'active' : ''}`}
+              onClick={() => setShowHairTextureDialog(true)}
+              title={
+                hairTextureId
+                  ? `Hair texture: ${hairTextureLabel ?? hairTextureId} — click to change or clear`
+                  : 'Choose a texture for hair strokes (or leave unset to use colors / materials)'
+              }
+            >
+              {hairTextureId
+                ? `Hair Texture · ${hairTextureLabel?.split(' (')[0] ?? 'On'}`
+                : 'Hair Texture'}
+            </button>
+            <div className="side-checkbox-row">
+              <label
+                className="side-checkbox"
+                title="Taper hair to a point at both ends (default)"
+              >
+                <input
+                  type="checkbox"
+                  checked={hairTipStyle === 'pointed'}
+                  onChange={() => setHairTipStyle('pointed')}
+                />
+                <span>Pointed</span>
+              </label>
+              <label
+                className="side-checkbox"
+                title="Keep full width/radius to blunt square ends"
+              >
+                <input
+                  type="checkbox"
+                  checked={hairTipStyle === 'square'}
+                  onChange={() => setHairTipStyle('square')}
+                />
+                <span>Square</span>
+              </label>
+            </div>
             <SideBtnGroup cols={2}>
               <button
                 type="button"
@@ -1657,6 +1729,9 @@ export function SidePanel() {
           </SideSection>
         </div>
       </aside>
+      {showHairTextureDialog && (
+        <HairTextureDialog onClose={() => setShowHairTextureDialog(false)} />
+      )}
     </>
   )
 }

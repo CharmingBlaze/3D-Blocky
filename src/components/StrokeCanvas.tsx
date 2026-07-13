@@ -58,6 +58,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     currentStroke,
     currentStrokePreview,
     currentStrokeView,
+    currentStrokePlane,
     isDrawing,
     activeColor,
     defaultDepth,
@@ -68,6 +69,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       currentStroke: s.currentStroke,
       currentStrokePreview: s.currentStrokePreview,
       currentStrokeView: s.currentStrokeView,
+      currentStrokePlane: s.currentStrokePlane,
       isDrawing: s.isDrawing,
       activeColor: s.activeColor,
       defaultDepth: s.defaultDepth,
@@ -85,7 +87,8 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
 
   /** Plane points for the live 3D preview (shared across every viewport). */
   const previewPoints = useMemo((): Vec2[] => {
-    if (!isDrawing || !currentStrokeView || currentStrokeView === 'perspective') return []
+    if (!isDrawing || !currentStrokeView) return []
+    if (currentStrokeView === 'perspective' && !currentStrokePlane) return []
     if (currentStroke.length === 0) return []
     const pts = [...currentStroke]
     if (
@@ -97,21 +100,30 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       pts.push(currentStrokePreview)
     }
     return pts
-  }, [isDrawing, currentStrokeView, currentStroke, currentStrokePreview])
+  }, [isDrawing, currentStrokeView, currentStrokePlane, currentStroke, currentStrokePreview])
 
   const showPlaneGuides = isDrawing && currentStrokeView === view
   // Keep the drawing view clean — only a thin path. Volume hull lives in peer views.
   const showVolumePreview =
     isDrawing &&
     currentStrokeView != null &&
-    currentStrokeView !== 'perspective' &&
+    !(currentStrokeView === 'perspective' && !currentStrokePlane) &&
     currentStrokeView !== view &&
     previewPoints.length >= 2
 
   const strokePath = useMemo(() => {
     if (!showPlaneGuides || currentStroke.length === 0) return []
-    return previewPoints.map((p) => planeToStroke3D(p.x, p.y, view, defaultDepth))
-  }, [showPlaneGuides, currentStroke.length, previewPoints, view, defaultDepth])
+    return previewPoints.map((p) =>
+      planeToStroke3D(p.x, p.y, view, defaultDepth, currentStrokePlane)
+    )
+  }, [
+    showPlaneGuides,
+    currentStroke.length,
+    previewPoints,
+    view,
+    defaultDepth,
+    currentStrokePlane,
+  ])
 
   if (!isDrawing || previewPoints.length === 0) return null
 

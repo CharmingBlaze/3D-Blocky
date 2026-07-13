@@ -16,12 +16,32 @@ import { strokeToMesh, isHoleLineStroke } from '../stroke/strokeToMesh'
 import { isVectorDoodleObject, regenerateVectorObject } from '../vector/vectorSource'
 import { isNearPoint } from '../vector/penTool'
 import { extrudeValueFromScreenDelta } from '../mesh/meshOps'
-import { planeToWorld3D } from '../utils/screenToWorld'
+import { planeToWorld3D, type StrokePlaneFrame } from '../utils/screenToWorld'
 import type { ViewType } from '../scene/viewTypes'
 import { emaSmoothPoint, movingAverageSmoothStroke } from '../stroke/strokeCapture'
+import { applyActiveHairTexture } from '../material/materialEditorSlice'
+import {
+  applyHairUvTransformToObject,
+  DEFAULT_HAIR_UV_TRANSFORM,
+  normalizeHairUvTransform,
+  type HairUvTransform,
+} from '../stroke/hairUvTransform'
+import type { HairTipStyle } from '../mesh/hairRibbon'
 
-export type StrokeMode = 'outline' | 'centerline' | 'blob' | 'capsule'
+export type StrokeMode =
+  | 'outline'
+  | 'centerline'
+  | 'blob'
+  | 'capsule'
+  | 'hair-paths'
+  | 'hair-strips'
+  | 'hair-round'
 export type DrawInputMode = 'regular' | 'vector-pen'
+export type { HairTipStyle }
+
+export function isHairStrokeMode(mode: StrokeMode): boolean {
+  return mode === 'hair-paths' || mode === 'hair-strips' || mode === 'hair-round'
+}
 
 export interface ExtrudeDragAnchor {
   clientX: number
@@ -47,8 +67,16 @@ export interface StrokeLayoutState {
   currentStroke: { x: number; y: number }[]
   currentStrokeView: ViewType | null
   currentStrokePreview: { x: number; y: number } | null
+  /** Locked camera-facing plane while drawing in perspective. */
+  currentStrokePlane: StrokePlaneFrame | null
   isDrawing: boolean
   editingSketchObjectId: string | null
+  /** Global texture doc id applied to new hair strokes; null = use palette colors/materials. */
+  hairTextureId: string | null
+  /** How procedural hair UVs map into the hair texture (applies to new strokes). */
+  hairUvTransform: HairUvTransform
+  /** Tip shape for new hair strokes: pointed (tapered) or square (blunt). */
+  hairTipStyle: HairTipStyle
 }
 
 export interface StrokeLayoutActions {
@@ -63,13 +91,22 @@ export interface StrokeLayoutActions {
   beginExtrudeDrag: (clientX: number, clientY: number) => void
   updateExtrudeFromPointer: (clientX: number, clientY: number) => void
   clearExtrudeDrag: () => void
-  startStroke: (point: { x: number; y: number }, view: ViewType) => void
+  startStroke: (
+    point: { x: number; y: number },
+    view: ViewType,
+    planeFrame?: StrokePlaneFrame | null
+  ) => void
   continueStroke: (point: { x: number; y: number }) => void
   setStrokePreview: (point: { x: number; y: number } | null) => void
   endStroke: (view: ViewType) => void
   setStrokeMode: (mode: StrokeMode) => void
   setDrawInputMode: (mode: DrawInputMode) => void
   setAutoConnectPaths: (on: boolean) => void
+  setHairTextureId: (id: string | null) => void
+  clearHairTexture: () => void
+  setHairUvTransform: (transform: HairUvTransform | Partial<HairUvTransform>) => void
+  resetHairUvTransform: () => void
+  setHairTipStyle: (style: HairTipStyle) => void
   toggleAutoConnectPaths: () => void
   setSmoothDrawing: (on: boolean) => void
   setEditingSketchObject: (objectId: string | null) => void
@@ -97,18 +134,27 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   currentStroke: [],
   currentStrokeView: null,
   currentStrokePreview: null,
+  currentStrokePlane: null,
   isDrawing: false,
   editingSketchObjectId: null,
+  hairTextureId: null,
+  hairUvTransform: { ...DEFAULT_HAIR_UV_TRANSFORM },
+  hairTipStyle: 'pointed',
 }
 
 export function clearStrokeDraftState(): Pick<
   StrokeLayoutState,
-  'currentStroke' | 'currentStrokeView' | 'currentStrokePreview' | 'isDrawing'
+  | 'currentStroke'
+  | 'currentStrokeView'
+  | 'currentStrokePreview'
+  | 'currentStrokePlane'
+  | 'isDrawing'
 > {
   return {
     currentStroke: [],
     currentStrokeView: null,
     currentStrokePreview: null,
+    currentStrokePlane: null,
     isDrawing: false,
   }
 }
@@ -289,7 +335,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       store().commitHistory('Convert sketch to mesh')
     },
 
-    startStroke: (point, view) => {
+    startStroke: (point, view, planeFrame = null) => {
       const { autoConnectPaths, lastStrokeEndpoint, closeThreshold } = store()
       let p = { ...point }
       if (
@@ -304,6 +350,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         isDrawing: true,
         currentStrokeView: view,
         currentStrokePreview: p,
+        currentStrokePlane: view === 'perspective' ? planeFrame : null,
       } as Partial<T>)
     },
 
@@ -358,6 +405,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       const {
         currentStroke,
         currentStrokeView,
+        currentStrokePlane,
         polyBudget,
         brushDensity,
         rdpTolerance,
@@ -374,6 +422,9 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         sketchLatheCaps,
         extrudeAmount,
         smoothDrawing,
+        hairTextureId,
+        hairUvTransform,
+        hairTipStyle,
       } = store()
 
       if (currentStrokeView !== view || currentStroke.length < 2) {
@@ -381,7 +432,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         return
       }
 
-      if (view === 'perspective') {
+      if (view === 'perspective' && !currentStrokePlane) {
         set(clearStrokeDraftState() as Partial<T>)
         return
       }
@@ -411,6 +462,8 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         latheMode: sketchLatheMode,
         latheCaps: sketchLatheCaps,
         extrudeAmount,
+        hairTipStyle,
+        planeFrame: currentStrokePlane,
       }
 
       if (
@@ -423,13 +476,15 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
             snappedStroke[0]!.x,
             snappedStroke[0]!.y,
             view,
-            defaultDepth
+            defaultDepth,
+            currentStrokePlane
           )
           const end = planeToWorld3D(
             snappedStroke[snappedStroke.length - 1]!.x,
             snappedStroke[snappedStroke.length - 1]!.y,
             view,
-            defaultDepth
+            defaultDepth,
+            currentStrokePlane
           )
           const punched = punchHoleAlongLine(target, start, end, 8)
           if (punched) {
@@ -468,10 +523,16 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
               defaultDepth,
               prepared.isClosed,
               prepared.isClosed ? 'sharp' : 'path',
-              extrudeAmount
+              extrudeAmount,
+              { planeFrame: currentStrokePlane }
             ),
           }
         }
+      }
+
+      if (obj && isHairStrokeMode(strokeMode)) {
+        obj = applyActiveHairTexture(obj, hairTextureId)
+        obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 
       const lastPt = snappedStroke[snappedStroke.length - 1]!
@@ -528,5 +589,23 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       set((s) => ({ autoConnectPaths: !s.autoConnectPaths }) as Partial<T>),
 
     setSmoothDrawing: (on) => set({ smoothDrawing: on } as Partial<T>),
+
+    setHairTextureId: (id) => set({ hairTextureId: id } as Partial<T>),
+
+    clearHairTexture: () => set({ hairTextureId: null } as Partial<T>),
+
+    setHairUvTransform: (transform) =>
+      set({
+        hairUvTransform: normalizeHairUvTransform({
+          ...get().hairUvTransform,
+          ...transform,
+        }),
+      } as Partial<T>),
+
+    resetHairUvTransform: () =>
+      set({ hairUvTransform: { ...DEFAULT_HAIR_UV_TRANSFORM } } as Partial<T>),
+
+    setHairTipStyle: (style) =>
+      set({ hairTipStyle: style === 'square' ? 'square' : 'pointed' } as Partial<T>),
   }
 }

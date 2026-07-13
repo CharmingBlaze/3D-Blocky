@@ -7,6 +7,7 @@ import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { reconstructOrganicMesh } from '../mesh/organicVolumeReconstruct'
 import { remeshOrganic } from '../mesh/organicRemesh'
 import { simplifyMesh } from '../mesh/simplification'
+import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
 import {
   extrudeSilhouette,
   generateConcaveSilhouette,
@@ -28,12 +29,25 @@ import {
 import { classifyStroke, extractLatheProfile } from './strokeClassifier'
 import { isLatheViewSupported, strokeToLatheProfile } from './latheProfile'
 import { detectLobes } from './lobeDetection'
-import { offsetMeshInPlane, planePathToWorld, projectMeshToView } from './worldProjection'
+import { offsetMeshInPlane, planePathToWorld, projectMeshToView, type StrokePlaneFrame } from './worldProjection'
 import { orientTubeFacesOutward } from '../mesh/extrusion'
 import { ensureClosedMeshOutward, orientLatheMeshOutward } from '../mesh/meshWinding'
 import type { ViewType, StrokeMode } from '../store/appStore'
+import type { HairTipStyle } from '../mesh/hairRibbon'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import { blobStrokeToObject } from '../blob/strokeToBlob'
+import { preparePathCenterline } from './sketchSource'
+
+function capSpineToSampleCount(spine: Vec2[], maxSamples: number): Vec2[] {
+  if (maxSamples < 2 || spine.length <= maxSamples) return spine
+  const out: Vec2[] = []
+  for (let i = 0; i < maxSamples; i++) {
+    out.push(
+      spine[Math.min(spine.length - 1, Math.round((i / (maxSamples - 1)) * (spine.length - 1)))]!
+    )
+  }
+  return out
+}
 
 export interface PolylineInput {
   points: { x: number; y: number }[]
@@ -56,6 +70,10 @@ export interface PolylineInput {
   pathClosed?: boolean
   /** Vector pen commit: skip sketch RDP, force doodle intent, low-poly capsule sampling. */
   preserveDetail?: boolean
+  /** Hair tip shape: pointed (tapered) or square (blunt). Default pointed. */
+  hairTipStyle?: HairTipStyle
+  /** Locked camera-facing plane for perspective strokes (required for correct world placement). */
+  planeFrame?: StrokePlaneFrame | null
 }
 
 function dedupeConsecutivePoints(points: Vec2[], epsilon = 0.01): Vec2[] {
@@ -90,7 +108,8 @@ function finalizeMesh(
   customName?: string,
   tubePathPlane?: Vec2[],
   preserveDetail = false,
-  latheObject = false
+  latheObject = false,
+  planeFrame?: StrokePlaneFrame | null
 ): SceneObject {
   const planeOffsetX =
     intent === 'profile-lathe' && interpretation.latheAxisH != null
@@ -98,7 +117,7 @@ function finalizeMesh(
       : interpretation.centroid.x
   const planeOffsetY = intent === 'profile-lathe' ? 0 : interpretation.centroid.y
   offsetMeshInPlane(mesh, planeOffsetX, planeOffsetY)
-  projectMeshToView(mesh, view, depth)
+  projectMeshToView(mesh, view, depth, planeFrame)
   applyColor(mesh, color)
 
   if (
@@ -108,7 +127,7 @@ function finalizeMesh(
   ) {
     orientTubeFacesOutward(
       mesh,
-      planePathToWorld(tubePathPlane, view, depth),
+      planePathToWorld(tubePathPlane, view, depth, planeFrame),
       interpretation.isClosed
     )
   } else if (intent === 'profile-lathe' && interpretation.latheAxisH != null) {
@@ -124,9 +143,10 @@ function finalizeMesh(
   } else if (
     !preserveDetail &&
     intent !== 'vertical-capsule' &&
+    intent !== 'silhouette-extrude' &&
+    intent !== 'path-tube' &&
     (intent === 'soft-silhouette' ||
       intent === 'sharp-silhouette' ||
-      intent === 'silhouette-extrude' ||
       intent === 'capsule-pillow')
   ) {
     if (result.vertexCount() > polyBudget) {
@@ -137,6 +157,8 @@ function finalizeMesh(
     !preserveDetail &&
     !latheObject &&
     intent !== 'vertical-capsule' &&
+    intent !== 'silhouette-extrude' &&
+    intent !== 'path-tube' &&
     result.vertexCount() > polyBudget
   ) {
     result = simplifyMesh(result, polyBudget)
@@ -204,11 +226,23 @@ function generateForIntent(
     case 'silhouette-extrude': {
       let boundary: Vec2[]
       if (interpretation.isClosed) {
-        boundary = curvatureSampleClosedLoop(
-          relative,
-          tess.minAngleDeg,
-          tess.boundaryVerts
-        )
+        // Keep the drawn loop — strip only a duplicate close vertex.
+        // Do not curvature-sample; that turns smooth freehand into jagged polygons.
+        const first = relative[0]!
+        const last = relative[relative.length - 1]!
+        boundary =
+          Math.hypot(first.x - last.x, first.y - last.y) <= 0.01
+            ? relative.slice(0, -1)
+            : relative
+        if (boundary.length > tess.boundaryVerts) {
+          // Soft even downsample only when past the hard tessellation cap.
+          const out: Vec2[] = []
+          const step = boundary.length / tess.boundaryVerts
+          for (let i = 0; i < tess.boundaryVerts; i++) {
+            out.push(boundary[Math.min(boundary.length - 1, Math.round(i * step))]!)
+          }
+          boundary = out
+        }
       } else {
         const halfWidth = Math.max(2.5, brushDensity * 0.4)
         const outline = strokeToFlatOutline(relative, halfWidth)
@@ -293,23 +327,33 @@ function generateForIntent(
       )
     }
 
-    case 'path-tube':
-      return generateCapsuleSweep(relative, {
+    case 'path-tube': {
+      const spine = preparePathCenterline(relative, Math.max(polyBudget, tess.pathSamples * 4))
+      if (!spine || spine.length < 2) return null
+      const ringSpine = capSpineToSampleCount(spine, tess.pathSamples)
+      return generateCapsuleSweep(ringSpine, {
         radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
         radialSegments: tess.radialSegments,
-        minAngleDeg: tess.minAngleDeg,
         closed: false,
+        hemiRings: 0,
+        preserveSpine: true,
         color,
       })
+    }
 
-    case 'path-capsule':
-      return generateCapsuleSweep(relative, {
+    case 'path-capsule': {
+      const spine = preparePathCenterline(relative, Math.max(polyBudget, tess.pathSamples * 4))
+      if (!spine || spine.length < 2) return null
+      const ringSpine = capSpineToSampleCount(spine, tess.pathSamples)
+      return generateCapsuleSweep(ringSpine, {
         radius: Math.max(2, tess.extrudeDepth),
         radialSegments: tess.radialSegments,
-        minAngleDeg: tess.minAngleDeg,
         closed: false,
+        hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
+        preserveSpine: true,
         color,
       })
+    }
 
     case 'capsule-pillow': {
       // Sample once here; pillow must not resample again (keeps depth edges aligned).
@@ -393,9 +437,11 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     name,
     pathClosed,
     preserveDetail = false,
+    planeFrame = null,
   } = input
 
-  if (points.length < 2 || view === 'perspective') return null
+  if (points.length < 2) return null
+  if (view === 'perspective' && !planeFrame) return null
   if (latheMode && !isLatheViewSupported(view)) return null
 
   if (strokeMode === 'blob' && !extrudeMode && !latheMode) {
@@ -412,14 +458,21 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
         closedPoints = closedPoints.slice(0, -1)
       }
     }
+  } else if (strokeMode === 'outline' || (extrudeMode && strokeMode !== 'centerline')) {
+    // Outline / Extrude silhouette: keep stroke points (light dedupe only).
+    closedPoints = dedupeConsecutivePoints(points)
+    const effectiveCloseThreshold = extrudeMode ? closeThreshold * 2.5 : closeThreshold
+    if (classifyStroke(closedPoints, effectiveCloseThreshold) === 'closed') {
+      const first = closedPoints[0]!
+      const last = closedPoints[closedPoints.length - 1]!
+      if (Math.hypot(first.x - last.x, first.y - last.y) > 0.01) {
+        closedPoints = [...closedPoints, first]
+      }
+    }
   } else {
-    const outlineSketch = strokeMode === 'outline' && !extrudeMode
-    const spacing = Math.max(rdpTolerance * (outlineSketch ? 0.22 : 0.35), outlineSketch ? 0.5 : 0.8)
+    const spacing = Math.max(rdpTolerance * 0.35, 0.8)
     const resampled = resampleUniform(points, spacing)
-    const simplified = rdpSimplify(
-      resampled,
-      outlineSketch ? rdpTolerance * 0.72 : rdpTolerance
-    )
+    const simplified = rdpSimplify(resampled, rdpTolerance)
 
     if (simplified.length < 2) return null
 
@@ -504,7 +557,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
       ? closedPoints
       : undefined,
     preserveDetail,
-    interpretation.intent === 'profile-lathe'
+    interpretation.intent === 'profile-lathe',
+    planeFrame
   )
 }
 

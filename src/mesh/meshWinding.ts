@@ -9,6 +9,18 @@ import {
   meshCentroid,
 } from './MeshBuilder'
 import { triangulateMeshFace } from './faceTriangulation'
+import { newellNormal } from './geometry2d'
+
+/** Robust face normal — Newell for n-gons (ribbon caps), triangle cross for tris. */
+function faceNormalForWinding(
+  positions: { x: number; y: number; z: number }[],
+  face: number[]
+): Vec3 {
+  if (face.length === 3) {
+    return computeFaceNormal(positions, [face[0]!, face[1]!, face[2]!])
+  }
+  return newellNormal(face.map((vi) => positions[vi]!))
+}
 
 /** Signed volume — positive when face windings are consistently oriented. */
 export function meshSignedVolume(mesh: HalfEdgeMesh): number {
@@ -52,8 +64,8 @@ export function reorientFacesOutward(
   for (let fi = 0; fi < mesh.faces.length; fi++) {
     const face = mesh.faces[fi]!
     if (face.length < 3) continue
-    const n = computeFaceNormal(mesh.positions, [face[0]!, face[1]!, face[2]!])
-    // For quads/n-gons, use the first triangle's normal against face centroid.
+    // Newell for n-gons — first-3-vert normals fail on long ribbon edges (collinear).
+    const n = faceNormalForWinding(mesh.positions, face)
     let cx = 0
     let cy = 0
     let cz = 0
@@ -120,7 +132,7 @@ export function orientLatheMeshOutward(
 export function meshFacesPointAwayFrom(mesh: HalfEdgeMesh, refPoint: Vec3): boolean {
   for (const face of mesh.faces) {
     if (face.length < 3) continue
-    const n = computeFaceNormal(mesh.positions, [face[0]!, face[1]!, face[2]!])
+    const n = faceNormalForWinding(mesh.positions, face)
     let cx = 0
     let cy = 0
     let cz = 0

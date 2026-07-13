@@ -1,5 +1,7 @@
 import { attachVectorSource } from '../vector/vectorSource'
 import { vectorPathToMesh } from '../vector/vectorPathToMesh'
+import { applyActiveHairTexture } from '../material/materialEditorSlice'
+import { applyHairUvTransformToObject } from '../stroke/hairUvTransform'
 import { emptyVectorDocument, type VectorDocument, type VectorPath, type VectorAnchor, type ShapeKind } from '../vector/types'
 import {
   findNearestPathEndpoint,
@@ -39,7 +41,7 @@ import {
 import { canExtrudeHeightInView, isOrthoView, type Axis } from '../primitives/viewAxes'
 import { maxRoundedBoxSubdivisionsForBudget } from '../mesh/meshPolyBudget'
 import type { ViewType, OrthoViewType } from '../scene/viewTypes'
-import { clearStrokeDraftState } from './strokeSlice'
+import { clearStrokeDraftState, isHairStrokeMode } from './strokeSlice'
 
 type UvTextureInfo = {
   url: string
@@ -216,6 +218,9 @@ type VectorStore = VectorToolsLayoutState & {
   objects: import('../mesh/HalfEdgeMesh').SceneObject[]
   selectedObjectId: string | null
   selectionObjectIds: string[]
+  hairTextureId: string | null
+  hairUvTransform: import('../stroke/hairUvTransform').HairUvTransform
+  hairTipStyle: import('./strokeSlice').HairTipStyle
   pushHistory: (label?: string) => boolean
   objectTextures: Record<string, UvTextureInfo>
 }
@@ -716,9 +721,12 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         penLatheMode,
         penLatheCaps,
         extrudeAmount,
+        hairTextureId,
+        hairUvTransform,
+        hairTipStyle,
       } = store()
 
-      const obj = vectorPathToMesh(path, {
+      let obj = vectorPathToMesh(path, {
         view: path.view,
         polyBudget,
         brushDensity,
@@ -732,22 +740,30 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         latheMode: penLatheMode,
         latheCaps: penLatheCaps,
         extrudeAmount,
+        hairTipStyle,
       })
+
+      if (obj && isHairStrokeMode(strokeMode)) {
+        obj = applyActiveHairTexture(obj, hairTextureId)
+        obj = applyHairUvTransformToObject(obj, hairUvTransform)
+      }
 
       const pathWithObject = { ...path, objectId: obj?.id }
 
+      const hairMode = isHairStrokeMode(strokeMode)
       const objToAdd =
         obj && path.source === 'pen'
           ? attachVectorSource(obj, {
               path: pathWithObject,
-              strokeMode: penExtrudeMode ? 'outline' : strokeMode,
-              extrudeMode: penExtrudeMode,
+              strokeMode: penExtrudeMode && !hairMode ? 'outline' : strokeMode,
+              extrudeMode: penExtrudeMode && !hairMode,
               brushDensity,
               rdpTolerance,
               closeThreshold,
               defaultDepth,
               stylize: facetExaggeration,
               extrudeDepth: extrudeAmount,
+              hairTipStyle: hairMode ? hairTipStyle : undefined,
             })
           : obj
 

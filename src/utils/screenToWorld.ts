@@ -12,11 +12,19 @@ import {
   planePointToWorld,
   worldToPlanePoint,
 } from '../primitives/viewAxes'
+import {
+  planePointToStrokeFrame,
+  worldPointToStrokePlane2D,
+  type StrokePlaneFrame,
+} from '../stroke/worldProjection'
 
 const _raycaster = new THREE.Raycaster()
 const _ndc = new THREE.Vector2()
 const _hit = new THREE.Vector3()
 const _normal = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _up = new THREE.Vector3()
+const _forward = new THREE.Vector3()
 
 function orthoWorkPlane(view: OrthoViewType, depth: number): THREE.Plane {
   switch (view) {
@@ -84,6 +92,50 @@ export function clientToWorkPlane(
   return worldToPlanePoint(view, { x: hit.x, y: hit.y, z: hit.z })
 }
 
+/**
+ * Build a camera-facing stroke plane through a world focus point.
+ * Right/up match the camera so cursor motion maps stably onto the plane.
+ */
+export function buildPerspectiveStrokeFrame(
+  camera: THREE.Camera,
+  throughPoint: { x: number; y: number; z: number }
+): StrokePlaneFrame {
+  camera.updateMatrixWorld()
+  camera.matrixWorld.extractBasis(_right, _up, _forward)
+  _right.normalize()
+  camera.getWorldDirection(_normal)
+  // Plane normal faces the camera (opposite look direction).
+  _normal.negate()
+  // Re-orthogonalize up so right × up = toward-camera.
+  _up.crossVectors(_normal, _right).normalize()
+  _right.crossVectors(_up, _normal).normalize()
+  return {
+    origin: { x: throughPoint.x, y: throughPoint.y, z: throughPoint.z },
+    right: { x: _right.x, y: _right.y, z: _right.z },
+    up: { x: _up.x, y: _up.y, z: _up.z },
+  }
+}
+
+/** Raycast pointer onto a locked perspective stroke frame → 2D plane coords. */
+export function clientToPerspectiveStrokePlane(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  camera: THREE.Camera,
+  frame: StrokePlaneFrame
+): { x: number; y: number } | null {
+  const nx = frame.right.y * frame.up.z - frame.right.z * frame.up.y
+  const ny = frame.right.z * frame.up.x - frame.right.x * frame.up.z
+  const nz = frame.right.x * frame.up.y - frame.right.y * frame.up.x
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+    new THREE.Vector3(nx, ny, nz).normalize(),
+    new THREE.Vector3(frame.origin.x, frame.origin.y, frame.origin.z)
+  )
+  const hit = clientToCameraPlane(clientX, clientY, rect, camera, plane)
+  if (!hit) return null
+  return worldPointToStrokePlane2D({ x: hit.x, y: hit.y, z: hit.z }, frame)
+}
+
 /** 2D coords on the active orthographic work plane (matches stroke-to-mesh) */
 export function clientToPlane(
   clientX: number,
@@ -91,12 +143,17 @@ export function clientToPlane(
   rect: DOMRect,
   camera: THREE.Camera,
   view: ViewType,
-  depth = 0
+  depth = 0,
+  frame?: StrokePlaneFrame | null
 ): { x: number; y: number } | null {
   const ortho = orthoViewFromLegacy(view)
   if (ortho) {
     const onPlane = clientToWorkPlane(clientX, clientY, rect, camera, ortho, depth)
     if (onPlane) return onPlane
+  }
+
+  if (view === 'perspective' && frame) {
+    return clientToPerspectiveStrokePlane(clientX, clientY, rect, camera, frame)
   }
 
   const w = clientToWorld(clientX, clientY, rect, camera)
@@ -111,11 +168,15 @@ export function planeToWorld3D(
   x: number,
   y: number,
   view: ViewType,
-  depth = 0
+  depth = 0,
+  frame?: StrokePlaneFrame | null
 ): { x: number; y: number; z: number } {
   const ortho = orthoViewFromLegacy(view)
   if (ortho) {
     return planePointToWorld(ortho, x, y, depth)
+  }
+  if (frame) {
+    return planePointToStrokeFrame(x, y, frame, 0)
   }
   return { x, y, z: depth }
 }
@@ -125,7 +186,8 @@ export function planeToStroke3D(
   x: number,
   y: number,
   view: ViewType,
-  depth = 0
+  depth = 0,
+  frame?: StrokePlaneFrame | null
 ): THREE.Vector3 {
   const ortho = orthoViewFromLegacy(view)
   if (ortho) {
@@ -133,8 +195,14 @@ export function planeToStroke3D(
     const o = strokeOffset(ortho)
     return new THREE.Vector3(w.x + o.x, w.y + o.y, w.z + o.z)
   }
+  if (frame) {
+    const w = planePointToStrokeFrame(x, y, frame, 1)
+    return new THREE.Vector3(w.x, w.y, w.z)
+  }
   return new THREE.Vector3(x, y, depth + 1)
 }
+
+export type { StrokePlaneFrame }
 
 /** Raycast pointer onto horizontal ground plane (Y = groundY). */
 export function clientToGroundPlane(
