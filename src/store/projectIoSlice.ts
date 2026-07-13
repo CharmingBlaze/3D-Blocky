@@ -13,6 +13,7 @@ import {
 import { pickOpenFile } from '../io/fileDialogs'
 import { PROJECT_FILE_FILTERS } from '../io/download'
 import { importSceneFromFile } from '../io/sceneImport'
+import { confirmDiscardProject } from '../ui/appConfirm'
 import type { SceneSnapshot } from '../history/sceneHistory'
 import type {
   BillboardImage,
@@ -89,10 +90,7 @@ export function createProjectIoSlice<T extends object>(
         state.referenceImages.length > 0 ||
         state.billboardImages.length > 0 ||
         Object.keys(state.pixelDocuments).length > 0
-      if (
-        hasContent &&
-        !window.confirm('Discard the current project? Unsaved changes will be lost.')
-      ) {
+      if (hasContent && !(await confirmDiscardProject())) {
         return false
       }
 

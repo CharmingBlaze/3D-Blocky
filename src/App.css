@@ -1800,6 +1800,65 @@ html[data-theme-contrast='light'] .theme-select {
   padding: 24px;
 }
 
+.app-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.app-confirm-dialog {
+  width: min(420px, 100%);
+  padding: 18px 18px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.app-confirm-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.app-confirm-dialog p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.app-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-confirm-actions .side-btn {
+  width: auto;
+  min-width: 84px;
+  padding: 7px 12px;
+}
+
+.app-confirm-danger {
+  background: color-mix(in srgb, #e85d5d 22%, var(--bg-hover)) !important;
+  border-color: color-mix(in srgb, #e85d5d 65%, var(--border)) !important;
+  color: #ffb4b4 !important;
+}
+
+.app-confirm-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #e85d5d 32%, var(--bg-hover)) !important;
+  border-color: #e85d5d !important;
+  color: #ffd0d0 !important;
+}
+
 .ie-dialog {
   width: min(720px, 100%);
   max-height: min(90vh, 720px);

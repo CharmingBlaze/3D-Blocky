@@ -8,6 +8,8 @@ import { PrimitivesToolbar } from './components/PrimitivesToolbar'
 import { useAppStore } from './store/appStore'
 import { selectionHasComponents } from './mesh/meshSelection'
 import type { NudgeDirection } from './utils/viewNavigation'
+import { AppConfirmDialog } from './components/AppConfirmDialog'
+import { confirmDiscardProject } from './ui/appConfirm'
 
 const SidePanel = lazy(() =>
   import('./components/SidePanel').then((m) => ({ default: m.SidePanel }))
@@ -127,15 +129,17 @@ export default function App() {
       }
       if (ctrlOrMeta && e.code === 'KeyN' && !e.shiftKey) {
         e.preventDefault()
-        const state = useAppStore.getState()
-        const hasContent =
-          state.objects.length > 0 ||
-          state.referenceImages.length > 0 ||
-          state.billboardImages.length > 0 ||
-          Object.keys(state.pixelDocuments).length > 0
-        if (!hasContent || window.confirm('Discard the current project? Unsaved changes will be lost.')) {
-          state.newProject()
-        }
+        void (async () => {
+          const state = useAppStore.getState()
+          const hasContent =
+            state.objects.length > 0 ||
+            state.referenceImages.length > 0 ||
+            state.billboardImages.length > 0 ||
+            Object.keys(state.pixelDocuments).length > 0
+          if (!hasContent || (await confirmDiscardProject())) {
+            useAppStore.getState().newProject()
+          }
+        })()
         return
       }
       if (e.key === 'Tab') {
@@ -513,6 +517,7 @@ function AppOverlays() {
 
   return (
     <>
+      <AppConfirmDialog />
       {showToolRing && (
         <ToolRing onClose={() => useAppStore.getState().setShowToolRing(false)} />
       )}

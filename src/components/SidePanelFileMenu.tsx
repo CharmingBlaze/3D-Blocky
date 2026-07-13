@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { SideButtonDropdown } from './SideButtonDropdown'
+import { confirmDiscardProject } from '../ui/appConfirm'
 
 export function SidePanelFileMenu() {
   const [busy, setBusy] = useState(false)
@@ -18,11 +19,6 @@ export function SidePanelFileMenu() {
   const loadProjectFromDialog = useAppStore((s) => s.loadProjectFromDialog)
   const setShowExportDialog = useAppStore((s) => s.setShowExportDialog)
 
-  const confirmDiscard = useCallback(() => {
-    if (!hasContent) return true
-    return window.confirm('Discard the current project? Unsaved changes will be lost.')
-  }, [hasContent])
-
   const runSave = useCallback(async () => {
     setMessage(null)
     setBusy(true)
@@ -36,12 +32,12 @@ export function SidePanelFileMenu() {
     }
   }, [saveProject])
 
-  const runNew = useCallback(() => {
-    if (!confirmDiscard()) return
+  const runNew = useCallback(async () => {
+    if (hasContent && !(await confirmDiscardProject())) return
     setMessage(null)
     newProject()
     setMessage('New project.')
-  }, [confirmDiscard, newProject])
+  }, [hasContent, newProject])
 
   const runLoad = useCallback(async () => {
     setMessage(null)
@@ -59,7 +55,7 @@ export function SidePanelFileMenu() {
   const handleSelect = useCallback(
     (action: string) => {
       if (busy) return
-      if (action === 'new') runNew()
+      if (action === 'new') void runNew()
       else if (action === 'save') void runSave()
       else if (action === 'load') void runLoad()
       else if (action === 'export') setShowExportDialog(true)

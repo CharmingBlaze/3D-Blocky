@@ -75,8 +75,8 @@ const CAD_PRIMITIVE_TYPES = [
   'halfCircle',
 ] as const
 
-/** Center-based outward tests are invalid for torus-like / open-base shells. */
-const CAD_SKIP_INWARD_CHECK = new Set(['doughnut', 'ring', 'dome'])
+/** Center-based outward tests are invalid for torus-like / open-base shells / stepped solids. */
+const CAD_SKIP_INWARD_CHECK = new Set(['doughnut', 'ring', 'dome', 'stairs'])
 
 /** Primitives whose bodies should be true 4-vert quads (poles/caps may stay tris). */
 const CAD_QUAD_BODY_TYPES = [
@@ -267,6 +267,51 @@ describe('MeshBuilder', () => {
     if (!CAD_SKIP_INWARD_CHECK.has(type)) {
       expect(inwardFaceCount(obj!.positions, obj!.faces)).toBe(0)
     }
+  })
+
+  it('CAD stairs have distinct tread and riser quads, not a ramp wedge', () => {
+    const box = { min: { x: -2, y: 0, z: -4 }, max: { x: 2, y: 4, z: 4 } }
+    const obj = primitiveBoxToSceneObject(
+      'stairs',
+      box,
+      heightAxisForView('front'),
+      0x6ecbf5,
+      128
+    )
+    expect(obj).not.toBeNull()
+    expect(obj!.faces.length).toBeGreaterThan(0)
+    expect(obj!.faces.every((f) => f.length === 4)).toBe(true)
+    expect(inwardFaceCount(obj!.positions, obj!.faces, { x: 0, y: 0.5, z: 2 })).toBe(0)
+
+    let treadFaces = 0
+    let riserFaces = 0
+    const treadDepths: number[] = []
+    for (const face of obj!.faces) {
+      const raw = computeFaceNormal(obj!.positions, [face[0]!, face[1]!, face[2]!])
+      const len = Math.hypot(raw.x, raw.y, raw.z) || 1
+      const n = { x: raw.x / len, y: raw.y / len, z: raw.z / len }
+      const ys = face.map((i) => obj!.positions[i]!.y)
+      const zs = face.map((i) => obj!.positions[i]!.z)
+      const ySpan = Math.max(...ys) - Math.min(...ys)
+      const zSpan = Math.max(...zs) - Math.min(...zs)
+      if (n.y > 0.85 && ySpan < 1e-6) {
+        treadFaces++
+        treadDepths.push(zSpan)
+      }
+      if (n.z < -0.85 && zSpan < 1e-6 && ySpan > 0.1) {
+        riserFaces++
+      }
+    }
+    expect(treadFaces).toBeGreaterThanOrEqual(2)
+    expect(riserFaces).toBeGreaterThanOrEqual(2)
+    // Each tread covers one step depth — not the full remaining run (ramp look).
+    const fullRun = 8
+    expect(Math.max(...treadDepths)).toBeLessThan(fullRun * 0.75)
+
+    const yLevels = [
+      ...new Set(obj!.positions.map((p) => Math.round(p.y * 1000) / 1000)),
+    ].sort((a, b) => a - b)
+    expect(yLevels.length).toBeGreaterThanOrEqual(3)
   })
 
   it('CAD cylinder sides are quads with triangle caps', () => {

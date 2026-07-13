@@ -255,8 +255,11 @@ export function createInscribedStairs(
   const hy = size.y / 2
   const hz = size.z / 2
   const baseY = center.y - hy
+  const topY = center.y + hy
   const cx = center.x
   const cz = center.z
+  const zFront = cz - hz
+  const zBack = cz + hz
 
   const steps = Math.max(2, Math.min(14, Math.round((2 * hy) / Math.max(hz * 0.45, 0.5))))
   const rise = (2 * hy) / steps
@@ -286,75 +289,57 @@ export function createInscribedStairs(
     )
   }
 
+  // Underside
   quad(
     cx - hx,
     baseY,
-    cz - hz,
+    zFront,
     cx + hx,
     baseY,
-    cz - hz,
+    zFront,
     cx + hx,
     baseY,
-    cz + hz,
+    zBack,
     cx - hx,
     baseY,
-    cz + hz
+    zBack
   )
 
+  // Back wall (full height)
   quad(
     cx + hx,
     baseY,
-    cz - hz,
-    cx + hx,
+    zBack,
+    cx - hx,
     baseY,
-    cz + hz,
+    zBack,
+    cx - hx,
+    topY,
+    zBack,
     cx + hx,
-    baseY + steps * rise,
-    cz + hz,
-    cx + hx,
-    baseY + steps * rise,
-    cz - hz
+    topY,
+    zBack
   )
 
   for (let s = 0; s < steps; s++) {
-    const z0 = cz - hz + s * tread
+    const z0 = zFront + s * tread
+    const z1 = z0 + tread
     const y0 = baseY + s * rise
     const y1 = y0 + rise
 
+    // Riser — vertical face at the front of this step
     quad(cx - hx, y0, z0, cx + hx, y0, z0, cx + hx, y1, z0, cx - hx, y1, z0)
-    quad(cx - hx, y1, z0, cx + hx, y1, z0, cx + hx, y1, cz + hz, cx - hx, y1, cz + hz)
+    // Tread — horizontal face for this step only (not the full remaining depth)
+    quad(cx - hx, y1, z0, cx + hx, y1, z0, cx + hx, y1, z1, cx - hx, y1, z1)
+
+    // Solid side panels under this tread (stepped silhouette in side view)
+    quad(cx - hx, baseY, z0, cx - hx, baseY, z1, cx - hx, y1, z1, cx - hx, y1, z0)
+    quad(cx + hx, baseY, z1, cx + hx, baseY, z0, cx + hx, y1, z0, cx + hx, y1, z1)
   }
 
-  const fillSideX = (x: number) => {
-    const outline: [number, number][] = [[cz - hz, baseY]]
-    for (let s = 0; s < steps; s++) {
-      const zFront = cz - hz + s * tread
-      const yTop = baseY + (s + 1) * rise
-      outline.push([zFront, yTop])
-      if (s < steps - 1) {
-        outline.push([cz - hz + (s + 1) * tread, yTop])
-      } else {
-        outline.push([cz + hz, yTop])
-      }
-    }
-    outline.push([cz + hz, baseY])
-
-    const pivot = b.addVertex(x, baseY, cz - hz)
-    for (let i = 1; i < outline.length - 1; i++) {
-      const a = outline[i]!
-      const b0 = outline[i + 1]!
-      b.addTriangle(
-        pivot,
-        b.addVertex(x, a[1], a[0]),
-        b.addVertex(x, b0[1], b0[0])
-      )
-    }
-  }
-
-  fillSideX(cx - hx)
-  fillSideX(cx + hx)
-
-  return finalize(b.build(), center)
+  // Box center often sits in empty air above lower steps — use a point inside the solid.
+  const solidRef = { x: cx, y: baseY + rise * 0.5, z: zBack - tread * 0.5 }
+  return finalize(b.build(), solidRef)
 }
 
 function starProfilePoints(outerH: number, outerV: number, points: number): [number, number][] {
