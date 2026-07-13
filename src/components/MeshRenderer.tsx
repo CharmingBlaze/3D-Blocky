@@ -383,22 +383,39 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   useEffect(() => {
     return subscribeUvDraft((snapshot) => {
-      if (!snapshot || snapshot.objectId !== object.id) return
       const mesh = meshRef.current
       const topology = uvPatchRef.current.topology
       if (!mesh || !topology) return
+
+      if (snapshot && snapshot.objectId === object.id) {
+        if (
+          patchMeshGeometryUvs(
+            mesh.geometry,
+            topology,
+            snapshot.uvs,
+            uvPatchRef.current.flatShading
+          )
+        ) {
+          invalidate()
+        }
+        return
+      }
+
+      // Draft cleared — restore committed UVs from the scene object.
       if (
+        (!snapshot || snapshot.objectId !== object.id) &&
+        object.uvs?.length &&
         patchMeshGeometryUvs(
           mesh.geometry,
           topology,
-          snapshot.uvs,
+          object.uvs,
           uvPatchRef.current.flatShading
         )
       ) {
         invalidate()
       }
     })
-  }, [object.id, invalidate])
+  }, [object.id, object.uvs, invalidate])
 
   const emissive = useMemo(() => new THREE.Color(0x000000), [])
   const emissiveIntensity = 0
@@ -434,7 +451,7 @@ export const MeshRenderer = memo(function MeshRenderer({
           config={config}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
-          opacity={xrayOpacity}
+          opacity={displayMode === 'wireframe' ? 0 : xrayOpacity}
           side={xraySide}
           map={texture}
           useVertexColors={useVertexColors}

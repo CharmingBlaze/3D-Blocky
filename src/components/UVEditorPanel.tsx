@@ -38,15 +38,41 @@ import {
   collectIslandSnapTargets,
   collectVertexSnapTargets,
   snapUvDrag,
-  snapIslandDrag,
-  snapPixelToTargets,
   type UvSnapContext,
   type UvSnapMode,
 } from '../uv/uvSnap'
 import { type UvUnwrapMethod } from '../uv/uvUnwrap'
 import type { Uv2 } from '../uv/uvTypes'
-import { clearUvDraft, setUvDraft } from '../uv/uvDraftRelay'
+import { clearUvDraft, scheduleUvDraft } from '../uv/uvDraftRelay'
+import {
+  applyFaceDragOverlayTransform,
+  applyFaceRotateOverlayTransform,
+  applyFaceScaleOverlayTransform,
+  clearFaceDragOverlay,
+  faceDragScreenDelta,
+  faceDragScreenToUvDelta,
+  faceRotateAngleFromUv,
+  type FaceDragPreviewState,
+  type FaceRotatePreviewState,
+  type FaceScalePreviewState,
+} from '../uv/uvFaceDragPreview'
+import {
+  applyUvLive3dDelta,
+  isCssUvLiveOverlayMode,
+  uvScreenOriginFromPivot,
+  writeUvLive3dPool,
+  type UvLiveOverlayMode,
+} from '../uv/uvTransformSession'
+import {
+  isUvEditorScrollbarTarget,
+  uvEditorPanCssFromPainted,
+  uvEditorPanFromScrollRatio,
+  uvEditorScrollAxisMetrics,
+  uvEditorScrollDocSpan,
+  uvEditorZoomAtScreenPoint,
+} from '../uv/uvEditorView'
 import { UvEditorToolbar } from './uv/UvEditorToolbar'
+import { UvObjectPreview } from './uv/UvObjectPreview'
 
 const HANDLE_SIZE = 7
 const ROTATE_HANDLE_RADIUS = 7
@@ -271,9 +297,14 @@ function drawNavigatorArrow(
   ctx.restore()
 }
 
-export function UVEditorPanel() {
+export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   const theme = useTheme()
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const viewLayerRef = useRef<HTMLDivElement | null>(null)
+  const screenOverlayRef = useRef<HTMLCanvasElement | null>(null)
+  const paintedViewRef = useRef({ panX: 0, panY: 0, zoom: 1 })
+  const viewportSizeRef = useRef({ w: 0, h: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
     kind: UvDragKind | 'pending'
@@ -296,10 +327,30 @@ export function UVEditorPanel() {
   } | null>(null)
 
   const draftUvsRef = useRef<Uv2[] | null>(null)
+  const pendingTopologyRef = useRef<{ objectId: string; faceUvIndices: number[][] } | null>(null)
   const previewRelayRafRef = useRef<number | null>(null)
+  /** Store-topology UV pool for live 3D preview during face-drag (separate from editor detach). */
+  const faceDrag3dRef = useRef<{
+    indices: number[]
+    starts: Uv2[]
+    pool: Uv2[]
+  } | null>(null)
   const redrawRafRef = useRef<number | null>(null)
-  const canvasSizeRef = useRef({ w: 0, h: 0 })
+  const canvasSizeRef = useRef({ w: 0, h: 0 }) // viewport buffer size
   const liveViewRef = useRef<{ panX: number; panY: number; zoom: number } | null>(null)
+  /** During face move/rotate, omit selected islands from the main canvas (they live on the overlay). */
+  const omitSelectionPaintRef = useRef(false)
+  const faceDragPreviewRef = useRef<FaceDragPreviewState | null>(null)
+  const faceRotatePreviewRef = useRef<FaceRotatePreviewState | null>(null)
+  const faceScalePreviewRef = useRef<FaceScalePreviewState | null>(null)
+  /** Blockbench-style session: css-* freezes atlas + CSS; repaint freezes atlas + overlay redraw. */
+  const liveOverlayModeRef = useRef<UvLiveOverlayMode | null>(null)
+  const selectionOverlayRef = useRef<HTMLCanvasElement | null>(null)
+  const scrollThumbHRef = useRef<HTMLDivElement | null>(null)
+  const scrollThumbVRef = useRef<HTMLDivElement | null>(null)
+  const faceDragCssLiveRef = useRef(false)
+  const zoomViewRafRef = useRef<number | null>(null)
+  const pendingZoomViewRef = useRef<{ zoom: number; panX: number; panY: number } | null>(null)
   const dragWindowListenersRef = useRef<{
     pointerId: number
     onMove: (e: PointerEvent) => void
@@ -578,15 +629,11 @@ export function UVEditorPanel() {
     (faceIndices: number[]): SceneObjectWithUVs | null => {
       if (!obj || !objectId || !ensured) return null
       const detached = detachFacesUvTopology(obj, faceIndices)
-      updateObject(objectId, {
-        uvs: detached.uvs,
-        faceUvIndices: detached.faceUvIndices,
-        uvAutoPacked: true,
-      })
+      pendingTopologyRef.current = { objectId, faceUvIndices: detached.faceUvIndices }
       ensuredRef.current = detached
       return detached
     },
-    [obj, objectId, ensured, updateObject]
+    [obj, objectId, ensured]
   )
 
   const getSelectionPivotUv = useCallback(
@@ -808,91 +855,41 @@ export function UVEditorPanel() {
     })
   }, [texW, texH, setPan, setZoom])
 
-  // Custom Overlay Scrollbar calculations
-  const cw = canvasSizeRef.current.w || 600
-  const ch = canvasSizeRef.current.h || 600
-
-  const xMinVisible = -pan.x / zoom
-  const xMaxVisible = (cw - pan.x) / zoom
-  const yMinVisible = -pan.y / zoom
-  const yMaxVisible = (ch - pan.y) / zoom
+  // Scrollbars use a fixed padded-atlas document so thumbs stay meaningful when zoomed in.
+  const containerEl = containerRef.current
+  if (containerEl) {
+    const w = containerEl.clientWidth
+    const h = containerEl.clientHeight
+    if (w > 0 && h > 0) viewportSizeRef.current = { w, h }
+  }
+  const cw = viewportSizeRef.current.w || containerEl?.clientWidth || 600
+  const ch = viewportSizeRef.current.h || containerEl?.clientHeight || 600
 
   const docX0 = -texW * 0.5
   const docX1 = texW * 1.5
   const docY0 = -texH * 0.5
   const docY1 = texH * 1.5
+  const docSpanX = Math.max(docX1 - docX0, 1)
+  const docSpanY = Math.max(docY1 - docY0, 1)
+  const viewW = cw / Math.max(zoom, 1e-6)
+  const viewH = ch / Math.max(zoom, 1e-6)
+  const xMinVisible = -pan.x / Math.max(zoom, 1e-6)
+  const yMinVisible = -pan.y / Math.max(zoom, 1e-6)
 
-  const minDocX = Math.min(docX0, xMinVisible)
-  const maxDocX = Math.max(docX1, xMaxVisible)
-  const minDocY = Math.min(docY0, yMinVisible)
-  const maxDocY = Math.max(docY1, yMaxVisible)
-
-  const spanX = Math.max(maxDocX - minDocX, 1)
-  const spanY = Math.max(maxDocY - minDocY, 1)
-  const viewW = cw / zoom
-  const viewH = ch / zoom
-
-  const trackW = cw - 16
-  const thumbRatioX = Math.min(1, viewW / spanX)
-  const thumbW = Math.max(24, trackW * thumbRatioX)
-  const posRatioX = spanX - viewW > 0 ? (xMinVisible - minDocX) / (spanX - viewW) : 0
+  const trackW = Math.max(1, cw - 16)
+  const trackH = Math.max(1, ch - 16)
+  const thumbW = Math.max(24, trackW * Math.min(1, viewW / docSpanX))
+  const thumbHSize = Math.max(24, trackH * Math.min(1, viewH / docSpanY))
+  const scrollRangeX = Math.max(0, docSpanX - viewW)
+  const scrollRangeY = Math.max(0, docSpanY - viewH)
+  const posRatioX =
+    scrollRangeX > 0 ? Math.max(0, Math.min(1, (xMinVisible - docX0) / scrollRangeX)) : 0
+  const posRatioY =
+    scrollRangeY > 0 ? Math.max(0, Math.min(1, (yMinVisible - docY0) / scrollRangeY)) : 0
   const thumbX = (trackW - thumbW) * posRatioX
-
-  const trackH = ch - 16
-  const thumbRatioY = Math.min(1, viewH / spanY)
-  const thumbHSize = Math.max(24, trackH * thumbRatioY)
-  const posRatioY = spanY - viewH > 0 ? (yMinVisible - minDocY) / (spanY - viewH) : 0
   const thumbY = (trackH - thumbHSize) * posRatioY
-
-  const handleScrollHMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startClientX = e.clientX
-    const startPanX = pan.x
-
-    const currentZoom = zoom
-    const currentPanY = pan.y
-    const ratio = (spanX - viewW) / Math.max(1, trackW - thumbW)
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startClientX
-      const nextPanX = startPanX - dx * ratio * currentZoom
-      setUvEditorView(currentZoom, nextPanX, currentPanY)
-    }
-
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-  }, [pan.x, pan.y, zoom, spanX, viewW, trackW, thumbW, setUvEditorView])
-
-  const handleScrollVMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startClientY = e.clientY
-    const startPanY = pan.y
-
-    const currentZoom = zoom
-    const currentPanX = pan.x
-    const ratio = (spanY - viewH) / Math.max(1, trackH - thumbHSize)
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const dy = moveEvent.clientY - startClientY
-      const nextPanY = startPanY - dy * ratio * currentZoom
-      setUvEditorView(currentZoom, currentPanX, nextPanY)
-    }
-
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-    }
-
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-  }, [pan.x, pan.y, zoom, spanY, viewH, trackH, thumbHSize, setUvEditorView])
+  const showScrollH = scrollRangeX > 1e-3
+  const showScrollV = scrollRangeY > 1e-3
 
   const getViewPanZoom = useCallback(() => {
     const live = liveViewRef.current
@@ -905,13 +902,204 @@ export function UVEditorPanel() {
     }
   }, [])
 
-  const clearPanPreview = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    canvas.style.transform = ''
-    canvas.style.willChange = ''
-  }, [])
+  /** Pan moves the frozen viewport paint; zoom/content changes call redraw. */
+  const applyCamera = useCallback(() => {
+    const layer = viewLayerRef.current
+    if (!layer) return
+    const live = getViewPanZoom()
+    const painted = paintedViewRef.current
+    if (Math.abs(live.zoom - painted.zoom) > 1e-6) {
+      layer.style.transform = ''
+      return
+    }
+    layer.style.transform = uvEditorPanCssFromPainted(painted, live)
+  }, [getViewPanZoom])
 
+  const syncScrollThumbsFromView = useCallback(
+    (view: { panX: number; panY: number; zoom: number }) => {
+      const container = containerRef.current
+      const vw = Math.max(1, viewportSizeRef.current.w || container?.clientWidth || 600)
+      const vh = Math.max(1, viewportSizeRef.current.h || container?.clientHeight || 600)
+      const z = Math.max(view.zoom, 1e-6)
+      const xMin = -view.panX / z
+      const yMin = -view.panY / z
+      const visW = vw / z
+      const visH = vh / z
+      const d0x = -texW * 0.5
+      const d1x = texW * 1.5
+      const d0y = -texH * 0.5
+      const d1y = texH * 1.5
+      const spanXv = Math.max(d1x - d0x, 1)
+      const spanYv = Math.max(d1y - d0y, 1)
+      const trackWv = Math.max(1, vw - 16)
+      const trackHv = Math.max(1, vh - 16)
+      const thumbWv = Math.max(24, trackWv * Math.min(1, visW / spanXv))
+      const thumbHv = Math.max(24, trackHv * Math.min(1, visH / spanYv))
+      const rangeX = Math.max(0, spanXv - visW)
+      const rangeY = Math.max(0, spanYv - visH)
+      const posXv = rangeX > 0 ? Math.max(0, Math.min(1, (xMin - d0x) / rangeX)) : 0
+      const posYv = rangeY > 0 ? Math.max(0, Math.min(1, (yMin - d0y) / rangeY)) : 0
+      if (scrollThumbHRef.current) {
+        scrollThumbHRef.current.style.left = `${(trackWv - thumbWv) * posXv}px`
+        scrollThumbHRef.current.style.width = `${thumbWv}px`
+      }
+      if (scrollThumbVRef.current) {
+        scrollThumbVRef.current.style.top = `${(trackHv - thumbHv) * posYv}px`
+        scrollThumbVRef.current.style.height = `${thumbHv}px`
+      }
+    },
+    [texW, texH]
+  )
+
+  const finishScrollbarPan = useCallback(() => {
+    const live = liveViewRef.current
+    if (!live) return
+    // Do not clear liveView here — clearing before the store updates snaps the camera back.
+    setUvEditorView(live.zoom, live.panX, live.panY)
+    applyCamera()
+  }, [setUvEditorView, applyCamera])
+
+  const handleScrollHThumbDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const container = containerRef.current
+      if (container) {
+        viewportSizeRef.current = { w: container.clientWidth, h: container.clientHeight }
+      }
+      const startClientX = e.clientX
+      const view = getViewPanZoom()
+      const startPanX = view.panX
+      const currentZoom = view.zoom
+      const currentPanY = view.panY
+      const vw = Math.max(1, viewportSizeRef.current.w || 600)
+      const { span } = uvEditorScrollDocSpan(texW)
+      const { panPerPx } = uvEditorScrollAxisMetrics(vw, currentZoom, span)
+      liveViewRef.current = { zoom: currentZoom, panX: startPanX, panY: currentPanY }
+      dragRef.current = null
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        const dx = moveEvent.clientX - startClientX
+        liveViewRef.current = {
+          zoom: currentZoom,
+          panX: startPanX - dx * panPerPx,
+          panY: currentPanY,
+        }
+        applyCamera()
+        syncScrollThumbsFromView(liveViewRef.current)
+      }
+
+      const onPointerUp = () => {
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', onPointerUp)
+        window.removeEventListener('pointercancel', onPointerUp)
+        finishScrollbarPan()
+      }
+
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerup', onPointerUp)
+      window.addEventListener('pointercancel', onPointerUp)
+    },
+    [getViewPanZoom, texW, applyCamera, syncScrollThumbsFromView, finishScrollbarPan]
+  )
+
+  const handleScrollVThumbDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const container = containerRef.current
+      if (container) {
+        viewportSizeRef.current = { w: container.clientWidth, h: container.clientHeight }
+      }
+      const startClientY = e.clientY
+      const view = getViewPanZoom()
+      const startPanY = view.panY
+      const currentZoom = view.zoom
+      const currentPanX = view.panX
+      const vh = Math.max(1, viewportSizeRef.current.h || 600)
+      const { span } = uvEditorScrollDocSpan(texH)
+      const { panPerPx } = uvEditorScrollAxisMetrics(vh, currentZoom, span)
+      liveViewRef.current = { zoom: currentZoom, panX: currentPanX, panY: startPanY }
+      dragRef.current = null
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        const dy = moveEvent.clientY - startClientY
+        liveViewRef.current = {
+          zoom: currentZoom,
+          panX: currentPanX,
+          panY: startPanY - dy * panPerPx,
+        }
+        applyCamera()
+        syncScrollThumbsFromView(liveViewRef.current)
+      }
+
+      const onPointerUp = () => {
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', onPointerUp)
+        window.removeEventListener('pointercancel', onPointerUp)
+        finishScrollbarPan()
+      }
+
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerup', onPointerUp)
+      window.addEventListener('pointercancel', onPointerUp)
+    },
+    [getViewPanZoom, texH, applyCamera, syncScrollThumbsFromView, finishScrollbarPan]
+  )
+
+  const handleScrollHTrackDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.target !== e.currentTarget || e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const clickX = e.clientX - rect.left
+      const view = getViewPanZoom()
+      const vw = Math.max(1, viewportSizeRef.current.w || cw)
+      const { doc0, span } = uvEditorScrollDocSpan(texW)
+      const { track, thumb, range } = uvEditorScrollAxisMetrics(vw, view.zoom, span)
+      if (range <= 0) return
+      const ratio = Math.max(0, Math.min(1, (clickX - thumb / 2) / Math.max(1, track - thumb)))
+      liveViewRef.current = {
+        zoom: view.zoom,
+        panX: uvEditorPanFromScrollRatio(doc0, range, ratio, view.zoom),
+        panY: view.panY,
+      }
+      dragRef.current = null
+      applyCamera()
+      syncScrollThumbsFromView(liveViewRef.current)
+      finishScrollbarPan()
+    },
+    [getViewPanZoom, cw, texW, applyCamera, syncScrollThumbsFromView, finishScrollbarPan]
+  )
+
+  const handleScrollVTrackDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.target !== e.currentTarget || e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const clickY = e.clientY - rect.top
+      const view = getViewPanZoom()
+      const vh = Math.max(1, viewportSizeRef.current.h || ch)
+      const { doc0, span } = uvEditorScrollDocSpan(texH)
+      const { track, thumb, range } = uvEditorScrollAxisMetrics(vh, view.zoom, span)
+      if (range <= 0) return
+      const ratio = Math.max(0, Math.min(1, (clickY - thumb / 2) / Math.max(1, track - thumb)))
+      liveViewRef.current = {
+        zoom: view.zoom,
+        panX: view.panX,
+        panY: uvEditorPanFromScrollRatio(doc0, range, ratio, view.zoom),
+      }
+      dragRef.current = null
+      applyCamera()
+      syncScrollThumbsFromView(liveViewRef.current)
+      finishScrollbarPan()
+    },
+    [getViewPanZoom, ch, texH, applyCamera, syncScrollThumbsFromView, finishScrollbarPan]
+  )
 
   const screenToUvPixel = useCallback(
     (clientX: number, clientY: number) => {
@@ -946,27 +1134,152 @@ export function UVEditorPanel() {
     [uvEditorAutoFit, getSelectionBBoxPx, getViewPanZoom, frameToFaceIndices]
   )
 
+  const clearSelectionOverlay = useCallback(() => {
+    faceDragCssLiveRef.current = false
+    liveOverlayModeRef.current = null
+    faceDragPreviewRef.current = null
+    faceRotatePreviewRef.current = null
+    faceScalePreviewRef.current = null
+    faceDrag3dRef.current = null
+    omitSelectionPaintRef.current = false
+    clearFaceDragOverlay(selectionOverlayRef.current)
+  }, [])
+
   const redraw = useCallback(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
+    const screen = screenOverlayRef.current
     if (!canvas || !container) return
     const mesh = ensuredRef.current ?? ensured
+
     const cw = container.clientWidth
     const ch = container.clientHeight
-    if (canvasSizeRef.current.w !== cw || canvasSizeRef.current.h !== ch) {
-      canvas.width = cw
-      canvas.height = ch
-      canvasSizeRef.current = { w: cw, h: ch }
+    viewportSizeRef.current = { w: cw, h: ch }
+    if (screen) {
+      if (screen.width !== cw) screen.width = cw
+      if (screen.height !== ch) screen.height = ch
+      const sctx = screen.getContext('2d')
+      if (sctx) sctx.clearRect(0, 0, cw, ch)
     }
-    clearPanPreview()
+
+    // Face-transform preview freezes the atlas; camera pan still works via CSS.
+    if (faceDragCssLiveRef.current) return
+
+    const { panX, panY, zoom: viewZoom } = getViewPanZoom()
+    // Viewport-sized buffer (not world×zoom) — keeps large textures editable.
+    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2)
+    const bufW = Math.max(1, Math.floor(cw * dpr))
+    const bufH = Math.max(1, Math.floor(ch * dpr))
+    if (canvas.width !== bufW || canvas.height !== bufH) {
+      canvas.width = bufW
+      canvas.height = bufH
+    }
+    canvas.style.width = `${cw}px`
+    canvas.style.height = `${ch}px`
+    canvasSizeRef.current = { w: bufW, h: bufH }
+    const overlay = selectionOverlayRef.current
+    if (overlay) {
+      if (overlay.width !== bufW) overlay.width = bufW
+      if (overlay.height !== bufH) overlay.height = bufH
+      overlay.style.width = `${cw}px`
+      overlay.style.height = `${ch}px`
+    }
+
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.imageSmoothingEnabled = false
 
-    const { panX, panY, zoom: viewZoom } = getViewPanZoom()
-    const hoverFace = hoverRef.current.face
-    const hoverPoint = hoverRef.current.point
+    // Hover is drawn on the screen overlay — avoid full atlas repaints on mousemove.
+    const omitSelected = omitSelectionPaintRef.current
+    const lw = (n: number) => n / Math.max(viewZoom, 1e-6)
 
+    const paintSelectedFacesAndChrome = () => {
+      if (!mesh || regionFacesForEdit.length === 0) return
+      const uvs = getUvs()
+      drawRegionFill(ctx, mesh, uvs, regionFacesForEdit, theme.css['--accent-soft'], texW, texH)
+      drawRegionBoundary(
+        ctx,
+        mesh,
+        uvs,
+        regionFacesForEdit,
+        theme.accent,
+        lw(2.25),
+        texW,
+        texH,
+        isolatedBoundaryEdges ?? undefined
+      )
+
+      const box = getSelectionBBoxPx(regionFacesForEdit)
+      const handle = getRotateHandlePx(regionFacesForEdit)
+      const pivotPx = uvToPixel(getSelectionPivotUv(regionFacesForEdit), texW, texH)
+
+      if (box) {
+        ctx.setLineDash([lw(5), lw(4)])
+        ctx.strokeStyle = theme.accent
+        ctx.globalAlpha = 0.55
+        ctx.lineWidth = lw(1)
+        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 1
+        ctx.setLineDash([])
+
+        const hs = lw(RESIZE_HANDLE_SIZE)
+        const handles = [
+          { x: box.minX, y: box.minY },
+          { x: box.cx, y: box.minY },
+          { x: box.maxX, y: box.minY },
+          { x: box.maxX, y: box.cy },
+          { x: box.maxX, y: box.maxY },
+          { x: box.cx, y: box.maxY },
+          { x: box.minX, y: box.maxY },
+          { x: box.minX, y: box.cy },
+        ]
+        for (const h of handles) {
+          ctx.fillStyle = theme.text
+          ctx.strokeStyle = theme.accent
+          ctx.lineWidth = lw(1)
+          ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+          ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+        }
+
+        ctx.setLineDash([lw(3), lw(3)])
+        ctx.strokeStyle = theme.accent
+        ctx.globalAlpha = 0.25
+        ctx.fillStyle = theme.css['--accent-soft']
+        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 0.55
+        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+        ctx.globalAlpha = 1
+        ctx.setLineDash([])
+      }
+
+      if (handle) {
+        ctx.beginPath()
+        ctx.moveTo(pivotPx.x, pivotPx.y)
+        ctx.lineTo(handle.x, handle.y)
+        ctx.strokeStyle = theme.accent
+        ctx.globalAlpha = 0.7
+        ctx.lineWidth = lw(1)
+        ctx.stroke()
+        ctx.globalAlpha = 1
+
+        const hr = lw(ROTATE_HANDLE_RADIUS)
+        ctx.beginPath()
+        ctx.arc(handle.x, handle.y, hr, 0, Math.PI * 2)
+        ctx.fillStyle = theme.accent
+        ctx.fill()
+        ctx.strokeStyle = theme.text
+        ctx.lineWidth = lw(1.25)
+        ctx.stroke()
+
+        ctx.beginPath()
+        ctx.arc(handle.x, handle.y, hr * 0.55, 0.25 * Math.PI, 1.45 * Math.PI)
+        ctx.strokeStyle = theme.uvCanvasBg
+        ctx.lineWidth = lw(1.25)
+        ctx.stroke()
+      }
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, cw, ch)
     ctx.save()
     ctx.translate(panX, panY)
@@ -975,6 +1288,8 @@ export function UVEditorPanel() {
     if (!mesh) {
       drawChecker(ctx, texW, texH, theme.uvGridA, theme.uvGridB)
       ctx.restore()
+      paintedViewRef.current = { panX, panY, zoom: viewZoom }
+      applyCamera()
       return
     }
 
@@ -1001,13 +1316,13 @@ export function UVEditorPanel() {
 
     ctx.strokeStyle = theme.accent
     ctx.globalAlpha = 0.45
-    ctx.lineWidth = 2 / viewZoom
+    ctx.lineWidth = lw(2)
     ctx.strokeRect(0, 0, texW, texH)
     ctx.globalAlpha = 1
 
     if (resolveUvMappingMode(mesh) === 'perFace') {
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-      ctx.lineWidth = 1.25 / viewZoom
+      ctx.lineWidth = lw(1.25)
       ctx.beginPath()
       for (let c = 1; c < BLOCKBENCH_ATLAS_COLS; c++) {
         const x = (c * texW) / BLOCKBENCH_ATLAS_COLS
@@ -1033,7 +1348,7 @@ export function UVEditorPanel() {
 
     if (uvEditorShowGrid) {
       ctx.strokeStyle = 'rgba(255,255,255,0.12)'
-      ctx.lineWidth = 1 / viewZoom
+      ctx.lineWidth = lw(1)
       const stepX = texW / uvEditorGridDivisions
       const stepY = texH / uvEditorGridDivisions
       ctx.beginPath()
@@ -1046,53 +1361,30 @@ export function UVEditorPanel() {
       ctx.stroke()
     }
 
-    ctx.strokeStyle = theme.accent
-    ctx.globalAlpha = 0.9
-    ctx.lineWidth = 1.5 / viewZoom
-
     const uvs = getUvs()
-    const hoverGroupId =
-      hoverFace !== null && faceGroupMap ? (faceGroupMap.faceToGroup[hoverFace] ?? null) : null
+    // Hover highlight is on the screen overlay — keep the atlas paint stable.
+    const hoverGroupId = null as number | null
     const hasFaceSelection = uvEditorMode === 'faces' && selectedFaceSet.size > 0
+    const skipSelectedRegions = hasFaceSelection
+    const liveOmitUvIndices =
+      omitSelected && dragRef.current?.uvIndices?.length
+        ? new Set(dragRef.current.uvIndices)
+        : null
 
     if (uvEditorMode === 'faces' && mesh) {
-      if (isolatedFaceView) {
-        drawRegionFill(
-          ctx,
-          mesh,
-          uvs,
-          visibleFaceIndices,
-          theme.css['--accent-soft'],
-          texW,
-          texH
-        )
-        drawRegionBoundary(
-          ctx,
-          mesh,
-          uvs,
-          visibleFaceIndices,
-          theme.accent,
-          2.25 / viewZoom,
-          texW,
-          texH,
-          isolatedBoundaryEdges ?? undefined
-        )
-      } else if (faceGroupMap) {
+      if (faceGroupMap) {
         for (const group of faceGroupMap.groups) {
           const state = resolveUvRegionState(group, selectedFaceSet, hoverGroupId)
+          if (skipSelectedRegions && state === 'selected') continue
           const dimmed = hasFaceSelection && state === 'idle'
 
           let fill = 'rgba(255,255,255,0.04)'
           let stroke = 'rgba(255,255,255,0.22)'
-          let strokeW = 1.25 / viewZoom
+          let strokeW = lw(1.25)
           if (state === 'selected') {
             fill = theme.css['--accent-soft']
             stroke = theme.accent
-            strokeW = 2.25 / viewZoom
-          } else if (state === 'hover') {
-            fill = theme.css['--accent-orange-soft']
-            stroke = theme.meshHover
-            strokeW = 2 / viewZoom
+            strokeW = lw(2.25)
           } else if (dimmed) {
             fill = 'rgba(0,0,0,0.06)'
             stroke = 'rgba(255,255,255,0.07)'
@@ -1114,6 +1406,7 @@ export function UVEditorPanel() {
       } else {
         ctx.beginPath()
         for (const fi of visibleFaceIndices) {
+          if (skipSelectedRegions && selectedFaceSet.has(fi)) continue
           const pts = getFacePixels(fi)
           if (pts.length < 3) continue
           ctx.moveTo(pts[0].x, pts[0].y)
@@ -1123,11 +1416,19 @@ export function UVEditorPanel() {
         ctx.fillStyle = 'rgba(255,255,255,0.03)'
         ctx.fill()
         ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+        ctx.lineWidth = lw(1)
         ctx.stroke()
       }
     } else {
       ctx.beginPath()
       for (const fi of visibleFaceIndices) {
+        // Live point-edit session: those faces move on the overlay instead.
+        if (
+          liveOmitUvIndices &&
+          mesh.faceUvIndices[fi]?.some((ui) => liveOmitUvIndices.has(ui))
+        ) {
+          continue
+        }
         const pts = getFacePixels(fi)
         if (pts.length < 3) continue
         ctx.moveTo(pts[0].x, pts[0].y)
@@ -1137,6 +1438,7 @@ export function UVEditorPanel() {
       ctx.fillStyle = 'rgba(255,255,255,0.03)'
       ctx.fill()
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+      ctx.lineWidth = lw(1)
       ctx.stroke()
     }
 
@@ -1147,99 +1449,35 @@ export function UVEditorPanel() {
       }
 
       for (const ui of handleSet) {
+        if (liveOmitUvIndices?.has(ui)) continue
         const uv = getUvs()[ui] ?? { u: 0, v: 0 }
         const { x, y } = uvToPixel(uv, texW, texH)
         const selected = uvEditorSelectedPoints.includes(ui)
-        const hovered = hoverPoint === ui
-        const hs = (hovered ? HANDLE_SIZE + 2 : HANDLE_SIZE) / viewZoom
-        ctx.fillStyle = selected ? theme.accent : hovered ? theme.meshHover : theme.text
-        ctx.strokeStyle = selected || hovered ? theme.text : theme.accent
-        ctx.lineWidth = 1 / viewZoom
+        const hs = lw(HANDLE_SIZE)
+        ctx.fillStyle = selected ? theme.accent : theme.text
+        ctx.strokeStyle = selected ? theme.text : theme.accent
+        ctx.lineWidth = lw(1)
         ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs)
         ctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs)
       }
     }
 
-    if (uvEditorMode === 'faces' && regionFacesForEdit.length > 0) {
-      const box = getSelectionBBoxPx(regionFacesForEdit)
-      const handle = getRotateHandlePx(regionFacesForEdit)
-      const pivotPx = uvToPixel(getSelectionPivotUv(regionFacesForEdit), texW, texH)
-
-      if (box) {
-        ctx.setLineDash([5 / viewZoom, 4 / viewZoom])
-        ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.55
-        ctx.lineWidth = 1 / viewZoom
-        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 1
-        ctx.setLineDash([])
-
-        const hs = RESIZE_HANDLE_SIZE / viewZoom
-        const handles = [
-          { x: box.minX, y: box.minY },
-          { x: box.cx, y: box.minY },
-          { x: box.maxX, y: box.minY },
-          { x: box.maxX, y: box.cy },
-          { x: box.maxX, y: box.maxY },
-          { x: box.cx, y: box.maxY },
-          { x: box.minX, y: box.maxY },
-          { x: box.minX, y: box.cy },
-        ]
-        for (const h of handles) {
-          ctx.fillStyle = theme.text
-          ctx.strokeStyle = theme.accent
-          ctx.lineWidth = 1 / viewZoom
-          ctx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
-          ctx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
-        }
-
-        ctx.setLineDash([3 / viewZoom, 3 / viewZoom])
-        ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.25
-        ctx.fillStyle = theme.css['--accent-soft']
-        ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 0.55
-        ctx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
-        ctx.globalAlpha = 1
-        ctx.setLineDash([])
-      }
-
-      if (handle) {
-        ctx.beginPath()
-        ctx.moveTo(pivotPx.x, pivotPx.y)
-        ctx.lineTo(handle.x, handle.y)
-        ctx.strokeStyle = theme.accent
-        ctx.globalAlpha = 0.7
-        ctx.lineWidth = 1 / viewZoom
-        ctx.stroke()
-        ctx.globalAlpha = 1
-
-        const hr = ROTATE_HANDLE_RADIUS / viewZoom
-        ctx.beginPath()
-        ctx.arc(handle.x, handle.y, hr, 0, Math.PI * 2)
-        ctx.fillStyle = theme.accent
-        ctx.fill()
-        ctx.strokeStyle = theme.text
-        ctx.lineWidth = 1.25 / viewZoom
-        ctx.stroke()
-
-        ctx.beginPath()
-        ctx.arc(handle.x, handle.y, hr * 0.55, 0.25 * Math.PI, 1.45 * Math.PI)
-        ctx.strokeStyle = theme.uvCanvasBg
-        ctx.lineWidth = 1.25 / viewZoom
-        ctx.stroke()
-      }
+    if (!omitSelected && uvEditorMode === 'faces' && regionFacesForEdit.length > 0) {
+      paintSelectedFacesAndChrome()
     }
 
     if (dragRef.current?.kind === 'marquee' && dragRef.current.marquee) {
       const m = dragRef.current.marquee
       ctx.strokeStyle = theme.accent
-      ctx.setLineDash([4 / viewZoom, 4 / viewZoom])
+      ctx.setLineDash([lw(4), lw(4)])
+      ctx.lineWidth = lw(1)
       ctx.strokeRect(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0)
       ctx.setLineDash([])
     }
 
     ctx.restore()
+    paintedViewRef.current = { panX, panY, zoom: viewZoom }
+    applyCamera()
 
     const navBox =
       uvEditorSelectedFaces.length > 0
@@ -1261,20 +1499,25 @@ export function UVEditorPanel() {
               return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 }
             })()
           : null
-    if (navBox) {
-      drawNavigatorArrow(ctx, cw, ch, panX, panY, viewZoom, navBox, theme.accent, theme.uvCanvasBg)
+    if (navBox && screen) {
+      const sctx = screen.getContext('2d')
+      if (sctx) {
+        drawNavigatorArrow(sctx, cw, ch, panX, panY, viewZoom, navBox, theme.accent, theme.uvCanvasBg)
+      }
     }
   }, [
     ensured,
-    obj,
     faceGroupMap,
     selectedFaceSet,
     visibleFaceIndices,
-    isolatedFaceView,
+    isolatedBoundaryEdges,
+    groupBoundaryEdges,
+    regionFacesForEdit,
     getFacePixels,
     texW,
     texH,
     getViewPanZoom,
+    applyCamera,
     uvEditorShowGrid,
     uvEditorTilePreview,
     uvEditorGridDivisions,
@@ -1289,10 +1532,6 @@ export function UVEditorPanel() {
     getSelectionPivotUv,
     getUvs,
     theme,
-    clearPanPreview,
-    pan.x,
-    pan.y,
-    zoom,
   ])
 
   const scheduleRedraw = useCallback(() => {
@@ -1303,9 +1542,332 @@ export function UVEditorPanel() {
     })
   }, [redraw])
 
-  const applyPanPreview = useCallback(() => {
-    scheduleRedraw()
-  }, [scheduleRedraw])
+  const paintSelectionOverlay = useCallback(
+    (opts?: { pose?: 'start' | 'draft' }) => {
+      const overlay = selectionOverlayRef.current
+      const container = containerRef.current
+      const mesh = ensuredRef.current ?? ensured
+      const pose = opts?.pose ?? 'start'
+      if (!overlay || !container || !mesh) return
+
+      const cw = container.clientWidth
+      const ch = container.clientHeight
+      const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2)
+      const bufW = Math.max(1, Math.floor(cw * dpr))
+      const bufH = Math.max(1, Math.floor(ch * dpr))
+      if (overlay.width !== bufW) overlay.width = bufW
+      if (overlay.height !== bufH) overlay.height = bufH
+      overlay.style.width = `${cw}px`
+      overlay.style.height = `${ch}px`
+
+      const octx = overlay.getContext('2d')
+      if (!octx) return
+      octx.imageSmoothingEnabled = false
+      const { panX, panY, zoom: viewZoom } = paintedViewRef.current
+      const lw = (n: number) => n / Math.max(viewZoom, 1e-6)
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      octx.clearRect(0, 0, cw, ch)
+      octx.save()
+      octx.translate(panX, panY)
+      octx.scale(viewZoom, viewZoom)
+
+      const drag = dragRef.current
+      const savedDraft = draftUvsRef.current
+      // CSS transforms need the gesture-start silhouette; repaint mode uses live draft UVs.
+      if (pose === 'start' && drag?.uvIndices && drag.startUvs) {
+        const base = savedDraft ?? mesh.uvs
+        const startPose = base.map((uv) => ({ ...uv }))
+        for (let i = 0; i < drag.uvIndices.length; i++) {
+          startPose[drag.uvIndices[i]!] = { ...drag.startUvs[i]! }
+        }
+        draftUvsRef.current = startPose
+      }
+      const uvs = getUvs()
+
+      const facesForOverlay =
+        regionFacesForEdit.length > 0
+          ? regionFacesForEdit
+          : (() => {
+              // Point edits: outline faces that share the dragged UV indices.
+              if (!drag?.uvIndices?.length) return [] as number[]
+              const wanted = new Set(drag.uvIndices)
+              const faces: number[] = []
+              for (let fi = 0; fi < mesh.faceUvIndices.length; fi++) {
+                const idxs = mesh.faceUvIndices[fi]
+                if (idxs?.some((ui) => wanted.has(ui))) faces.push(fi)
+              }
+              return faces
+            })()
+
+      if (facesForOverlay.length > 0) {
+        drawRegionFill(octx, mesh, uvs, facesForOverlay, theme.css['--accent-soft'], texW, texH)
+        drawRegionBoundary(
+          octx,
+          mesh,
+          uvs,
+          facesForOverlay,
+          theme.accent,
+          lw(2.25),
+          texW,
+          texH,
+          isolatedBoundaryEdges ?? undefined
+        )
+        const box = getSelectionBBoxPx(facesForOverlay)
+        if (box) {
+          const hs = lw(RESIZE_HANDLE_SIZE)
+          octx.strokeStyle = theme.accent
+          octx.globalAlpha = 0.55
+          octx.lineWidth = lw(1)
+          octx.strokeRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+          octx.globalAlpha = 0.28
+          octx.fillStyle = theme.css['--accent-soft']
+          octx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY)
+          octx.globalAlpha = 1
+          for (const h of [
+            { x: box.minX, y: box.minY },
+            { x: box.cx, y: box.minY },
+            { x: box.maxX, y: box.minY },
+            { x: box.maxX, y: box.cy },
+            { x: box.maxX, y: box.maxY },
+            { x: box.cx, y: box.maxY },
+            { x: box.minX, y: box.maxY },
+            { x: box.minX, y: box.cy },
+          ]) {
+            octx.fillStyle = theme.text
+            octx.strokeStyle = theme.accent
+            octx.fillRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+            octx.strokeRect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+          }
+        }
+      }
+
+      // Point handles (points mode / vertex drag).
+      const pointIndices =
+        drag?.kind === 'handle' || drag?.activeKind === 'handle'
+          ? drag.uvIndices ?? []
+          : uvEditorSelectedPoints
+      if (pointIndices.length > 0) {
+        const hs = lw(HANDLE_SIZE)
+        for (const ui of pointIndices) {
+          const uv = uvs[ui]
+          if (!uv) continue
+          const p = uvToPixel(uv, texW, texH)
+          octx.fillStyle = theme.accent
+          octx.strokeStyle = theme.text
+          octx.lineWidth = lw(1)
+          octx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
+          octx.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
+        }
+      }
+
+      octx.restore()
+      draftUvsRef.current = savedDraft
+      if (pose === 'draft' || !isCssUvLiveOverlayMode(liveOverlayModeRef.current)) {
+        overlay.style.transform = ''
+        overlay.style.transformOrigin = ''
+      }
+    },
+    [
+      ensured,
+      regionFacesForEdit,
+      getUvs,
+      theme,
+      texW,
+      texH,
+      isolatedBoundaryEdges,
+      getSelectionBBoxPx,
+      uvEditorSelectedPoints,
+    ]
+  )
+
+  const paintHoverOverlay = useCallback(() => {
+    const screen = screenOverlayRef.current
+    const container = containerRef.current
+    const mesh = ensuredRef.current ?? ensured
+    if (!screen || !container) return
+    const cw = container.clientWidth
+    const ch = container.clientHeight
+    if (cw <= 0 || ch <= 0) return
+    if (screen.width !== cw) screen.width = cw
+    if (screen.height !== ch) screen.height = ch
+    const sctx = screen.getContext('2d')
+    if (!sctx) return
+    sctx.clearRect(0, 0, cw, ch)
+
+    const { panX, panY, zoom: viewZoom } = getViewPanZoom()
+    const hoverFace = hoverRef.current.face
+    const hoverPoint = hoverRef.current.point
+
+    if (mesh && (hoverFace !== null || hoverPoint !== null) && !faceDragCssLiveRef.current) {
+      const lw = (n: number) => n / Math.max(viewZoom, 1e-6)
+      sctx.save()
+      sctx.translate(panX, panY)
+      sctx.scale(viewZoom, viewZoom)
+      if (hoverFace !== null && uvEditorMode === 'faces') {
+        const groupId = faceGroupMap?.faceToGroup[hoverFace] ?? null
+        const group =
+          groupId !== null && faceGroupMap
+            ? faceGroupMap.groups.find((g) => g.id === groupId) ?? null
+            : null
+        const faces = group?.faceIndices ?? [hoverFace]
+        drawRegionFill(sctx, mesh, getUvs(), faces, theme.css['--accent-orange-soft'], texW, texH)
+        drawRegionBoundary(
+          sctx,
+          mesh,
+          getUvs(),
+          faces,
+          theme.meshHover,
+          lw(2),
+          texW,
+          texH,
+          group ? groupBoundaryEdges.get(group.id) : undefined
+        )
+      }
+      if (hoverPoint !== null && uvEditorMode === 'points') {
+        const uv = getUvs()[hoverPoint] ?? { u: 0, v: 0 }
+        const { x, y } = uvToPixel(uv, texW, texH)
+        const hs = lw(HANDLE_SIZE + 2)
+        sctx.fillStyle = theme.meshHover
+        sctx.strokeStyle = theme.text
+        sctx.lineWidth = lw(1)
+        sctx.fillRect(x - hs / 2, y - hs / 2, hs, hs)
+        sctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs)
+      }
+      sctx.restore()
+    }
+
+    if (uvEditorSelectedFaces.length > 0) {
+      const navBox = getSelectionBBoxPx(regionFacesForEdit)
+      if (navBox) {
+        drawNavigatorArrow(sctx, cw, ch, panX, panY, viewZoom, navBox, theme.accent, theme.uvCanvasBg)
+      }
+    }
+  }, [
+    ensured,
+    getViewPanZoom,
+    getUvs,
+    faceGroupMap,
+    groupBoundaryEdges,
+    uvEditorMode,
+    theme,
+    texW,
+    texH,
+    uvEditorSelectedFaces.length,
+    getSelectionBBoxPx,
+    regionFacesForEdit,
+  ])
+
+  const beginLive3dFacePreview = useCallback(
+    (indicesOverride?: number[]) => {
+      // Live 3D uses the *store* UV topology (MeshRenderer), not the detached editor copy.
+      if (!objectId) return
+      const liveObj = useAppStore.getState().objects.find((o) => o.id === objectId)
+      if (!liveObj) return
+      const base = ensureObjectUVs(liveObj)
+      const faces = regionFacesForEditRef.current
+      const indices =
+        indicesOverride ??
+        (faces.length > 0 ? collectFaceUvIndices(faces, base) : [])
+      if (indices.length === 0) return
+      faceDrag3dRef.current = {
+        indices,
+        starts: indices.map((i) => ({ ...base.uvs[i]! })),
+        pool: base.uvs.map((uv) => ({ ...uv })),
+      }
+    },
+    [objectId, collectFaceUvIndices]
+  )
+
+  /**
+   * Blockbench-style transform session:
+   * freeze atlas → paint selection overlay once (or per-move for repaint) → live 3D UV patch.
+   */
+  const beginFaceTransformPreview = useCallback(
+    (
+      mode: UvLiveOverlayMode,
+      opts?: {
+        startClientX?: number
+        startClientY?: number
+        pivotUv?: Uv2
+        startAngle?: number
+        uvIndices?: number[]
+      }
+    ) => {
+      const { panX, panY, zoom: viewZoom } = getViewPanZoom()
+      omitSelectionPaintRef.current = true
+      faceDragCssLiveRef.current = false
+      liveOverlayModeRef.current = null
+      faceDragPreviewRef.current = null
+      faceRotatePreviewRef.current = null
+      faceScalePreviewRef.current = null
+      clearFaceDragOverlay(selectionOverlayRef.current)
+
+      beginLive3dFacePreview(opts?.uvIndices)
+
+      redraw()
+      const pose = mode === 'repaint' ? 'draft' : 'start'
+      paintSelectionOverlay({ pose })
+
+      if (mode === 'css-move' && opts?.startClientX !== undefined && opts.startClientY !== undefined) {
+        faceDragPreviewRef.current = {
+          startClientX: opts.startClientX,
+          startClientY: opts.startClientY,
+          zoom: viewZoom,
+          texW,
+          texH,
+        }
+      } else if (mode === 'css-rotate' && opts?.pivotUv && opts.startAngle !== undefined) {
+        const origin = uvScreenOriginFromPivot(opts.pivotUv, panX, panY, viewZoom, texW, texH)
+        faceRotatePreviewRef.current = {
+          pivotU: opts.pivotUv.u,
+          pivotV: opts.pivotUv.v,
+          startAngle: opts.startAngle,
+          ...origin,
+        }
+      } else if (mode === 'css-scale' && opts?.pivotUv) {
+        faceScalePreviewRef.current = uvScreenOriginFromPivot(
+          opts.pivotUv,
+          panX,
+          panY,
+          viewZoom,
+          texW,
+          texH
+        )
+      }
+
+      liveOverlayModeRef.current = mode
+      faceDragCssLiveRef.current = true
+    },
+    [getViewPanZoom, beginLive3dFacePreview, redraw, paintSelectionOverlay, texW, texH]
+  )
+
+  const beginFaceDragPreview = useCallback(
+    (startClientX: number, startClientY: number) => {
+      beginFaceTransformPreview('css-move', { startClientX, startClientY })
+    },
+    [beginFaceTransformPreview]
+  )
+
+  const beginFaceRotatePreview = useCallback(
+    (pivotUv: Uv2, startAngle: number) => {
+      beginFaceTransformPreview('css-rotate', { pivotUv, startAngle })
+    },
+    [beginFaceTransformPreview]
+  )
+
+  const beginFaceScalePreview = useCallback(
+    (pivotUv: Uv2) => {
+      beginFaceTransformPreview('css-scale', { pivotUv })
+    },
+    [beginFaceTransformPreview]
+  )
+
+  const beginHandleLivePreview = useCallback(
+    (uvIndices: number[]) => {
+      beginFaceTransformPreview('repaint', { uvIndices })
+    },
+    [beginFaceTransformPreview]
+  )
 
   const detachDragWindowListeners = useCallback(() => {
     const listeners = dragWindowListenersRef.current
@@ -1316,26 +1878,6 @@ export function UVEditorPanel() {
     dragWindowListenersRef.current = null
   }, [])
 
-  const attachDragWindowListeners = useCallback(
-    (pointerId: number) => {
-      detachDragWindowListeners()
-      const onWinMove = (ev: PointerEvent) => {
-        if (ev.pointerId !== pointerId) return
-        moveCanvasDragRef.current(ev)
-      }
-      const onWinUp = (ev: PointerEvent) => {
-        if (ev.pointerId !== pointerId) return
-        finishCanvasDragRef.current(ev)
-        detachDragWindowListeners()
-      }
-      dragWindowListenersRef.current = { pointerId, onMove: onWinMove, onUp: onWinUp }
-      window.addEventListener('pointermove', onWinMove)
-      window.addEventListener('pointerup', onWinUp)
-      window.addEventListener('pointercancel', onWinUp)
-    },
-    [detachDragWindowListeners]
-  )
-
   useEffect(() => () => detachDragWindowListeners(), [detachDragWindowListeners])
 
   const cancelPreviewRelay = useCallback(() => {
@@ -1345,53 +1887,26 @@ export function UVEditorPanel() {
     }
   }, [])
 
-  const publishViewportDraft = useCallback(() => {
-    if (!objectId || !draftUvsRef.current) return
-    if (previewRelayRafRef.current !== null) return
-    previewRelayRafRef.current = requestAnimationFrame(() => {
-      previewRelayRafRef.current = null
-      const draft = draftUvsRef.current
-      if (draft && objectId) setUvDraft(objectId, draft)
-    })
-  }, [objectId])
-
   const resetDraftPreview = useCallback(() => {
     cancelPreviewRelay()
     draftUvsRef.current = null
+    pendingTopologyRef.current = null
     if (objectId) clearUvDraft(objectId)
   }, [objectId, cancelPreviewRelay])
 
   const applyUvDraft = useCallback(
-    (updates: Array<{ uvIndex: number; u: number; v: number }>) => {
+    (updates: Array<{ uvIndex: number; u: number; v: number }>, redrawCanvas = true) => {
       const mesh = ensuredRef.current ?? ensured
       if (!mesh || updates.length === 0) return
-      const base = draftUvsRef.current ?? mesh.uvs.map((u) => ({ ...u }))
-      const next = base.map((u) => ({ ...u }))
+      // Allocate the working UV pool once per gesture, then mutate it in place.
+      const next = draftUvsRef.current ?? mesh.uvs.map((u) => ({ ...u }))
       for (const u of updates) next[u.uvIndex] = { u: u.u, v: u.v }
       draftUvsRef.current = next
-      publishViewportDraft()
-      const drag = dragRef.current
-      const isLiveUvDrag =
-        drag &&
-        drag.kind !== 'pan' &&
-        drag.kind !== 'marquee' &&
-        (drag.kind === 'handle' ||
-          drag.kind === 'faceDrag' ||
-          drag.kind === 'faceRotate' ||
-          drag.kind === 'faceScale' ||
-          (drag.kind === 'pending' &&
-            (drag.activeKind === 'faceDrag' || drag.activeKind === 'handle')))
-      if (isLiveUvDrag) {
-        if (redrawRafRef.current != null) {
-          cancelAnimationFrame(redrawRafRef.current)
-          redrawRafRef.current = null
-        }
-        redraw()
-      } else {
-        scheduleRedraw()
-      }
+      if (redrawCanvas) scheduleRedraw()
+      // Live 3D: patch GPU UV buffers once per frame — never write the app store mid-drag.
+      if (objectId) scheduleUvDraft(objectId, next)
     },
-    [ensured, scheduleRedraw, redraw, publishViewportDraft]
+    [ensured, scheduleRedraw, objectId]
   )
 
   const flushDraftUvs = useCallback(() => {
@@ -1399,12 +1914,15 @@ export function UVEditorPanel() {
     if (objectId) clearUvDraft(objectId)
     if (!objectId || !draftUvsRef.current) {
       draftUvsRef.current = null
+      pendingTopologyRef.current = null
       return
     }
     const draft = draftUvsRef.current
+    const pendingTopology = pendingTopologyRef.current
     const liveObj = useAppStore.getState().objects.find((o) => o.id === objectId)
     const baseUvs = liveObj?.uvs?.length ? liveObj.uvs : ensured?.uvs
     draftUvsRef.current = null
+    pendingTopologyRef.current = null
     if (!baseUvs) return
     const updates: Array<{ uvIndex: number; u: number; v: number }> = []
     for (let i = 0; i < draft.length; i++) {
@@ -1414,8 +1932,17 @@ export function UVEditorPanel() {
         updates.push({ uvIndex: i, u: d.u, v: d.v })
       }
     }
-    if (updates.length > 0) setObjectUvPoints(objectId, updates, false)
-  }, [objectId, ensured, setObjectUvPoints, cancelPreviewRelay])
+    if (updates.length === 0) return
+    if (pendingTopology?.objectId === objectId) {
+      updateObject(objectId, {
+        uvs: draft.map((uv) => ({ ...uv })),
+        faceUvIndices: pendingTopology.faceUvIndices,
+        uvAutoPacked: true,
+      })
+    } else {
+      setObjectUvPoints(objectId, updates, false)
+    }
+  }, [objectId, ensured, setObjectUvPoints, updateObject, cancelPreviewRelay])
 
   useEffect(() => {
     if (pixelDoc) {
@@ -1509,15 +2036,31 @@ export function UVEditorPanel() {
 
   useEffect(() => {
     redraw()
-  }, [redraw, obj, uvEditorOpen, pan.x, pan.y, zoom])
+  }, [redraw, obj, uvEditorOpen])
+
+  useEffect(() => {
+    // Pan: CSS over frozen paint. Zoom: repaint viewport at the new zoom.
+    if (Math.abs(zoom - paintedViewRef.current.zoom) > 1e-6) {
+      scheduleRedraw()
+    } else {
+      applyCamera()
+    }
+  }, [applyCamera, scheduleRedraw, pan.x, pan.y, zoom])
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const observer = new ResizeObserver(() => redraw())
+    const observer = new ResizeObserver(() => {
+      viewportSizeRef.current = {
+        w: container.clientWidth,
+        h: container.clientHeight,
+      }
+      applyCamera()
+      redraw()
+    })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [redraw])
+  }, [redraw, applyCamera])
 
   useEffect(() => {
     const onResize = () => redraw()
@@ -1527,7 +2070,8 @@ export function UVEditorPanel() {
 
   const pickHandle = (px: number, py: number): number | null => {
     if (!ensured || uvEditorMode !== 'points') return null
-    const threshold = HANDLE_SIZE / zoom + 2
+    const viewZ = getViewPanZoom().zoom
+    const threshold = HANDLE_SIZE / viewZ + 2
     const set = new Set<number>()
     for (const fi of visibleFaceIndices) {
       for (const ui of ensured.faceUvIndices[fi] ?? []) set.add(ui)
@@ -1543,7 +2087,7 @@ export function UVEditorPanel() {
     if (uvEditorMode !== 'faces' || uvEditorSelectedFaces.length === 0) return false
     const handle = getRotateHandlePx(regionFacesForEdit)
     if (!handle) return false
-    const threshold = ROTATE_HANDLE_RADIUS / zoom + 4
+    const threshold = ROTATE_HANDLE_RADIUS / getViewPanZoom().zoom + 4
     return Math.hypot(px - handle.x, py - handle.y) <= threshold
   }
 
@@ -1605,21 +2149,25 @@ export function UVEditorPanel() {
   }
 
   const buildSnapContext = useCallback(
-    (uvIndices: number[], excludeFaces: number[]) => {
-      if (!ensured) return
+    (
+      uvIndices: number[],
+      excludeFaces: number[],
+      source: SceneObjectWithUVs | null = ensuredRef.current ?? ensured
+    ) => {
+      if (!source) return
       snapCtxRef.current = {
         texW,
         texH,
         gridDivisions: uvEditorGridDivisions,
         vertexTargets: collectVertexSnapTargets(
-          ensured.uvs,
+          source.uvs,
           new Set(uvIndices),
           texW,
           texH
         ),
         islandTargets: collectIslandSnapTargets(
-          ensured.uvs,
-          ensured.faceUvIndices,
+          source.uvs,
+          source.faceUvIndices,
           new Set(excludeFaces),
           texW,
           texH
@@ -1656,11 +2204,19 @@ export function UVEditorPanel() {
     draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
     ensuredRef.current = mesh
 
-    buildSnapContext(d.uvIndices ?? [], editFaces)
+    buildSnapContext(d.uvIndices ?? [], editFaces, mesh)
     if (d.activeKind === 'faceDrag' && editFaces.length > 0) {
       dragSelectionBoundsRef.current = getSelectionBBoxPx(editFaces)
     } else {
       dragSelectionBoundsRef.current = null
+    }
+
+    if (d.activeKind === 'faceDrag' && d.startClientX !== undefined && d.startClientY !== undefined) {
+      beginFaceDragPreview(d.startClientX, d.startClientY)
+    } else if (d.activeKind === 'handle' && d.uvIndices) {
+      beginHandleLivePreview(d.uvIndices)
+    } else {
+      scheduleRedraw()
     }
     return true
   }, [
@@ -1669,6 +2225,9 @@ export function UVEditorPanel() {
     prepareFaceTransformMesh,
     collectFaceUvIndices,
     getSelectionBBoxPx,
+    beginFaceDragPreview,
+    beginHandleLivePreview,
+    scheduleRedraw,
   ])
 
   const startFaceDragNow = useCallback(
@@ -1684,7 +2243,7 @@ export function UVEditorPanel() {
       const uvIndices = collectFaceUvIndices(faceIndices, mesh)
       draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
       ensuredRef.current = mesh
-      buildSnapContext(uvIndices, faceIndices)
+      buildSnapContext(uvIndices, faceIndices, mesh)
       dragSelectionBoundsRef.current = getSelectionBBoxPx(faceIndices)
       dragRef.current = {
         kind: 'faceDrag',
@@ -1696,6 +2255,7 @@ export function UVEditorPanel() {
         startClientY: clientY,
         faces: [...faceIndices],
       }
+      beginFaceDragPreview(clientX, clientY)
       return true
     },
     [
@@ -1706,6 +2266,7 @@ export function UVEditorPanel() {
       collectFaceUvIndices,
       buildSnapContext,
       getSelectionBBoxPx,
+      beginFaceDragPreview,
     ]
   )
 
@@ -1748,7 +2309,9 @@ export function UVEditorPanel() {
     if (prev.face === face && prev.point === point && prev.cursor === cursor) return
     hoverRef.current = { face, point, cursor }
     setHoverCursor(cursor)
-    scheduleRedraw()
+    if (faceDragCssLiveRef.current) return
+    // Hover highlight is a cheap screen overlay — never repaint the atlas for it.
+    if (prev.face !== face || prev.point !== point) paintHoverOverlay()
   }
 
   const moveSelectionToCursor = useCallback(
@@ -1789,6 +2352,9 @@ export function UVEditorPanel() {
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Scrollbars own their pointer stream — canvas must not start pan/select/edit.
+    if (isUvEditorScrollbarTarget(e.target)) return
+
     const px = screenToUvPixel(e.clientX, e.clientY)
     let capturePointer = false
 
@@ -1873,7 +2439,7 @@ export function UVEditorPanel() {
         const pivotUv = getScalePivotForHandle(startBounds, resize)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
         ensuredRef.current = mesh
-        buildSnapContext(uvIndices, regionFacesForEdit)
+        buildSnapContext(uvIndices, regionFacesForEdit, mesh)
         dragSelectionBoundsRef.current = getSelectionBBoxPx(regionFacesForEdit)
         dragRef.current = {
           kind: 'faceScale',
@@ -1885,6 +2451,7 @@ export function UVEditorPanel() {
           startX: px.x,
           startY: px.y,
         }
+        beginFaceScalePreview(pivotUv)
         capturePointer = true
       } else if (pickRotateHandle(px.x, px.y)) {
         captureUndoPoint('Edit UV')
@@ -1895,7 +2462,7 @@ export function UVEditorPanel() {
         const startAngle = Math.atan2(startUv.v - pivotUv.v, startUv.u - pivotUv.u)
         draftUvsRef.current = mesh.uvs.map((u) => ({ ...u }))
         ensuredRef.current = mesh
-        buildSnapContext(uvIndices, regionFacesForEdit)
+        buildSnapContext(uvIndices, regionFacesForEdit, mesh)
         dragSelectionBoundsRef.current = getSelectionBBoxPx(regionFacesForEdit)
         dragRef.current = {
           kind: 'faceRotate',
@@ -1906,6 +2473,7 @@ export function UVEditorPanel() {
           startX: px.x,
           startY: px.y,
         }
+        beginFaceRotatePreview(pivotUv, startAngle)
         setIslandFields((f) => ({ ...f, rot: 0 }))
         lastIslandRotRef.current = 0
         capturePointer = true
@@ -1944,7 +2512,6 @@ export function UVEditorPanel() {
       e.preventDefault()
       const el = e.currentTarget as HTMLElement
       el.setPointerCapture(e.pointerId)
-      attachDragWindowListeners(e.pointerId)
     }
   }
 
@@ -1977,6 +2544,91 @@ export function UVEditorPanel() {
   const applyFaceDragAtPointer = (
     clientX: number,
     clientY: number,
+    _ctrlKey: boolean,
+    _drag: NonNullable<typeof dragRef.current>
+  ) => {
+    // 2D: CSS overlay only. 3D: RAF-coalesced UV buffer patch (no store writes).
+    const preview = faceDragPreviewRef.current
+    if (!faceDragCssLiveRef.current || !preview) return
+    const { sx, sy } = faceDragScreenDelta(preview, clientX, clientY)
+    // Overlay bitmap is already at paint zoom (1 screen px ≈ 1 canvas px).
+    applyFaceDragOverlayTransform(selectionOverlayRef.current, sx, sy)
+
+    const live3d = faceDrag3dRef.current
+    if (!objectId || !live3d) return
+    const { du, dv } = faceDragScreenToUvDelta(preview, clientX, clientY)
+    applyUvLive3dDelta(live3d, du, dv)
+    scheduleUvDraft(objectId, live3d.pool)
+  }
+
+  const applyFaceRotateAtPointer = (
+    clientX: number,
+    clientY: number,
+    ctrlKey: boolean
+  ): number | null => {
+    const preview = faceRotatePreviewRef.current
+    if (!faceDragCssLiveRef.current || !preview) return null
+    const px = screenToUvPixel(clientX, clientY)
+    const currUv = pixelToUv(px.x, px.y, texW, texH)
+    let angle = faceRotateAngleFromUv(preview, currUv)
+    if (ctrlKey) {
+      const step = (15 * Math.PI) / 180
+      angle = Math.round(angle / step) * step
+    }
+    applyFaceRotateOverlayTransform(selectionOverlayRef.current, preview, angle)
+
+    const live3d = faceDrag3dRef.current
+    if (objectId && live3d) {
+      const rotated = rotateUvSnapshot(live3d.starts, angle, {
+        u: preview.pivotU,
+        v: preview.pivotV,
+      })
+      writeUvLive3dPool(live3d, rotated)
+      scheduleUvDraft(objectId, live3d.pool)
+    }
+    lastIslandRotRef.current = Math.round((angle * 180) / Math.PI)
+    return angle
+  }
+
+  const applyFaceScaleAtPointer = (
+    clientX: number,
+    clientY: number,
+    ctrlKey: boolean,
+    drag: NonNullable<typeof dragRef.current>
+  ): { scaleU: number; scaleV: number } | null => {
+    const preview = faceScalePreviewRef.current
+    if (
+      !faceDragCssLiveRef.current ||
+      !preview ||
+      !drag.startBounds ||
+      !drag.resizeHandle ||
+      !drag.pivotUv ||
+      !drag.startUvs ||
+      !drag.uvIndices
+    ) {
+      return null
+    }
+    const px = screenToUvPixel(clientX, clientY)
+    const currUv = pixelToUv(px.x, px.y, texW, texH)
+    let [scaleU, scaleV] = getScaleFromHandle(drag.startBounds, drag.resizeHandle, currUv)
+    if (ctrlKey) {
+      scaleU = Math.round(scaleU / 0.1) * 0.1
+      scaleV = Math.round(scaleV / 0.1) * 0.1
+    }
+    applyFaceScaleOverlayTransform(selectionOverlayRef.current, preview, scaleU, scaleV)
+
+    const live3d = faceDrag3dRef.current
+    if (objectId && live3d) {
+      const scaled = scaleUvSnapshot(live3d.starts, scaleU, scaleV, drag.pivotUv)
+      writeUvLive3dPool(live3d, scaled)
+      scheduleUvDraft(objectId, live3d.pool)
+    }
+    return { scaleU, scaleV }
+  }
+
+  const applyHandleDragAtPointer = (
+    clientX: number,
+    clientY: number,
     ctrlKey: boolean,
     drag: NonNullable<typeof dragRef.current>
   ) => {
@@ -1986,50 +2638,19 @@ export function UVEditorPanel() {
     const currUv = pixelToUv(px.x, px.y, texW, texH)
     const du = currUv.u - startUv.u
     const dv = currUv.v - startUv.v
-
-    let snapDu = du
-    let snapDv = dv
-    const enabled = ctrlKey ? !uvEditorSnap : uvEditorSnap
-    const mode: UvSnapMode = enabled ? uvEditorSnapMode : 'off'
-    const ctx = snapCtxRef.current
-    if (ctx && mode !== 'off') {
-      if (mode === 'grid') {
-        const stepU = 1 / ctx.gridDivisions
-        const stepV = 1 / ctx.gridDivisions
-        snapDu = Math.round(du / stepU) * stepU
-        snapDv = Math.round(dv / stepV) * stepV
-      } else if (mode === 'island' && dragSelectionBoundsRef.current) {
-        const bounds = dragSelectionBoundsRef.current
-        const pdx = (currUv.u - startUv.u) * texW
-        const pdy = (currUv.v - startUv.v) * texH
-        const draggedBounds = {
-          minX: bounds.minX + pdx,
-          minY: bounds.minY + pdy,
-          maxX: bounds.maxX + pdx,
-          maxY: bounds.maxY + pdy,
-        }
-        const { dx, dy } = snapIslandDrag(
-          draggedBounds,
-          ctx.islandTargets,
-          ctx.thresholdPx
-        )
-        const snapPx = { x: px.x + dx, y: px.y + dy }
-        const snapUv = pixelToUv(snapPx.x, snapPx.y, texW, texH)
-        snapDu = snapUv.u - startUv.u
-        snapDv = snapUv.v - startUv.v
-      } else if (mode === 'vertex') {
-        const snapped = snapPixelToTargets(px.x, px.y, ctx.vertexTargets, ctx.thresholdPx)
-        const snapUv = pixelToUv(snapped.x, snapped.y, texW, texH)
-        snapDu = snapUv.u - startUv.u
-        snapDv = snapUv.v - startUv.v
-      }
-    }
-
     const updates = drag.uvIndices.map((ui, idx) => {
       const base = drag.startUvs![idx]
-      return { uvIndex: ui, u: base.u + snapDu, v: base.v + snapDv }
+      const snapped = applySnap(base.u + du, base.v + dv, ctrlKey, 'point', {
+        x: px.x,
+        y: px.y,
+      })
+      return { uvIndex: ui, u: snapped.u, v: snapped.v }
     })
-    applyUvDraft(updates)
+    // Freeze atlas: draft + overlay repaint + live 3D (Blockbench-style hot path).
+    applyUvDraft(updates, false)
+    if (liveOverlayModeRef.current === 'repaint') {
+      paintSelectionOverlay({ pose: 'draft' })
+    }
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -2061,7 +2682,8 @@ export function UVEditorPanel() {
         panY: (active.panY ?? 0) + dy,
         zoom,
       }
-      applyPanPreview()
+      applyCamera()
+      syncScrollThumbsFromView(liveViewRef.current)
       return
     }
 
@@ -2077,21 +2699,7 @@ export function UVEditorPanel() {
         applyFaceDragAtPointer(e.clientX, e.clientY, e.ctrlKey, active)
         return
       }
-
-      const px = screenToUvPixel(e.clientX, e.clientY)
-      const startUv = pixelToUv(active.startX, active.startY ?? 0, texW, texH)
-      const currUv = pixelToUv(px.x, px.y, texW, texH)
-      const du = currUv.u - startUv.u
-      const dv = currUv.v - startUv.v
-      const updates = active.uvIndices.map((ui, idx) => {
-        const base = active.startUvs![idx]
-        const snapped = applySnap(base.u + du, base.v + dv, e.ctrlKey, 'point', {
-          x: px.x,
-          y: px.y,
-        })
-        return { uvIndex: ui, u: snapped.u, v: snapped.v }
-      })
-      applyUvDraft(updates)
+      applyHandleDragAtPointer(e.clientX, e.clientY, e.ctrlKey, active)
       return
     }
 
@@ -2103,19 +2711,7 @@ export function UVEditorPanel() {
       active.resizeHandle &&
       active.pivotUv
     ) {
-      const px = screenToUvPixel(e.clientX, e.clientY)
-      const currUv = pixelToUv(px.x, px.y, texW, texH)
-      let [scaleU, scaleV] = getScaleFromHandle(active.startBounds, active.resizeHandle, currUv)
-      if (e.ctrlKey) {
-        scaleU = Math.round(scaleU / 0.1) * 0.1
-        scaleV = Math.round(scaleV / 0.1) * 0.1
-      }
-      const scaled = scaleUvSnapshot(active.startUvs, scaleU, scaleV, active.pivotUv)
-      const updates = active.uvIndices.map((ui, idx) => {
-        const uv = scaled[idx]
-        return { uvIndex: ui, u: uv.u, v: uv.v }
-      })
-      applyUvDraft(updates)
+      applyFaceScaleAtPointer(e.clientX, e.clientY, e.ctrlKey, active)
       return
     }
 
@@ -2126,21 +2722,7 @@ export function UVEditorPanel() {
       active.pivotUv &&
       active.startAngle !== undefined
     ) {
-      const px = screenToUvPixel(e.clientX, e.clientY)
-      const currUv = pixelToUv(px.x, px.y, texW, texH)
-      const pivot = active.pivotUv
-      let angle = Math.atan2(currUv.v - pivot.v, currUv.u - pivot.u) - active.startAngle
-      if (e.ctrlKey) {
-        const step = 15 * Math.PI / 180
-        angle = Math.round(angle / step) * step
-      }
-      const rotated = rotateUvSnapshot(active.startUvs, angle, pivot)
-      const updates = active.uvIndices.map((ui, idx) => {
-        const uv = rotated[idx]
-        return { uvIndex: ui, u: uv.u, v: uv.v }
-      })
-      applyUvDraft(updates)
-      lastIslandRotRef.current = Math.round((angle * 180) / Math.PI)
+      applyFaceRotateAtPointer(e.clientX, e.clientY, e.ctrlKey)
       return
     }
 
@@ -2209,10 +2791,93 @@ export function UVEditorPanel() {
     const kind = d?.kind
     const wasPending = kind === 'pending'
     const pendingDrag = wasPending ? d : null
+    const preview = faceDragPreviewRef.current
+    const rotatePreview = faceRotatePreviewRef.current
+    const scalePreview = faceScalePreviewRef.current
+    const commitFaceDragPreview =
+      kind === 'faceDrag' &&
+      faceDragCssLiveRef.current &&
+      preview &&
+      d?.uvIndices &&
+      d.startUvs
+    const commitFaceRotatePreview =
+      kind === 'faceRotate' &&
+      faceDragCssLiveRef.current &&
+      rotatePreview &&
+      d?.uvIndices &&
+      d.startUvs &&
+      d.pivotUv
+    const commitFaceScalePreview =
+      kind === 'faceScale' &&
+      faceDragCssLiveRef.current &&
+      scalePreview &&
+      d?.uvIndices &&
+      d.startUvs &&
+      d.startBounds &&
+      d.resizeHandle &&
+      d.pivotUv
+
+    if (commitFaceDragPreview && d.uvIndices && d.startUvs) {
+      let { du, dv } = faceDragScreenToUvDelta(preview, e.clientX, e.clientY)
+      const enabled = e.ctrlKey ? !uvEditorSnap : uvEditorSnap
+      const mode: UvSnapMode = enabled ? uvEditorSnapMode : 'off'
+      const snapCtx = snapCtxRef.current
+      if (snapCtx && mode === 'grid') {
+        const stepU = 1 / snapCtx.gridDivisions
+        const stepV = 1 / snapCtx.gridDivisions
+        du = Math.round(du / stepU) * stepU
+        dv = Math.round(dv / stepV) * stepV
+      }
+      const updates = d.uvIndices.map((ui, idx) => {
+        const base = d.startUvs![idx]
+        return { uvIndex: ui, u: base.u + du, v: base.v + dv }
+      })
+      applyUvDraft(updates, false)
+    } else if (commitFaceRotatePreview && d.uvIndices && d.startUvs && d.pivotUv) {
+      const px = screenToUvPixel(e.clientX, e.clientY)
+      let angle = faceRotateAngleFromUv(rotatePreview, pixelToUv(px.x, px.y, texW, texH))
+      if (e.ctrlKey) {
+        const step = (15 * Math.PI) / 180
+        angle = Math.round(angle / step) * step
+      }
+      const rotated = rotateUvSnapshot(d.startUvs, angle, d.pivotUv)
+      const updates = d.uvIndices.map((ui, idx) => {
+        const uv = rotated[idx]!
+        return { uvIndex: ui, u: uv.u, v: uv.v }
+      })
+      applyUvDraft(updates, false)
+      lastIslandRotRef.current = Math.round((angle * 180) / Math.PI)
+    } else if (
+      commitFaceScalePreview &&
+      d.uvIndices &&
+      d.startUvs &&
+      d.startBounds &&
+      d.resizeHandle &&
+      d.pivotUv
+    ) {
+      const px = screenToUvPixel(e.clientX, e.clientY)
+      let [scaleU, scaleV] = getScaleFromHandle(
+        d.startBounds,
+        d.resizeHandle,
+        pixelToUv(px.x, px.y, texW, texH)
+      )
+      if (e.ctrlKey) {
+        scaleU = Math.round(scaleU / 0.1) * 0.1
+        scaleV = Math.round(scaleV / 0.1) * 0.1
+      }
+      const scaled = scaleUvSnapshot(d.startUvs, scaleU, scaleV, d.pivotUv)
+      const updates = d.uvIndices.map((ui, idx) => {
+        const uv = scaled[idx]!
+        return { uvIndex: ui, u: uv.u, v: uv.v }
+      })
+      applyUvDraft(updates, false)
+    }
+
     dragRef.current = null
+    clearSelectionOverlay()
     if (kind === 'pan') {
       commitLiveView()
-      scheduleRedraw()
+      applyCamera()
       setHoverCursor('crosshair')
       updateHoverAt(e.clientX, e.clientY)
       return
@@ -2229,6 +2894,7 @@ export function UVEditorPanel() {
       if (kind === 'faceRotate') {
         setIslandFields((f) => ({ ...f, rot: lastIslandRotRef.current }))
       }
+      redraw()
     } else if (wasPending && objectId && ensured && pendingDrag) {
       const dist =
         pendingDrag.startClientX !== undefined
@@ -2302,34 +2968,71 @@ export function UVEditorPanel() {
     const el = containerRef.current
     if (!el || !uvEditorOpen) return
 
+    const flushPendingZoom = () => {
+      zoomViewRafRef.current = null
+      const pending = pendingZoomViewRef.current
+      if (!pending) return
+      pendingZoomViewRef.current = null
+      // Keep liveView until the store matches — clearing first made redraws
+      // briefly use the old pan and zoom away from the cursor.
+      setUvEditorView(pending.zoom, pending.panX, pending.panY)
+    }
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
+      if (faceDragCssLiveRef.current) return
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const screenX = e.clientX - rect.left
+      const screenY = e.clientY - rect.top
 
-      const state = useAppStore.getState()
-      const currentZoom = state.uvEditorZoom
-      const currentPanX = state.uvEditorPanX
-      const currentPanY = state.uvEditorPanY
+      const base = liveViewRef.current ?? {
+        zoom: useAppStore.getState().uvEditorZoom,
+        panX: useAppStore.getState().uvEditorPanX,
+        panY: useAppStore.getState().uvEditorPanY,
+      }
 
       const factor = e.deltaY > 0 ? 0.9 : 1.1
-      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor))
-
-      const sx = e.clientX - rect.left
-      const sy = e.clientY - rect.top
-
-      const px = (sx - currentPanX) / currentZoom
-      const py = (sy - currentPanY) / currentZoom
-      const nx = sx - px * nz
-      const ny = sy - py * nz
-
-      setUvEditorView(nz, nx, ny)
+      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, base.zoom * factor))
+      // Keep the UV under the cursor fixed (zoom toward mouse).
+      const next = uvEditorZoomAtScreenPoint(base, screenX, screenY, nz)
+      liveViewRef.current = next
+      pendingZoomViewRef.current = next
+      applyCamera()
+      scheduleRedraw()
+      if (zoomViewRafRef.current === null) {
+        zoomViewRafRef.current = requestAnimationFrame(flushPendingZoom)
+      }
     }
 
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [uvEditorOpen, setUvEditorView])
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      if (zoomViewRafRef.current !== null) {
+        cancelAnimationFrame(zoomViewRafRef.current)
+        zoomViewRafRef.current = null
+      }
+      const pending = pendingZoomViewRef.current
+      if (pending) {
+        pendingZoomViewRef.current = null
+        setUvEditorView(pending.zoom, pending.panX, pending.panY)
+      }
+    }
+  }, [uvEditorOpen, setUvEditorView, scheduleRedraw, applyCamera])
+
+  useEffect(() => {
+    // Drop live camera once the store has caught up (after wheel coalescing).
+    const live = liveViewRef.current
+    if (
+      live &&
+      Math.abs(live.zoom - zoom) < 1e-6 &&
+      Math.abs(live.panX - pan.x) < 1e-6 &&
+      Math.abs(live.panY - pan.y) < 1e-6
+    ) {
+      liveViewRef.current = null
+    }
+  }, [pan.x, pan.y, zoom])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2503,20 +3206,31 @@ export function UVEditorPanel() {
     setPointFields({ x: Math.round(px.x), y: Math.round(px.y) })
   }, [ensured, uvEditorSelectedPoints, texW, texH, obj, getUvs])
 
+  const beginWorkspaceResize = (event: React.PointerEvent) => {
+    const workspaceEl = workspaceRef.current
+    if (!workspaceEl) return
+    event.preventDefault()
+    const update = (clientX: number) => {
+      const rect = workspaceEl.getBoundingClientRect()
+      const ratio = Math.max(0.34, Math.min(0.72, (clientX - rect.left) / Math.max(1, rect.width)))
+      workspaceEl.style.setProperty('--uv-workspace-split', `${ratio * 100}%`)
+    }
+    const onMove = (moveEvent: PointerEvent) => update(moveEvent.clientX)
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
   if (!uvEditorOpen) return null
 
-  return (
-    <FloatingPanel
-      title="UV Editor"
-      open={uvEditorOpen}
-      state={uvEditorPanel}
-      minWidth={560}
-      minHeight={360}
-      onClose={() => setUvEditorOpen(false)}
-      onStateChange={setUvEditorPanel}
-    >
+  const editor = (
       <div
-        className="uv-editor"
+        className={workspace ? 'uv-editor uv-editor-left' : 'uv-editor'}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
       >
@@ -2585,70 +3299,87 @@ export function UVEditorPanel() {
             onContextMenu={(e) => e.preventDefault()}
             onPointerLeave={() => {
               if (dragRef.current) return
+              const prev = hoverRef.current
               hoverRef.current = { face: null, point: null, cursor: 'crosshair' }
               setHoverCursor('crosshair')
-              scheduleRedraw()
+              if (prev.face !== null || prev.point !== null) paintHoverOverlay()
             }}
             onAuxClick={(e) => e.preventDefault()}
           >
-            <canvas ref={canvasRef} className="uv-editor-canvas" />
+            <div ref={viewLayerRef} className="uv-editor-camera">
+              <canvas ref={canvasRef} className="uv-editor-canvas" />
+              <canvas ref={selectionOverlayRef} className="uv-editor-selection-overlay" aria-hidden />
+            </div>
+            <canvas ref={screenOverlayRef} className="uv-editor-screen-overlay" aria-hidden />
             {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
 
-            {/* Horizontal Scrollbar */}
-            {thumbRatioX < 1 && (
+            {showScrollH && (
               <div
                 className="uv-scrollbar uv-scrollbar-horizontal"
+                onPointerDown={handleScrollHTrackDown}
                 style={{
                   position: 'absolute',
                   left: '2px',
                   bottom: '2px',
                   width: `${trackW}px`,
-                  height: '8px',
+                  height: '10px',
                   borderRadius: '4px',
-                  zIndex: 10,
+                  zIndex: 20,
+                  cursor: 'pointer',
+                  pointerEvents: 'auto',
+                  touchAction: 'none',
                 }}
               >
                 <div
+                  ref={scrollThumbHRef}
                   className="uv-scrollbar-thumb"
-                  onMouseDown={handleScrollHMouseDown}
+                  onPointerDown={handleScrollHThumbDown}
                   style={{
                     position: 'absolute',
                     left: `${thumbX}px`,
-                    top: '1px',
+                    top: '2px',
                     width: `${thumbW}px`,
                     height: '6px',
                     borderRadius: '3px',
-                    cursor: 'pointer',
+                    cursor: 'grab',
+                    pointerEvents: 'auto',
+                    touchAction: 'none',
                   }}
                 />
               </div>
             )}
 
-            {/* Vertical Scrollbar */}
-            {thumbRatioY < 1 && (
+            {showScrollV && (
               <div
                 className="uv-scrollbar uv-scrollbar-vertical"
+                onPointerDown={handleScrollVTrackDown}
                 style={{
                   position: 'absolute',
                   right: '2px',
                   top: '2px',
-                  width: '8px',
+                  width: '10px',
                   height: `${trackH}px`,
                   borderRadius: '4px',
-                  zIndex: 10,
+                  zIndex: 20,
+                  cursor: 'pointer',
+                  pointerEvents: 'auto',
+                  touchAction: 'none',
                 }}
               >
                 <div
+                  ref={scrollThumbVRef}
                   className="uv-scrollbar-thumb"
-                  onMouseDown={handleScrollVMouseDown}
+                  onPointerDown={handleScrollVThumbDown}
                   style={{
                     position: 'absolute',
                     top: `${thumbY}px`,
-                    left: '1px',
+                    left: '2px',
                     width: '6px',
                     height: `${thumbHSize}px`,
                     borderRadius: '3px',
-                    cursor: 'pointer',
+                    cursor: 'grab',
+                    pointerEvents: 'auto',
+                    touchAction: 'none',
                   }}
                 />
               </div>
@@ -2745,6 +3476,46 @@ export function UVEditorPanel() {
           </div>
         </div>
       </div>
+  )
+
+  if (workspace) {
+    return (
+      <section className="uv-workspace uv-workspace-dedicated">
+        <header className="uv-workspace-header">
+          <div>
+            <strong>UV Workspace</strong>
+            <span>{obj ? `Editing ${obj.name}` : 'Select an object to begin'}</span>
+          </div>
+          <button type="button" onClick={() => setUvEditorOpen(false)} title="Return to modeling">
+            Back to Modeling
+          </button>
+        </header>
+        <div ref={workspaceRef} className="uv-editor-workspace">
+          {editor}
+          <div
+            className="uv-workspace-divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize UV and 3D preview panes"
+            onPointerDown={beginWorkspaceResize}
+          />
+          <UvObjectPreview object={obj} />
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <FloatingPanel
+      title="UV Editor"
+      open={uvEditorOpen}
+      state={uvEditorPanel}
+      minWidth={560}
+      minHeight={360}
+      onClose={() => setUvEditorOpen(false)}
+      onStateChange={setUvEditorPanel}
+    >
+      {editor}
     </FloatingPanel>
   )
 }

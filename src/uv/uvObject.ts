@@ -205,23 +205,30 @@ export function detachFacesUvTopology(
   const uvs = base.uvs.map(cloneUv2)
   const faceUvIndices = base.faceUvIndices.map((f) => [...f])
 
+  // uvIndex -> face indices that reference it (avoids O(faces) scan per corner).
+  const uvOwners = new Map<number, number[]>()
+  for (let fi = 0; fi < faceUvIndices.length; fi++) {
+    for (const ui of faceUvIndices[fi] ?? []) {
+      const list = uvOwners.get(ui)
+      if (list) list.push(fi)
+      else uvOwners.set(ui, [fi])
+    }
+  }
+
   for (const fi of faceIndices) {
     const cornerIndices = faceUvIndices[fi]
     if (!cornerIndices) continue
     for (let ci = 0; ci < cornerIndices.length; ci++) {
       const ui = cornerIndices[ci]!
-      let sharedWithOutside = false
-      for (let otherFi = 0; otherFi < faceUvIndices.length; otherFi++) {
-        if (selected.has(otherFi)) continue
-        if (faceUvIndices[otherFi]?.includes(ui)) {
-          sharedWithOutside = true
-          break
-        }
-      }
+      const owners = uvOwners.get(ui)
+      const sharedWithOutside = owners?.some((otherFi) => !selected.has(otherFi)) ?? false
       if (!sharedWithOutside) continue
       const newUi = uvs.length
       uvs.push(cloneUv2(uvs[ui]!))
       cornerIndices[ci] = newUi
+      const nextOwners = uvOwners.get(ui)?.filter((f) => f !== fi) ?? []
+      uvOwners.set(ui, nextOwners)
+      uvOwners.set(newUi, [fi])
     }
   }
 

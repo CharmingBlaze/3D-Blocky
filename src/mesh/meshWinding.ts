@@ -8,16 +8,18 @@ import {
   computeFaceNormal,
   meshCentroid,
 } from './MeshBuilder'
+import { triangulateMeshFace } from './faceTriangulation'
 
 /** Signed volume — positive when face windings are consistently oriented. */
 export function meshSignedVolume(mesh: HalfEdgeMesh): number {
   let volume = 0
   for (const face of mesh.faces) {
     if (face.length < 3) continue
-    const a = mesh.positions[face[0]!]!
-    for (let i = 1; i < face.length - 1; i++) {
-      const b = mesh.positions[face[i]!]!
-      const c = mesh.positions[face[i + 1]!]!
+    const tris = triangulateMeshFace(mesh.positions, face)
+    for (const [ia, ib, ic] of tris) {
+      const a = mesh.positions[face[ia]!]!
+      const b = mesh.positions[face[ib]!]!
+      const c = mesh.positions[face[ic]!]!
       volume +=
         a.x * (b.y * c.z - c.y * b.z) +
         b.x * (c.y * a.z - a.y * c.z) +

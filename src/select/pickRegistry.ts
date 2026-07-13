@@ -1,34 +1,64 @@
 import * as THREE from 'three'
+import type { ViewportSlotIndex } from '../scene/viewTypes'
 
-const registry = new Map<string, THREE.Object3D>()
+/** Per-viewport Object3D roots used for ray picking. */
+const registries = new Map<ViewportSlotIndex, Map<string, THREE.Object3D>>()
 
-export function registerPickTarget(id: string, object: THREE.Object3D): void {
+function slotRegistry(slot: ViewportSlotIndex): Map<string, THREE.Object3D> {
+  let map = registries.get(slot)
+  if (!map) {
+    map = new Map()
+    registries.set(slot, map)
+  }
+  return map
+}
+
+export function registerPickTarget(
+  slotIndex: ViewportSlotIndex,
+  id: string,
+  object: THREE.Object3D
+): void {
   object.userData.sceneObjectId = id
-  registry.set(id, object)
+  slotRegistry(slotIndex).set(id, object)
 }
 
-export function unregisterPickTarget(id: string): void {
-  registry.delete(id)
+export function unregisterPickTarget(slotIndex: ViewportSlotIndex, id: string): void {
+  const map = registries.get(slotIndex)
+  if (!map) return
+  map.delete(id)
+  if (map.size === 0) registries.delete(slotIndex)
 }
 
-export function getPickTargets(): THREE.Object3D[] {
-  return [...registry.values()]
+export function getPickTargets(slotIndex: ViewportSlotIndex): THREE.Object3D[] {
+  const map = registries.get(slotIndex)
+  return map ? [...map.values()] : []
 }
 
-export function getPickTarget(id: string): THREE.Object3D | undefined {
-  return registry.get(id)
+export function getPickTarget(
+  slotIndex: ViewportSlotIndex,
+  id: string
+): THREE.Object3D | undefined {
+  return registries.get(slotIndex)?.get(id)
 }
 
-/** @deprecated use registerPickTarget */
-export function registerPickMesh(id: string, mesh: THREE.Mesh): void {
-  registerPickTarget(id, mesh)
+export function getPickMeshes(slotIndex: ViewportSlotIndex): THREE.Mesh[] {
+  return getPickTargets(slotIndex).filter((o): o is THREE.Mesh => o instanceof THREE.Mesh)
 }
 
-/** @deprecated use unregisterPickTarget */
-export function unregisterPickMesh(id: string): void {
-  unregisterPickTarget(id)
+/** @deprecated use registerPickTarget(slot, id, mesh) */
+export function registerPickMesh(
+  slotIndex: ViewportSlotIndex,
+  id: string,
+  mesh: THREE.Mesh
+): void {
+  registerPickTarget(slotIndex, id, mesh)
 }
 
-export function getPickMeshes(): THREE.Mesh[] {
-  return getPickTargets().filter((o): o is THREE.Mesh => o instanceof THREE.Mesh)
+/** @deprecated use unregisterPickTarget(slot, id) */
+export function unregisterPickMesh(slotIndex: ViewportSlotIndex, id: string): void {
+  unregisterPickTarget(slotIndex, id)
+}
+
+export function clearPickRegistryForTests(): void {
+  registries.clear()
 }

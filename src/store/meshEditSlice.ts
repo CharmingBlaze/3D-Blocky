@@ -281,7 +281,14 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
             if (!ids.includes(o.id) || o.topologyLocked) return o
             const verts = allVertexIndices(o)
             const updated = applySelectionPlaneTransform(o, verts, op, axes)
-            return { ...o, positions: updated.positions, faces: updated.faces }
+            return {
+              ...o,
+              positions: updated.positions,
+              faces: updated.faces,
+              sketchSource: undefined,
+              vectorSource: undefined,
+              primitiveSource: undefined,
+            }
           }),
         }
       })

@@ -31,7 +31,11 @@ import {
   startPrimitiveBoxSession,
   type WorldBox,
 } from '../primitives/primitiveBoxMath'
-import { primitiveBoxToSceneObject } from '../primitives/primitiveBoxCommit'
+import {
+  primitiveBoxToSceneObject,
+  regeneratePrimitiveObject,
+  type EditablePrimitiveSourcePatch,
+} from '../primitives/primitiveBoxCommit'
 import { canExtrudeHeightInView, isOrthoView, type Axis } from '../primitives/viewAxes'
 import { maxRoundedBoxSubdivisionsForBudget } from '../mesh/meshPolyBudget'
 import type { ViewType, OrthoViewType } from '../scene/viewTypes'
@@ -116,6 +120,9 @@ export interface VectorToolsLayoutActions {
   setActivePrimitiveKind: (kind: PrimitiveKind | null) => void
   setRoundedBoxRoundness: (value: number) => void
   setRoundedBoxSubdivisions: (value: number) => void
+  updateSelectedPrimitiveSource: (changes: EditablePrimitiveSourcePatch) => void
+  commitPrimitiveSourceEdit: () => void
+  convertSelectedPrimitiveToMesh: () => void
   adjustRoundedBoxWheel: (deltaY: number, shiftKey: boolean) => boolean
   cancelPrimitiveBoxDraft: () => void
   primitiveBoxPointerDown: (
@@ -207,6 +214,9 @@ type VectorStore = VectorToolsLayoutState & {
   activeTool: string
   toolCategory: string
   objects: import('../mesh/HalfEdgeMesh').SceneObject[]
+  selectedObjectId: string | null
+  selectionObjectIds: string[]
+  pushHistory: (label?: string) => boolean
   objectTextures: Record<string, UvTextureInfo>
 }
 
@@ -796,7 +806,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
 
     setActivePrimitiveKind: (kind) => {
       store().penCancelPath()
-      const resolvedKind = kind === 'roundedBox' ? 'box' : kind
+      const resolvedKind = kind
       setPartial({
         activePrimitiveKind: resolvedKind,
         activeTool: resolvedKind ? 'primitive-box' : 'draw',
@@ -820,6 +830,34 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
           maxRoundedBoxSubdivisionsForBudget(store().polyBudget)
         ),
       }),
+
+    updateSelectedPrimitiveSource: (changes) => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!object?.primitiveSource) return
+      const updated = regeneratePrimitiveObject(object, changes)
+      if (!updated) return
+      setPartial({
+        objects: objects.map((candidate) => candidate.id === object.id ? updated : candidate),
+      })
+    },
+
+    commitPrimitiveSourceEdit: () => {
+      store().pushHistory('Edit primitive')
+    },
+
+    convertSelectedPrimitiveToMesh: () => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!object?.primitiveSource) return
+      const { primitiveSource: _source, ...meshObject } = object
+      setPartial({
+        objects: objects.map((candidate) => candidate.id === object.id ? meshObject : candidate),
+      })
+      store().commitHistory('Convert primitive to mesh')
+    },
 
     adjustRoundedBoxWheel: (deltaY, shiftKey) => {
       const {

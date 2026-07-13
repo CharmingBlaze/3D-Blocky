@@ -55,7 +55,7 @@ export interface LoopCutDraft {
   t: number
 }
 
-export type KnifeSnapKind = 'vertex' | 'edge' | 'face'
+export type KnifeSnapKind = 'vertex' | 'edge' | 'face' | 'face-center' | 'grid' | 'path'
 
 export interface KnifePoint {
   world: Vec3
@@ -70,6 +70,8 @@ export interface KnifeDraft {
   view: ViewType
   /** Camera forward at last hover/click — used for Enter-to-confirm. */
   viewForward: Vec3
+  /** Non-destructive guidance when the current path cannot produce a cut. */
+  feedback: string | null
 }
 
 export interface BendDraft {
@@ -118,6 +120,7 @@ export interface CadMeshToolsLayoutActions {
   knifeHover: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
   knifeClearHover: () => void
   knifeAddPoint: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
+  knifeRemoveLastPoint: () => void
   knifeApply: (viewForward?: Vec3) => void
   knifeCancel: () => void
   /** @deprecated use knifeAddPoint / knifeApply — kept for transitional call sites */
@@ -404,6 +407,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
             hover: { ...point },
             view,
             viewForward: { ...viewForward },
+            feedback: null,
           },
           activeTool: 'knife',
         } as unknown as Partial<S>)
@@ -416,6 +420,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           hover: { ...point, world: { ...point.world }, local: { ...point.local } },
           view: prev?.view ?? view,
           viewForward: { ...viewForward },
+          feedback: null,
         },
         activeTool: 'knife',
       } as unknown as Partial<S>)
@@ -454,8 +459,26 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           hover: null,
           view,
           viewForward: { ...viewForward },
+          feedback: null,
         },
         activeTool: 'knife',
+      } as unknown as Partial<S>)
+    },
+
+    knifeRemoveLastPoint: () => {
+      const { knifeDraft } = get()
+      if (!knifeDraft) return
+      if (knifeDraft.points.length <= 1) {
+        set({ knifeDraft: null } as unknown as Partial<S>)
+        return
+      }
+      set({
+        knifeDraft: {
+          ...knifeDraft,
+          points: knifeDraft.points.slice(0, -1),
+          hover: null,
+          feedback: null,
+        },
       } as unknown as Partial<S>)
     },
 
@@ -464,7 +487,13 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       if (!knifeDraft || knifeDraft.points.length < 2) return
       const obj = objects.find((o) => o.id === knifeDraft.objectId)
       if (!obj || obj.topologyLocked) {
-        set({ knifeDraft: null } as unknown as Partial<S>)
+        set({
+          knifeDraft: {
+            ...knifeDraft,
+            hover: null,
+            feedback: obj?.topologyLocked ? 'Unlock topology before cutting' : 'Mesh is no longer available',
+          },
+        } as unknown as Partial<S>)
         return
       }
 
@@ -484,7 +513,13 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       }
 
       if (applied === 0) {
-        set({ knifeDraft: null } as unknown as Partial<S>)
+        set({
+          knifeDraft: {
+            ...knifeDraft,
+            hover: null,
+            feedback: 'No visible face was crossed — adjust the cut points',
+          },
+        } as unknown as Partial<S>)
         return
       }
 
@@ -523,6 +558,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         knifeDraft: {
           ...knifeDraft,
           hover: { world: { ...world }, local, snap: 'face' },
+          feedback: null,
         },
       } as unknown as Partial<S>)
     },

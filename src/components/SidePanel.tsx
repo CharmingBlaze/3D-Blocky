@@ -27,6 +27,7 @@ import { SidePanelPixelEditorMenu } from './SidePanelPixelEditorMenu'
 import { SideButtonDropdown } from './SideButtonDropdown'
 import { resolveTargetObjectIds } from '../material/materialEditorSlice'
 import { computeSelectionFitFrame } from '../viewport/fitViewports'
+import { boxCenterSize } from '../primitives/primitiveBoxMath'
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Draw a closed outline → filled flat 3D shape' },
@@ -278,6 +279,11 @@ export function SidePanel() {
     extrudeAmount,
     setExtrudeAmount,
     commitExtrudeDepth,
+    editingSketchObjectId,
+    setEditingSketchObject,
+    updateSelectedSketchSource,
+    commitSketchSourceEdit,
+    convertSelectedSketchToMesh,
     activeShapeKind,
     setActiveShapeKind,
     activePrimitiveKind,
@@ -286,6 +292,9 @@ export function SidePanel() {
     roundedBoxSubdivisions,
     setRoundedBoxRoundness,
     setRoundedBoxSubdivisions,
+    updateSelectedPrimitiveSource,
+    commitPrimitiveSourceEdit,
+    convertSelectedPrimitiveToMesh,
     showGrid,
     setShowGrid,
     showDensityHeatmap,
@@ -350,6 +359,10 @@ export function SidePanel() {
     toggleSubDSelected,
     setSubDLevelsSelected,
     applySubDSelected,
+    knifeDraft,
+    knifeRemoveLastPoint,
+    knifeApply,
+    knifeCancel,
     loopCutDraft,
     loopCutCommit,
     loopCutCancel,
@@ -394,6 +407,11 @@ export function SidePanel() {
       extrudeAmount: s.extrudeAmount,
       setExtrudeAmount: s.setExtrudeAmount,
       commitExtrudeDepth: s.commitExtrudeDepth,
+      editingSketchObjectId: s.editingSketchObjectId,
+      setEditingSketchObject: s.setEditingSketchObject,
+      updateSelectedSketchSource: s.updateSelectedSketchSource,
+      commitSketchSourceEdit: s.commitSketchSourceEdit,
+      convertSelectedSketchToMesh: s.convertSelectedSketchToMesh,
       activeShapeKind: s.activeShapeKind,
       setActiveShapeKind: s.setActiveShapeKind,
       activePrimitiveKind: s.activePrimitiveKind,
@@ -402,6 +420,9 @@ export function SidePanel() {
       roundedBoxSubdivisions: s.roundedBoxSubdivisions,
       setRoundedBoxRoundness: s.setRoundedBoxRoundness,
       setRoundedBoxSubdivisions: s.setRoundedBoxSubdivisions,
+      updateSelectedPrimitiveSource: s.updateSelectedPrimitiveSource,
+      commitPrimitiveSourceEdit: s.commitPrimitiveSourceEdit,
+      convertSelectedPrimitiveToMesh: s.convertSelectedPrimitiveToMesh,
       showGrid: s.showGrid,
       setShowGrid: s.setShowGrid,
       showDensityHeatmap: s.showDensityHeatmap,
@@ -466,6 +487,10 @@ export function SidePanel() {
       toggleSubDSelected: s.toggleSubDSelected,
       setSubDLevelsSelected: s.setSubDLevelsSelected,
       applySubDSelected: s.applySubDSelected,
+      knifeDraft: s.knifeDraft,
+      knifeRemoveLastPoint: s.knifeRemoveLastPoint,
+      knifeApply: s.knifeApply,
+      knifeCancel: s.knifeCancel,
       loopCutDraft: s.loopCutDraft,
       loopCutCommit: s.loopCutCommit,
       loopCutCancel: s.loopCutCancel,
@@ -516,6 +541,11 @@ export function SidePanel() {
 
   const selectedSketchDoodle =
     selectedObj?.sketchSource?.isClosed ? selectedObj.sketchSource : null
+  const selectedSketchSource = selectedObj?.sketchSource ?? null
+  const selectedPrimitiveSource = selectedObj?.primitiveSource ?? null
+  const selectedPrimitiveSize = selectedPrimitiveSource
+    ? boxCenterSize(selectedPrimitiveSource.box).size
+    : null
   const selectedVectorDoodle = selectedObj?.vectorSource ?? null
   const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
 
@@ -933,15 +963,50 @@ export function SidePanel() {
 
           {isSketchOrPen && (
             <SideSection title="Stroke" order={11} collapsible>
+              {selectedSketchSource && selectedObj && (
+                <>
+                  <div className="side-chips">
+                    <span className="lock-indicator">Editable Sketch</span>
+                  </div>
+                  <SideBtnGroup cols={2}>
+                    <button
+                      type="button"
+                      className={`side-btn ${editingSketchObjectId === selectedObj.id ? 'active' : ''}`}
+                      onClick={() => setEditingSketchObject(
+                        editingSketchObjectId === selectedObj.id ? null : selectedObj.id
+                      )}
+                    >
+                      {editingSketchObjectId === selectedObj.id ? 'Hide Source' : 'Edit Sketch'}
+                    </button>
+                    <button
+                      type="button"
+                      className="side-btn"
+                      onClick={convertSelectedSketchToMesh}
+                      title="Bake the current result into a regular editable mesh"
+                    >
+                      Convert to Mesh
+                    </button>
+                  </SideBtnGroup>
+                </>
+              )}
               <SideSlider
                 label="Extrude depth"
-                value={extrudeAmount}
-                display={String(Math.round(extrudeAmount))}
+                value={selectedSketchSource?.extrudeDepth ?? extrudeAmount}
+                display={String(Math.round(selectedSketchSource?.extrudeDepth ?? extrudeAmount))}
                 min={-64}
                 max={64}
                 step={1}
-                onChange={setExtrudeAmount}
-                onCommit={selectedExtrudableDoodle ? commitExtrudeDepth : undefined}
+                onChange={(value) => {
+                  if (selectedSketchSource) updateSelectedSketchSource({ extrudeDepth: value })
+                  else setExtrudeAmount(value)
+                }}
+                onCommit={
+                  selectedSketchSource
+                    ? commitSketchSourceEdit
+                    : selectedExtrudableDoodle
+                      ? commitExtrudeDepth
+                      : undefined
+                }
               />
               {selectedExtrudableDoodle && (
                 <p className="side-color-hint muted">
@@ -960,25 +1025,114 @@ export function SidePanel() {
               )}
               <SideSlider
                 label="Poly budget"
-                value={polyBudget}
-                display={String(polyBudget)}
+                value={selectedSketchSource?.polyBudget ?? polyBudget}
+                display={String(selectedSketchSource?.polyBudget ?? polyBudget)}
                 min={24}
-                max={256}
+                max={selectedSketchSource ? 512 : 256}
                 step={4}
                 warn={!!overBudget}
-                onChange={setPolyBudget}
+                onChange={selectedSketchSource
+                  ? (value) => updateSelectedSketchSource({ polyBudget: value })
+                  : setPolyBudget}
+                onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
               />
               <SideSlider
-                label="Brush density"
-                value={brushDensity}
-                display={String(brushDensity)}
-                min={4}
-                max={24}
+                label={selectedSketchSource ? 'Sketch thickness' : 'Brush density'}
+                value={selectedSketchSource?.brushDensity ?? brushDensity}
+                display={String(selectedSketchSource?.brushDensity ?? brushDensity)}
+                min={2}
+                max={selectedSketchSource ? 48 : 24}
                 step={1}
-                onChange={setBrushDensity}
+                onChange={selectedSketchSource
+                  ? (value) => updateSelectedSketchSource({ brushDensity: value })
+                  : setBrushDensity}
+                onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
               />
               <p className="side-color-hint muted">
                 Poly budget caps mesh complexity. Brush density sets stroke thickness and default inflate depth.
+              </p>
+            </SideSection>
+          )}
+
+          {selectedPrimitiveSource && selectedPrimitiveSize && (
+            <SideSection title="Primitive" order={12} collapsible>
+              <div className="side-chips">
+                <span className="lock-indicator">Editable {selectedPrimitiveSource.type}</span>
+              </div>
+              <SideSlider
+                label="Width"
+                value={selectedPrimitiveSize.x}
+                display={selectedPrimitiveSize.x.toFixed(1)}
+                min={0.5}
+                max={256}
+                step={0.5}
+                onChange={(value) => updateSelectedPrimitiveSource({ size: { x: value } })}
+                onCommit={commitPrimitiveSourceEdit}
+              />
+              <SideSlider
+                label="Height"
+                value={selectedPrimitiveSize.y}
+                display={selectedPrimitiveSize.y.toFixed(1)}
+                min={0.5}
+                max={256}
+                step={0.5}
+                onChange={(value) => updateSelectedPrimitiveSource({ size: { y: value } })}
+                onCommit={commitPrimitiveSourceEdit}
+              />
+              <SideSlider
+                label="Depth"
+                value={selectedPrimitiveSize.z}
+                display={selectedPrimitiveSize.z.toFixed(1)}
+                min={0.5}
+                max={256}
+                step={0.5}
+                onChange={(value) => updateSelectedPrimitiveSource({ size: { z: value } })}
+                onCommit={commitPrimitiveSourceEdit}
+              />
+              <SideSlider
+                label="Detail"
+                value={selectedPrimitiveSource.polyBudget}
+                display={String(selectedPrimitiveSource.polyBudget)}
+                min={24}
+                max={512}
+                step={4}
+                onChange={(value) => updateSelectedPrimitiveSource({ polyBudget: value })}
+                onCommit={commitPrimitiveSourceEdit}
+              />
+              {selectedPrimitiveSource.type === 'roundedBox' && (
+                <>
+                  <SideSlider
+                    label="Roundness"
+                    value={selectedPrimitiveSource.roundedParams?.roundness ?? 0.25}
+                    display={`${Math.round((selectedPrimitiveSource.roundedParams?.roundness ?? 0.25) * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={(value) => updateSelectedPrimitiveSource({ roundness: value })}
+                    onCommit={commitPrimitiveSourceEdit}
+                  />
+                  <SideSlider
+                    label="Subdivisions"
+                    value={selectedPrimitiveSource.roundedParams?.subdivisions ?? 2}
+                    display={String(selectedPrimitiveSource.roundedParams?.subdivisions ?? 2)}
+                    min={0}
+                    max={4}
+                    step={1}
+                    onChange={(value) => updateSelectedPrimitiveSource({ subdivisions: value })}
+                    onCommit={commitPrimitiveSourceEdit}
+                  />
+                </>
+              )}
+              <button
+                type="button"
+                className="side-btn"
+                onClick={convertSelectedPrimitiveToMesh}
+                title="Bake this primitive into a regular vertex/edge/face mesh"
+              >
+                Convert to Mesh
+              </button>
+              <p className="side-color-hint muted">
+                Knife, sculpt, and topology edits automatically bake these parameters while Undo preserves the original.
               </p>
             </SideSection>
           )}
@@ -1285,10 +1439,31 @@ export function SidePanel() {
               </button>
             </SideBtnGroup>
             {activeTool === 'knife' && (
-              <p className="side-color-hint muted">
-                Click to place cut points · green = vertex, orange = edge · Enter confirms · Esc
-                cancels
-              </p>
+              <>
+                <p className="side-color-hint muted">
+                  Click to place points · Shift snaps edge steps and face centers · Ctrl snaps
+                  to the face grid · Enter applies · Backspace removes a point
+                </p>
+                <SideBtnGroup cols={3}>
+                  <button
+                    className="side-btn"
+                    onClick={knifeRemoveLastPoint}
+                    disabled={!knifeDraft?.points.length}
+                  >
+                    Undo Point
+                  </button>
+                  <button
+                    className="side-btn side-btn-primary"
+                    onClick={() => knifeApply()}
+                    disabled={!knifeDraft || knifeDraft.points.length < 2}
+                  >
+                    Apply
+                  </button>
+                  <button className="side-btn" onClick={knifeCancel} disabled={!knifeDraft}>
+                    Cancel
+                  </button>
+                </SideBtnGroup>
+              </>
             )}
             {selectionCount > 0 && !selectedObj?.topologyLocked && (
               <>

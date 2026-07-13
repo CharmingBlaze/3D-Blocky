@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { strokeToMesh } from '../stroke/strokeToMesh'
+import { regenerateSketchObjectFromSource } from './sketchSource'
 
 const square = [
   { x: -30, y: -30 },
@@ -49,5 +50,18 @@ describe('outline vs blob stroke modes', () => {
     expect(extrude?.name).toBe('Doodle')
     expect(blobExtrude?.name).toBe('Doodle')
     expect(extrude!.positions.length).toBe(blobExtrude!.positions.length)
+  })
+
+  it('regenerates retained sketch parameters without changing object identity', () => {
+    const original = strokeToMesh({ ...base, strokeMode: 'blob' })!
+    const updated = regenerateSketchObjectFromSource(original, {
+      brushDensity: 20,
+      polyBudget: 196,
+      extrudeDepth: 22,
+    })!
+    expect(updated.id).toBe(original.id)
+    expect(updated.sketchSource?.brushDensity).toBe(20)
+    expect(updated.sketchSource?.polyBudget).toBe(196)
+    expect(updated.sketchSource?.extrudeDepth).toBe(22)
   })
 })

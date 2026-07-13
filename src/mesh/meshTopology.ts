@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { SceneObject } from './HalfEdgeMesh'
 import { getMeshAdjacency } from './meshAdjacencyCache'
+import { getObjectFaceTriangulation } from './faceTriangulation'
 
 export const COINCIDENT_VERTEX_QUANT = 1e-5
 
@@ -114,8 +115,9 @@ export function buildFacesFillGeometry(
       positions.push(p.x, p.y, p.z)
     }
 
-    for (let i = 1; i < face.length - 1; i++) {
-      indices.push(offset, offset + i, offset + i + 1)
+    const tris = getObjectFaceTriangulation(object)[fi] ?? []
+    for (const [a, b, c] of tris) {
+      indices.push(offset + a, offset + b, offset + c)
     }
     offset += face.length
   }

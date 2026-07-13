@@ -36,6 +36,25 @@ export function cloneSceneObject(obj: SceneObject): SceneObject {
           scale: { ...obj.transform.scale },
         }
       : undefined,
+    primitiveSource: obj.primitiveSource
+      ? {
+          ...obj.primitiveSource,
+          box: {
+            min: { ...obj.primitiveSource.box.min },
+            max: { ...obj.primitiveSource.box.max },
+          },
+          roundedParams: obj.primitiveSource.roundedParams
+            ? { ...obj.primitiveSource.roundedParams }
+            : undefined,
+        }
+      : undefined,
+    sketchSource: obj.sketchSource
+      ? {
+          ...obj.sketchSource,
+          relative: obj.sketchSource.relative.map((point) => ({ ...point })),
+          center: { ...obj.sketchSource.center },
+        }
+      : undefined,
   }
 }
 

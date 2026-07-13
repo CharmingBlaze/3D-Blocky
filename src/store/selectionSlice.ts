@@ -101,7 +101,14 @@ function colorFromSelection(objects: SceneObject[], id: string | null): number |
 /** Avoid notifying subscribers when a hover pick resolves to the same component. */
 function meshHoverEquals(a: MeshPickHit | null, b: MeshPickHit | null): boolean {
   if (a === b) return true
-  if (!a || !b || a.objectId !== b.objectId || a.vertex !== b.vertex || a.face !== b.face) {
+  if (
+    !a ||
+    !b ||
+    a.objectId !== b.objectId ||
+    a.vertex !== b.vertex ||
+    a.face !== b.face ||
+    a.viewportSlot !== b.viewportSlot
+  ) {
     return false
   }
   if (!a.edge && !b.edge) return true
@@ -505,7 +512,16 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
           deps.reconcileBlobUrls()
         } else {
           set((s) => ({
-            objects: s.objects.map((o) => (o.id === obj.id ? updated : o)),
+            objects: s.objects.map((o) =>
+              o.id === obj.id
+                ? {
+                    ...updated,
+                    sketchSource: undefined,
+                    vectorSource: undefined,
+                    primitiveSource: undefined,
+                  }
+                : o
+            ),
             meshSelection: null,
           }) as unknown as Partial<S>)
         }
@@ -600,6 +616,9 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
             if (o.id !== obj.id) return o
             return {
               ...o,
+              sketchSource: undefined,
+              vectorSource: undefined,
+              primitiveSource: undefined,
               positions: o.positions.map((p, i) =>
                 verts.has(i)
                   ? {

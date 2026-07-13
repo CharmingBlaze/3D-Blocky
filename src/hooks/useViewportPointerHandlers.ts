@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Vector3 } from 'three'
 import type * as THREE from 'three'
 import { useShallow } from 'zustand/react/shallow'
-import { pushViewportInteraction, popViewportInteraction } from '../rendering/viewportFrameLoop'
+import { pushViewportSharedInteraction, popViewportSharedInteraction } from '../rendering/viewportFrameLoop'
+import type { ViewportSlotIndex } from '../scene/viewTypes'
+
 import { useAppStore } from '../store/appStore'
 import type { ViewType } from '../scene/viewTypes'
 import type { PolyDrawPointSnap } from '../store/appStore'
@@ -22,7 +24,6 @@ import {
   pickKnifeHit,
   resolveMarqueeMeshObjectId,
 } from '../select/meshPick'
-import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
 import {
   constrainPixelShape,
   estimateTexelScreenSize,
@@ -43,7 +44,7 @@ import type { ObjectTransform } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SculptTool } from '../sculpt/sculptTools'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
-import { cloneTransform, ensureTransform, localPointFromWorld, selectionWorldCenter } from '../mesh/objectTransform'
+import { cloneTransform, ensureTransform, selectionWorldCenter } from '../mesh/objectTransform'
 import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
 import {
@@ -74,6 +75,7 @@ export interface UseViewportPointerHandlersParams {
   view: ViewType
   onActivate: () => void
   layoutVisible: boolean
+  slotIndex: ViewportSlotIndex
   containerRef: React.RefObject<HTMLDivElement | null>
   cameraRef: React.RefObject<THREE.Camera | null>
 }
@@ -82,6 +84,7 @@ export function useViewportPointerHandlers({
   view,
   onActivate,
   layoutVisible,
+  slotIndex,
   containerRef,
   cameraRef,
 }: UseViewportPointerHandlersParams) {
@@ -90,14 +93,14 @@ export function useViewportPointerHandlers({
   const beginPointerInteraction = useCallback(() => {
     if (!layoutVisible || pointerInteractionRef.current) return
     pointerInteractionRef.current = true
-    pushViewportInteraction()
-  }, [layoutVisible])
+    pushViewportSharedInteraction(slotIndex)
+  }, [layoutVisible, slotIndex])
 
   const endPointerInteraction = useCallback(() => {
     if (!pointerInteractionRef.current) return
     pointerInteractionRef.current = false
-    popViewportInteraction()
-  }, [])
+    popViewportSharedInteraction(slotIndex)
+  }, [slotIndex])
 
   const lastSculptRef = useRef(0)
   const marqueeStartRef = useRef<{ x: number; y: number; additive: boolean } | null>(null)
@@ -324,10 +327,12 @@ export function useViewportPointerHandlers({
           hit &&
           (hit.vertex !== undefined || hit.edge !== undefined || hit.face !== undefined)
 
-        store.setMeshHover(hasComponent ? hit : null)
+        store.setMeshHover(
+          hasComponent && hit ? { ...hit, viewportSlot: slotIndex } : null
+        )
       })
     },
-    []
+    [slotIndex]
   )
 
   useEffect(
@@ -424,46 +429,56 @@ export function useViewportPointerHandlers({
   )
 
   const resolveKnifeHit = useCallback(
-    (clientX: number, clientY: number, preferredId: string | null, shiftKey = false) => {
+    (
+      clientX: number,
+      clientY: number,
+      preferredId: string | null,
+      shiftKey = false,
+      ctrlKey = false
+    ) => {
       const rect = containerRef.current?.getBoundingClientRect()
       const camera = cameraRef.current
       if (!rect || !camera) return null
 
       const store = useAppStore.getState()
-      const hit = pickKnifeHit(clientX, clientY, rect, camera, store.objects, preferredId)
+      const hit = pickKnifeHit(clientX, clientY, rect, camera, store.objects, preferredId, {
+        shiftKey,
+        ctrlKey,
+      })
       if (!hit) return null
 
-      let world = hit.world
-      let local = hit.local
-      const draft = store.knifeDraft
-      const anchor = draft?.points[draft.points.length - 1]?.world ?? null
-      if (shiftKey && anchor) {
-        world = constrainKnifeEndWorld(
-          anchor,
-          world,
-          (w) => {
-            const p = new Vector3(w.x, w.y, w.z).project(camera)
+      // A knife path belongs to the mesh where its first point was placed.
+      // Do not silently discard it when another object passes under the cursor.
+      const lockedObjectId = store.knifeDraft?.points.length
+        ? store.knifeDraft.objectId
+        : null
+      if (lockedObjectId && hit.objectId !== lockedObjectId) return null
+
+      // Reuse existing path points when the pointer comes back to one. This makes
+      // closed cuts and branching paths deliberate instead of creating near-duplicates.
+      if (store.knifeDraft?.objectId === hit.objectId) {
+        for (const point of store.knifeDraft.points) {
+          const screen = new Vector3(point.world.x, point.world.y, point.world.z).project(camera)
+          const sx = rect.left + (screen.x * 0.5 + 0.5) * rect.width
+          const sy = rect.top + (-screen.y * 0.5 + 0.5) * rect.height
+          if (Math.hypot(clientX - sx, clientY - sy) <= 10) {
             return {
-              x: rect.left + (p.x * 0.5 + 0.5) * rect.width,
-              y: rect.top + (-p.y * 0.5 + 0.5) * rect.height,
+              objectId: hit.objectId,
+              world: { ...point.world },
+              local: { ...point.local },
+              snap: 'path' as const,
+              vertexIndex: null,
+              edge: null,
+              faceIndex: hit.faceIndex,
             }
-          },
-          (sx, sy) => {
-            const ndcX = ((sx - rect.left) / rect.width) * 2 - 1
-            const ndcY = -((sy - rect.top) / rect.height) * 2 + 1
-            const vec = new Vector3(ndcX, ndcY, 0.5).unproject(camera)
-            return { x: vec.x, y: vec.y, z: vec.z }
-          },
-          true
-        )
-        const obj = store.objects.find((o) => o.id === hit.objectId)
-        local = obj ? localPointFromWorld(obj, world) : world
+          }
+        }
       }
 
       return {
         objectId: hit.objectId,
-        world,
-        local,
+        world: hit.world,
+        local: hit.local,
         snap: hit.snap,
         vertexIndex: hit.vertexIndex,
         edge: hit.edge,
@@ -722,7 +737,7 @@ export function useViewportPointerHandlers({
               }
               return
             }
-            if (pixelTool !== 'pencil' && pixelTool !== 'eraser') return
+            if (pixelTool !== 'pencil' && pixelTool !== 'paintBrush' && pixelTool !== 'eraser') return
 
             store.beginPixelEdit()
             store.paintOnModelPixel(docId, px.x, px.y)
@@ -761,7 +776,7 @@ export function useViewportPointerHandlers({
       }
 
       if (e.altKey && e.button === 0 && rect && camera) {
-        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
+        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
         if (picked) {
           selectObject(picked, { additive: e.shiftKey })
           return
@@ -775,7 +790,7 @@ export function useViewportPointerHandlers({
         rect &&
         camera
       ) {
-        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
+        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
         if (picked) {
           const canDrag = resolveObjectClickSelection(picked, e.shiftKey)
           if (canDrag && activeTool === 'move' && !e.shiftKey) {
@@ -875,7 +890,7 @@ export function useViewportPointerHandlers({
             }
           } else {
             const sel = store.meshSelection
-            const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera)
+            const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
             const obj =
               sel && selectionHasComponents(sel)
                 ? store.objects.find((o) => o.id === sel.objectId)
@@ -913,7 +928,7 @@ export function useViewportPointerHandlers({
         rect &&
         camera
       ) {
-        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
+        const picked = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
 
         if (picked) {
           if (e.shiftKey) {
@@ -965,7 +980,7 @@ export function useViewportPointerHandlers({
           store.knifeDraft?.objectId ??
           store.selectedObjectId ??
           (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
-        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey)
+        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey, e.ctrlKey || e.metaKey)
         if (!hit) return
         e.currentTarget.setPointerCapture(e.pointerId)
         selectObject(hit.objectId)
@@ -1228,7 +1243,7 @@ export function useViewportPointerHandlers({
           const obj = objects.find((o) => o.id === paint.objectId)
           if (doc && obj) {
             const pixelTool = store.pixelEditorTool
-            if (pixelTool !== 'pencil' && pixelTool !== 'eraser') return
+            if (pixelTool !== 'pencil' && pixelTool !== 'paintBrush' && pixelTool !== 'eraser') return
 
             const anchor = pickMeshSurfaceUv(paint.lastX, paint.lastY, rect, camera, objects, paint.objectId)
             const step = anchor
@@ -1350,7 +1365,7 @@ export function useViewportPointerHandlers({
           store.knifeDraft?.objectId ??
           store.selectedObjectId ??
           (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
-        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey)
+        const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey, e.ctrlKey || e.metaKey)
         if (hit) {
           knifeHover(
             hit.objectId,
@@ -1594,6 +1609,7 @@ export function useViewportPointerHandlers({
                 startY: start.y,
                 endX: e.clientX,
                 endY: e.clientY,
+                slotIndex,
               },
               !viewportXRay
             )
@@ -1614,7 +1630,7 @@ export function useViewportPointerHandlers({
             }
           }
         } else if (selectionMode === 'object') {
-          const picked = pickObjectAt(e.clientX, e.clientY, rect, camera)
+          const picked = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
           if (picked) {
             if (additive) addToObjectSelection([picked])
             else selectObject(picked)
@@ -1659,7 +1675,7 @@ export function useViewportPointerHandlers({
             selectReferenceImage(null)
           } else if (isComponentSelectionMode(selectionMode) && rect && camera) {
             clearMeshSelection()
-            const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera)
+            const pickedObjectId = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
             if (pickedObjectId) selectObject(pickedObjectId)
           }
         }

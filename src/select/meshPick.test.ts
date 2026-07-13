@@ -8,7 +8,7 @@ import {
   rayIntersectsLocalAabb,
 } from './meshPickGeometryCache'
 import { clearOverlayPickCacheForTests, getOverlayPickData } from './overlayPickCache'
-import { pickMeshComponent, pickMeshSurfaceWorld } from './meshPick'
+import { pickKnifeHit, pickMeshComponent, pickMeshSurfaceWorld } from './meshPick'
 
 const box = prepareSceneObject({
   id: 'pick-box',
@@ -107,6 +107,44 @@ describe('overlayPickCache', () => {
     expect(a.vertexGroups.length).toBeGreaterThan(0)
     expect(a.edgeOverlays.length).toBeGreaterThan(0)
     expect(a.faceGroups.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Blockbench-style knife snapping', () => {
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+  camera.position.set(0, 0, 5)
+  camera.lookAt(0, 0, 0)
+  camera.updateMatrixWorld()
+  const rect = {
+    left: 0, top: 0, width: 200, height: 200, right: 200, bottom: 200, x: 0, y: 0,
+    toJSON: () => ({}),
+  } as DOMRect
+  const screen = (point: THREE.Vector3) => {
+    const projected = point.clone().project(camera)
+    return { x: (projected.x * 0.5 + 0.5) * 200, y: (-projected.y * 0.5 + 0.5) * 200 }
+  }
+
+  it('uses Shift to snap a face hit to its center', () => {
+    const p = screen(new THREE.Vector3(0.25, 0.2, 1))
+    const hit = pickKnifeHit(p.x, p.y, rect, camera, [box], box.id, { shiftKey: true })
+    expect(hit?.snap).toBe('face-center')
+    expect(hit?.local).toEqual({ x: 0, y: 0, z: 1 })
+  })
+
+  it('uses Control to snap across the face-local grid', () => {
+    const p = screen(new THREE.Vector3(0.34, 0.18, 1))
+    const hit = pickKnifeHit(p.x, p.y, rect, camera, [box], box.id, { ctrlKey: true })
+    expect(hit?.snap).toBe('grid')
+    expect(hit?.local.x).toBeCloseTo(0.25)
+    expect(hit?.local.y).toBeCloseTo(0.25)
+    expect(hit?.local.z).toBeCloseTo(1)
+  })
+
+  it('uses Shift to quantize edge placement to quarter steps', () => {
+    const p = screen(new THREE.Vector3(0.36, 1, 1))
+    const hit = pickKnifeHit(p.x, p.y, rect, camera, [box], box.id, { shiftKey: true })
+    expect(hit?.snap).toBe('edge')
+    expect(hit?.local.x).toBeCloseTo(0.5)
   })
 })
 

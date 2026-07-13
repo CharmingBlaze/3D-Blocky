@@ -84,8 +84,8 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     const size = canvas.width
     const cx = size / 2
     const cy = size / 2
-    const outer = size / 2 - 2
-    const inner = outer - 14
+    const outer = size / 2 - 1
+    const inner = outer - 16
     ctx.clearRect(0, 0, size, size)
     // Hue 0° (red) at 12 o'clock — match pick/marker math (not canvas default 3 o'clock).
     for (let hueDeg = 0; hueDeg < 360; hueDeg++) {
@@ -102,15 +102,31 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     ctx.arc(cx, cy, inner, 0, Math.PI * 2)
     ctx.fillStyle = bgPanel
     ctx.fill()
-    const markerAngle = h * Math.PI * 2 - Math.PI / 2
-    const mx = cx + Math.cos(markerAngle) * (inner + 7)
-    const my = cy + Math.sin(markerAngle) * (inner + 7)
+    // Soft ring edge
     ctx.beginPath()
-    ctx.arc(mx, my, 5, 0, Math.PI * 2)
+    ctx.arc(cx, cy, outer, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(cx, cy, inner, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    const markerAngle = h * Math.PI * 2 - Math.PI / 2
+    const mx = cx + Math.cos(markerAngle) * ((inner + outer) / 2)
+    const my = cy + Math.sin(markerAngle) * ((inner + outer) / 2)
+    ctx.beginPath()
+    ctx.arc(mx, my, 6, 0, Math.PI * 2)
     ctx.fillStyle = text
     ctx.fill()
     ctx.strokeStyle = bgDark
-    ctx.lineWidth = 1.5
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(mx, my, 6.5, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+    ctx.lineWidth = 1
     ctx.stroke()
   }, [h, bgPanel, text, bgDark])
 
@@ -135,11 +151,13 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     ctx.fillStyle = black
     ctx.fillRect(0, 0, w, hPx)
     ctx.beginPath()
-    ctx.arc(s * w, (1 - v) * hPx, 5, 0, Math.PI * 2)
-    ctx.strokeStyle = text
+    ctx.arc(s * w, (1 - v) * hPx, 6, 0, Math.PI * 2)
+    ctx.strokeStyle = '#fff'
     ctx.lineWidth = 2
     ctx.stroke()
-    ctx.strokeStyle = bgDark
+    ctx.beginPath()
+    ctx.arc(s * w, (1 - v) * hPx, 6, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)'
     ctx.lineWidth = 1
     ctx.stroke()
   }, [h, s, v, text, bgDark])
@@ -193,8 +211,8 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
       <div className="mat-color-wheel-wrap">
         <canvas
           ref={canvasRef}
-          width={120}
-          height={120}
+          width={148}
+          height={148}
           className="mat-color-wheel"
           onPointerDown={(e) => {
             draggingRef.current = 'hue'
@@ -205,8 +223,8 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
       <div className="mat-color-sv-wrap">
         <canvas
           ref={svRef}
-          width={140}
-          height={100}
+          width={148}
+          height={110}
           className="mat-color-sv"
           onPointerDown={(e) => {
             draggingRef.current = 'sv'

@@ -10,7 +10,7 @@ import { prepareSceneObject } from '../mesh/objectTransform'
 import { weldSceneObjectCoincidentVertices } from '../mesh/subdivisionSurface'
 import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
 import { generateId } from '../utils/math'
-import type { WorldBox } from './primitiveBoxMath'
+import { boxCenterSize, type WorldBox } from './primitiveBoxMath'
 import type { ViewType } from '../scene/viewTypes'
 import {
   createPrimitiveInBox,
@@ -35,6 +35,30 @@ const PRIMITIVE_NAMES: Record<PrimitiveBoxType, string> = {
   halfCircle: 'Half Circle',
 }
 
+export interface PrimitiveSource {
+  type: PrimitiveBoxType
+  box: WorldBox
+  heightAxis: Axis
+  polyBudget: number
+  roundedParams?: RoundedBoxParams
+  baseView?: ViewType | null
+}
+
+export type EditablePrimitiveSourcePatch = {
+  size?: Partial<{ x: number; y: number; z: number }>
+  polyBudget?: number
+  roundness?: number
+  subdivisions?: number
+}
+
+function clonePrimitiveSource(source: PrimitiveSource): PrimitiveSource {
+  return {
+    ...source,
+    box: { min: { ...source.box.min }, max: { ...source.box.max } },
+    roundedParams: source.roundedParams ? { ...source.roundedParams } : undefined,
+  }
+}
+
 /** Weld position-coincident corners so face/edge/vertex edits stay connected. */
 function finalizeCadPrimitive(obj: SceneObject): SceneObject {
   return weldSceneObjectCoincidentVertices(prepareSceneObject(obj))
@@ -49,6 +73,14 @@ export function primitiveBoxToSceneObject(
   roundedParams?: RoundedBoxParams,
   baseView?: ViewType | null
 ): SceneObject | null {
+  const primitiveSource: PrimitiveSource = {
+    type,
+    box: { min: { ...box.min }, max: { ...box.max } },
+    heightAxis,
+    polyBudget,
+    roundedParams: roundedParams ? { ...roundedParams } : undefined,
+    baseView,
+  }
   if (type === 'roundedBox') {
     const params = roundedParams ?? { roundness: 0.25, subdivisions: 2 }
     const obj = roundedBoxFromWorldBox(box, color, params, polyBudget)
@@ -61,6 +93,7 @@ export function primitiveBoxToSceneObject(
         color,
         polyBudgetMode: 'strict',
       }),
+      primitiveSource,
     })
   }
 
@@ -83,7 +116,64 @@ export function primitiveBoxToSceneObject(
     polyBudgetMode: 'strict',
   })
 
-  return finalizeCadPrimitive(obj)
+  return finalizeCadPrimitive({ ...obj, primitiveSource })
+}
+
+/** Regenerate a retained CAD primitive without changing its scene identity or transform. */
+export function regeneratePrimitiveObject(
+  object: SceneObject,
+  changes: EditablePrimitiveSourcePatch
+): SceneObject | null {
+  const current = object.primitiveSource
+  if (!current) return null
+  const source = clonePrimitiveSource(current)
+  const { center, size } = boxCenterSize(source.box)
+  const nextSize = {
+    x: Math.max(0.5, changes.size?.x ?? size.x),
+    y: Math.max(0.5, changes.size?.y ?? size.y),
+    z: Math.max(0.5, changes.size?.z ?? size.z),
+  }
+  source.box = {
+    min: {
+      x: center.x - nextSize.x / 2,
+      y: center.y - nextSize.y / 2,
+      z: center.z - nextSize.z / 2,
+    },
+    max: {
+      x: center.x + nextSize.x / 2,
+      y: center.y + nextSize.y / 2,
+      z: center.z + nextSize.z / 2,
+    },
+  }
+  source.polyBudget = Math.max(24, Math.min(512, changes.polyBudget ?? source.polyBudget))
+  if (source.type === 'roundedBox') {
+    source.roundedParams = {
+      roundness: Math.max(0, Math.min(1, changes.roundness ?? source.roundedParams?.roundness ?? 0.25)),
+      subdivisions: Math.max(0, Math.min(4, Math.round(changes.subdivisions ?? source.roundedParams?.subdivisions ?? 2))),
+    }
+  }
+
+  const regenerated = primitiveBoxToSceneObject(
+    source.type,
+    source.box,
+    source.heightAxis,
+    object.color,
+    source.polyBudget,
+    source.roundedParams,
+    source.baseView
+  )
+  if (!regenerated) return null
+  return {
+    ...regenerated,
+    id: object.id,
+    name: object.name,
+    material: object.material,
+    transform: object.transform,
+    pivot: object.pivot,
+    smoothShading: object.smoothShading,
+    facetExaggeration: object.facetExaggeration,
+    primitiveSource: source,
+  }
 }
 
 export function primitiveBoxPreviewMesh(

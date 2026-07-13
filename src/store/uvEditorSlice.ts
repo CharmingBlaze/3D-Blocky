@@ -25,6 +25,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
 import type { SelectionMode } from './selectionSlice'
 import type { ActiveTool, ToolCategory } from './toolActivationSlice'
+
 export type UvEditorMode = 'points' | 'faces'
 
 export interface UvTextureInfo {

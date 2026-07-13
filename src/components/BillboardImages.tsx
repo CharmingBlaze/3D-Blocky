@@ -5,7 +5,9 @@ import * as THREE from 'three'
 import { useAppStore, type ActiveTool } from '../store/appStore'
 import type { BillboardImage } from '../images/imageDropTypes'
 import { useLoadedTexture } from '../rendering/textureCache'
-import { popViewportInteraction, pushViewportInteraction } from '../rendering/viewportFrameLoop'
+import { popViewportSharedInteraction, pushViewportSharedInteraction } from '../rendering/viewportFrameLoop'
+import { useViewportSlotIndex } from './ViewportSlotContext'
+
 
 const TRANSFORM_TOOLS: ActiveTool[] = ['move', 'rotate', 'scale']
 
@@ -126,6 +128,7 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
   const activeTool = useAppStore((s) => s.activeTool)
   const updateBillboardImage = useAppStore((s) => s.updateBillboardImage)
   const commitHistory = useAppStore((s) => s.commitHistory)
+  const slotIndex = useViewportSlotIndex()
   const groupRef = useRef<THREE.Group>(null)
   const faceRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
@@ -201,7 +204,7 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
           space="world"
           size={1.2}
           onMouseDown={() => {
-            pushViewportInteraction()
+            pushViewportSharedInteraction(slotIndex)
             draggingRef.current = true
             scaleBaseRef.current = { width: billboard.width, height: billboard.height }
             dragBaseRef.current = {
@@ -212,7 +215,7 @@ export function BillboardNode({ billboard, isSelected }: BillboardNodeProps) {
             }
           }}
           onMouseUp={() => {
-            popViewportInteraction()
+            popViewportSharedInteraction(slotIndex)
             draggingRef.current = false
             const base = dragBaseRef.current
             const scaleBase = scaleBaseRef.current

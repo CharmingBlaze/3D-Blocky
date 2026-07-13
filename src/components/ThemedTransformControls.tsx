@@ -3,7 +3,9 @@ import { forwardRef, useCallback, useLayoutEffect, useRef } from 'react'
 import type { TransformControls as TransformControlsImpl } from 'three-stdlib'
 import { applyTransformControlsTheme } from '../theme/gizmoTheme'
 import { useTheme } from '../theme/useTheme'
-import { popViewportInteraction, pushViewportInteraction } from '../rendering/viewportFrameLoop'
+import { pushViewportSharedInteraction, popViewportSharedInteraction } from '../rendering/viewportFrameLoop'
+import { useViewportSlotIndex } from './ViewportSlotContext'
+
 
 type TransformControlEvent = Parameters<NonNullable<TransformControlsProps['onMouseDown']>>[0]
 
@@ -12,6 +14,7 @@ export const ThemedTransformControls = forwardRef<
   TransformControlsProps
 >(function ThemedTransformControls(props, forwardedRef) {
   const theme = useTheme()
+  const slotIndex = useViewportSlotIndex()
   const localRef = useRef<TransformControlsImpl>(null)
   const { onMouseDown, onMouseUp, ...rest } = props
 
@@ -29,18 +32,18 @@ export const ThemedTransformControls = forwardRef<
 
   const handleMouseDown = useCallback(
     (event: TransformControlEvent) => {
-      pushViewportInteraction()
+      pushViewportSharedInteraction(slotIndex)
       onMouseDown?.(event)
     },
-    [onMouseDown]
+    [onMouseDown, slotIndex]
   )
 
   const handleMouseUp = useCallback(
     (event: TransformControlEvent) => {
-      popViewportInteraction()
+      popViewportSharedInteraction(slotIndex)
       onMouseUp?.(event)
     },
-    [onMouseUp]
+    [onMouseUp, slotIndex]
   )
 
   return (

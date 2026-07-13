@@ -12,6 +12,9 @@ import type { CornerColor } from '../material/colorObject'
 import type { Uv2 } from '../uv/uvTypes'
 import type { SketchSource } from '../stroke/sketchSource'
 import type { VectorSource } from '../vector/vectorSource'
+import type { PrimitiveSource } from '../primitives/primitiveBoxCommit'
+import { buildTopologyVertexNormals, getVertexNormalFromHalfEdges } from './meshNormals'
+import { triangulateMeshFace } from './faceTriangulation'
 
 export interface HalfEdge {
   origin: number
@@ -80,6 +83,8 @@ export interface SceneObject {
   sketchSource?: SketchSource
   /** When set, mesh can be rebuilt from vector pen path data. */
   vectorSource?: VectorSource
+  /** Retained CAD parameters until explicitly converted to a regular mesh. */
+  primitiveSource?: PrimitiveSource
 }
 
 function emptyMesh(): SceneObject {
@@ -260,6 +265,9 @@ export class HalfEdgeMesh {
   }
 
   getVertexNormal(vi: number, averaged = true): Vec3 {
+    const fromHe = getVertexNormalFromHalfEdges(this, vi, averaged)
+    if (fromHe) return fromHe
+
     let sum = { x: 0, y: 0, z: 0 }
     let any = false
     let first: Vec3 | null = null
@@ -271,7 +279,6 @@ export class HalfEdgeMesh {
       const c = this.positions[face[(idx + face.length - 1) % face.length]!]!
       const n = faceNormal(a, b, c)
       if (!averaged) return n
-      // Angle-weighted average — matches Blender Shade Smooth.
       const e1 = normalize3(sub3(b, a))
       const e2 = normalize3(sub3(c, a))
       const cos = Math.max(-1, Math.min(1, e1.x * e2.x + e1.y * e2.y + e1.z * e2.z))
@@ -298,6 +305,11 @@ export class HalfEdgeMesh {
     const hasCornerColors =
       this.cornerColors.length > 0 && this.faceColorIndices.length === this.faces.length
 
+    const topoNormals =
+      !flatShading || facetExaggeration > 0
+        ? buildTopologyVertexNormals(this)
+        : null
+
     if (flatShading) {
       for (let fi = 0; fi < this.faces.length; fi++) {
         const face = this.faces[fi]
@@ -320,10 +332,10 @@ export class HalfEdgeMesh {
         const verts = face.map((vi) => this.positions[vi])
         let normal = faceNormal(verts[0], verts[1], verts[2])
 
-        if (facetExaggeration > 0) {
+        if (facetExaggeration > 0 && topoNormals) {
           const avgNormal = normalize3(
             verts.reduce((acc, _, i) => {
-              const n = this.getVertexNormal(face[i], true)
+              const n = topoNormals[face[i]!] ?? { x: 0, y: 1, z: 0 }
               return add3(acc, n)
             }, { x: 0, y: 0, z: 0 })
           )
@@ -346,12 +358,10 @@ export class HalfEdgeMesh {
           }
           pushCornerColor(ci)
         }
-        if (face.length === 3) {
-          indices.push(baseIdx, baseIdx + 1, baseIdx + 2)
-        } else {
-          for (let i = 1; i < face.length - 1; i++) {
-            indices.push(baseIdx, baseIdx + i, baseIdx + i + 1)
-          }
+
+        const tris = triangulateMeshFace(this.positions, face)
+        for (const [a, b, c] of tris) {
+          indices.push(baseIdx + a, baseIdx + b, baseIdx + c)
         }
       }
 
@@ -367,7 +377,6 @@ export class HalfEdgeMesh {
 
     // Blender-style shade smooth: weld for UVs/colors, but keep topology normals
     // so UV seams don't create hard shading edges.
-    const topoNormals = this.positions.map((_, vi) => this.getVertexNormal(vi, true))
     const normals: number[] = []
     const weldMap = new Map<string, number>()
 
@@ -395,7 +404,7 @@ export class HalfEdgeMesh {
       const p = this.positions[vi]!
       positions.push(p.x, p.y, p.z)
       sourceVertexIndices.push(vi)
-      const n = topoNormals[vi]!
+      const n = topoNormals![vi]!
       normals.push(n.x, n.y, n.z)
       if (hasUv) {
         const uvIdx = this.faceUvIndices[fi]?.[ci] ?? 0
@@ -424,12 +433,9 @@ export class HalfEdgeMesh {
         cornerIdx.push(getOrCreateCorner(face[ci]!, fi, ci))
       }
 
-      if (face.length === 3) {
-        indices.push(cornerIdx[0]!, cornerIdx[1]!, cornerIdx[2]!)
-      } else {
-        for (let i = 1; i < face.length - 1; i++) {
-          indices.push(cornerIdx[0]!, cornerIdx[i]!, cornerIdx[i + 1]!)
-        }
+      const tris = triangulateMeshFace(this.positions, face)
+      for (const [a, b, c] of tris) {
+        indices.push(cornerIdx[a]!, cornerIdx[b]!, cornerIdx[c]!)
       }
     }
 

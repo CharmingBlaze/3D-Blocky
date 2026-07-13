@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
+import { getObjectFaceTriangulation } from '../mesh/faceTriangulation'
 
 export interface LocalAabb {
   minX: number
@@ -67,10 +68,9 @@ export function getFaceTriangulation(object: SceneObject): FaceTriangulation {
   let cached = trisByObject.get(object)
   if (cached) return cached
 
+  const faceTris = getObjectFaceTriangulation(object)
   let triCount = 0
-  for (const face of object.faces) {
-    if (face.length >= 3) triCount += face.length - 2
-  }
+  for (const tris of faceTris) triCount += tris.length
 
   const positions = new Float32Array(triCount * 9)
   const faceIndices = new Uint32Array(triCount)
@@ -79,13 +79,13 @@ export function getFaceTriangulation(object: SceneObject): FaceTriangulation {
 
   for (let fi = 0; fi < object.faces.length; fi++) {
     const face = object.faces[fi]
-    if (!face || face.length < 3) continue
-    const a = object.positions[face[0]!]
-    if (!a) continue
-    for (let i = 1; i < face.length - 1; i++) {
-      const b = object.positions[face[i]!]
-      const c = object.positions[face[i + 1]!]
-      if (!b || !c) continue
+    const tris = faceTris[fi]
+    if (!face || !tris || tris.length === 0) continue
+    for (const [ca, cb, cc] of tris) {
+      const a = object.positions[face[ca]!]
+      const b = object.positions[face[cb]!]
+      const c = object.positions[face[cc]!]
+      if (!a || !b || !c) continue
       positions[po++] = a.x
       positions[po++] = a.y
       positions[po++] = a.z

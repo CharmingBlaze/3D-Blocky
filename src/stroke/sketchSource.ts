@@ -147,37 +147,49 @@ export function createSketchSource(
   }
 }
 
-/** Rebuild a sketch doodle with a new extrusion depth, preserving id and transform. */
-export function regenerateSketchObject(obj: SceneObject, extrudeDepth: number): SceneObject | null {
+export type EditableSketchSourcePatch = Partial<
+  Pick<SketchSource, 'brushDensity' | 'polyBudget' | 'extrudeDepth'>
+>
+
+/** Rebuild a sketch doodle from editable source parameters, preserving identity and transforms. */
+export function regenerateSketchObjectFromSource(
+  obj: SceneObject,
+  changes: EditableSketchSourcePatch
+): SceneObject | null {
   const source = obj.sketchSource
   if (!source) return null
 
-  const mesh = buildMeshFromSource(source, extrudeDepth, obj.color)
+  const nextSource: SketchSource = {
+    ...source,
+    brushDensity: Math.max(2, Math.min(48, changes.brushDensity ?? source.brushDensity)),
+    polyBudget: Math.max(16, Math.min(512, changes.polyBudget ?? source.polyBudget)),
+    extrudeDepth: changes.extrudeDepth ?? source.extrudeDepth,
+  }
+
+  const mesh = buildMeshFromSource(nextSource, nextSource.extrudeDepth, obj.color)
   if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
 
   for (let i = 0; i < mesh.faceColors.length; i++) mesh.faceColors[i] = obj.color
-  offsetMeshInPlane(mesh, source.center.x, source.center.y)
-  projectMeshToView(mesh, source.view, source.defaultDepth)
+  offsetMeshInPlane(mesh, nextSource.center.x, nextSource.center.y)
+  projectMeshToView(mesh, nextSource.view, nextSource.defaultDepth)
 
-  if (source.kind === 'outline' || (source.isClosed && source.kind !== 'path')) {
+  if (nextSource.kind === 'outline' || (nextSource.isClosed && nextSource.kind !== 'path')) {
     ensureClosedMeshOutward(mesh)
   } else {
-    const planePath = source.relative.map((p) => ({
-      x: p.x + source.center.x,
-      y: p.y + source.center.y,
+    const planePath = nextSource.relative.map((p) => ({
+      x: p.x + nextSource.center.x,
+      y: p.y + nextSource.center.y,
     }))
     orientTubeFacesOutward(
       mesh,
-      planePathToWorld(planePath, source.view, source.defaultDepth)
+      planePathToWorld(planePath, nextSource.view, nextSource.defaultDepth)
     )
   }
-
-  const nextSource: SketchSource = { ...source, extrudeDepth }
 
   return mesh.toObject(obj.id, obj.name, {
     ...obj,
     sketchSource: nextSource,
-    polyBudget: Math.max(mesh.vertexCount(), source.polyBudget),
+    polyBudget: Math.max(mesh.vertexCount(), nextSource.polyBudget),
     color: obj.color,
     smoothShading: obj.smoothShading ?? false,
     transform: obj.transform ?? {
@@ -186,4 +198,9 @@ export function regenerateSketchObject(obj: SceneObject, extrudeDepth: number): 
       scale: { ...IDENTITY_TRANSFORM.scale },
     },
   })
+}
+
+/** Rebuild a sketch doodle with a new extrusion depth, preserving id and transform. */
+export function regenerateSketchObject(obj: SceneObject, extrudeDepth: number): SceneObject | null {
+  return regenerateSketchObjectFromSource(obj, { extrudeDepth })
 }

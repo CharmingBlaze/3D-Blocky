@@ -1,28 +1,92 @@
 import { useSyncExternalStore } from 'react'
+import type { ViewportSlotIndex } from '../scene/viewTypes'
+
+export type ViewportInteractionKind = 'local' | 'shared'
 
 type InteractionListener = () => void
 
-let interactionRefCount = 0
+const localCounts = new Map<ViewportSlotIndex, number>()
+const sharedCounts = new Map<ViewportSlotIndex, number>()
 const listeners = new Set<InteractionListener>()
 
+let version = 0
+
 function notifyInteraction(): void {
+  version += 1
   for (const listener of listeners) listener()
 }
 
-/** Boost visible viewports to continuous rendering during drag/orbit/gizmo use. Idle slots stay on demand. */
-export function pushViewportInteraction(): void {
-  interactionRefCount += 1
-  if (interactionRefCount === 1) notifyInteraction()
+function bump(map: Map<ViewportSlotIndex, number>, slot: ViewportSlotIndex, delta: number): boolean {
+  const prev = map.get(slot) ?? 0
+  const next = Math.max(0, prev + delta)
+  if (next === prev) return false
+  if (next === 0) map.delete(slot)
+  else map.set(slot, next)
+  return true
 }
 
-export function popViewportInteraction(): void {
-  if (interactionRefCount === 0) return
-  interactionRefCount -= 1
-  if (interactionRefCount === 0) notifyInteraction()
+/** Camera orbit/pan/zoom — continuous frames only on this slot. */
+export function pushViewportLocalInteraction(slot: ViewportSlotIndex): void {
+  if (bump(localCounts, slot, 1)) notifyInteraction()
 }
 
-export function isViewportInteractionActive(): boolean {
-  return interactionRefCount > 0
+export function popViewportLocalInteraction(slot: ViewportSlotIndex): void {
+  if (bump(localCounts, slot, -1)) notifyInteraction()
+}
+
+/** Mesh/sculpt/gizmo edits — continuous on source slot; peers demand+invalidate. */
+export function pushViewportSharedInteraction(slot: ViewportSlotIndex): void {
+  if (bump(sharedCounts, slot, 1)) notifyInteraction()
+}
+
+export function popViewportSharedInteraction(slot: ViewportSlotIndex): void {
+  if (bump(sharedCounts, slot, -1)) notifyInteraction()
+}
+
+/** @deprecated Prefer typed local/shared helpers */
+export function pushViewportInteraction(
+  slot?: ViewportSlotIndex,
+  kind: ViewportInteractionKind = 'shared'
+): void {
+  const s = (slot ?? 0) as ViewportSlotIndex
+  if (kind === 'local') pushViewportLocalInteraction(s)
+  else pushViewportSharedInteraction(s)
+}
+
+/** @deprecated Prefer typed local/shared helpers */
+export function popViewportInteraction(
+  slot?: ViewportSlotIndex,
+  kind: ViewportInteractionKind = 'shared'
+): void {
+  const s = (slot ?? 0) as ViewportSlotIndex
+  if (kind === 'local') popViewportLocalInteraction(s)
+  else popViewportSharedInteraction(s)
+}
+
+export function isViewportLocalInteractionActive(slot: ViewportSlotIndex): boolean {
+  return (localCounts.get(slot) ?? 0) > 0
+}
+
+export function isViewportSharedInteractionActive(slot?: ViewportSlotIndex): boolean {
+  if (slot !== undefined) return (sharedCounts.get(slot) ?? 0) > 0
+  for (const count of sharedCounts.values()) {
+    if (count > 0) return true
+  }
+  return false
+}
+
+export function getSharedInteractionSourceSlot(): ViewportSlotIndex | null {
+  for (const [slot, count] of sharedCounts) {
+    if (count > 0) return slot
+  }
+  return null
+}
+
+export function isViewportInteractionActive(slot?: ViewportSlotIndex): boolean {
+  if (slot !== undefined) {
+    return isViewportLocalInteractionActive(slot) || isViewportSharedInteractionActive(slot)
+  }
+  return isViewportSharedInteractionActive() || localCounts.size > 0
 }
 
 export function subscribeViewportInteraction(onStoreChange: InteractionListener): () => void {
@@ -30,11 +94,39 @@ export function subscribeViewportInteraction(onStoreChange: InteractionListener)
   return () => listeners.delete(onStoreChange)
 }
 
-/** Synchronous interaction flag — avoids one-frame demand lag after pointer down. */
+function getVersion(): number {
+  return version
+}
+
+/** Per-slot interaction flags (stable primitive snapshot via version). */
+export function useViewportSlotInteraction(slot: ViewportSlotIndex): {
+  localActive: boolean
+  sharedActiveHere: boolean
+  /** @deprecated Prefer sharedActiveHere + invalidate peers; do not continuous-render all. */
+  sharedActiveAnywhere: boolean
+} {
+  const ver = useSyncExternalStore(subscribeViewportInteraction, getVersion, () => 0)
+  void ver
+  return {
+    localActive: isViewportLocalInteractionActive(slot),
+    sharedActiveHere: isViewportSharedInteractionActive(slot),
+    sharedActiveAnywhere: isViewportSharedInteractionActive(),
+  }
+}
+
+/** Legacy hook — true if any interaction is active. */
 export function useViewportInteractionActive(): boolean {
   return useSyncExternalStore(
     subscribeViewportInteraction,
     isViewportInteractionActive,
     () => false
   )
+}
+
+/** Test helper — drop all interaction refcounts. */
+export function clearViewportInteractionForTests(): void {
+  if (localCounts.size === 0 && sharedCounts.size === 0) return
+  localCounts.clear()
+  sharedCounts.clear()
+  notifyInteraction()
 }

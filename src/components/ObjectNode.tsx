@@ -5,6 +5,7 @@ import type * as THREE from 'three'
 import { useAppStore, type ActiveTool, type SelectionMode } from '../store/appStore'
 import { ensureTransform, getObjectPivot, cloneTransform, transformFromObject3D, transformsEqual } from '../mesh/objectTransform'
 import { registerPickTarget, unregisterPickTarget } from '../select/pickRegistry'
+import { useViewportSlotIndex } from './viewport/ViewportRuntimeContext'
 import { MeshRenderer } from './MeshRenderer'
 import { MeshEditVisuals } from './MeshEditVisuals'
 import { NormalVisuals } from './NormalVisuals'
@@ -48,6 +49,7 @@ function ObjectMeshEditOverlay({
   showNormals: boolean
 }) {
   const activeTool = useAppStore((s) => s.activeTool)
+  const isDrawing = useAppStore((s) => s.isDrawing)
   const meshSelection = useAppStore((s) =>
     s.meshSelection?.objectId === object.id ? s.meshSelection : null
   )
@@ -56,7 +58,7 @@ function ObjectMeshEditOverlay({
   )
 
   // Knife / loop-cut use their own overlays — hide edit handles so the view stays clean.
-  if (activeTool === 'knife' || activeTool === 'loop-cut') {
+  if (isDrawing || activeTool === 'knife' || activeTool === 'loop-cut') {
     if (!showNormals) return null
     return (
       <NormalVisuals
@@ -168,6 +170,8 @@ function ObjectNodeInner({
 }: ObjectNodeProps) {
   const rootRef = useRef<THREE.Group>(null)
   const draggingRef = useRef(false)
+  const slotIndex = useViewportSlotIndex()
+  const isDrawing = useAppStore((s) => s.isDrawing)
 
   const tr = ensureTransform(object)
   const pivot = getObjectPivot(object)
@@ -185,9 +189,9 @@ function ObjectNodeInner({
   useEffect(() => {
     const g = rootRef.current
     if (!g) return
-    registerPickTarget(object.id, g)
-    return () => unregisterPickTarget(object.id)
-  }, [object.id])
+    registerPickTarget(slotIndex, object.id, g)
+    return () => unregisterPickTarget(slotIndex, object.id)
+  }, [object.id, slotIndex])
 
   return (
     <>
@@ -197,7 +201,7 @@ function ObjectNodeInner({
             object={object}
             isSelected={isSelected}
             isPrimary={isPrimary}
-            objectSelectionOutline={isSelected && selectionMode === 'object'}
+            objectSelectionOutline={isSelected && selectionMode === 'object' && !isDrawing}
             facetExaggeration={facetExaggeration}
             showDensityHeatmap={showDensityHeatmap}
             displayMode={viewportDisplayMode}

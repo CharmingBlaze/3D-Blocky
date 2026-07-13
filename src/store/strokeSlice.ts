@@ -4,6 +4,8 @@ import {
   createSketchSource,
   isSketchDoodleObject,
   regenerateSketchObject,
+  regenerateSketchObjectFromSource,
+  type EditableSketchSourcePatch,
 } from '../stroke/sketchSource'
 import {
   isSketchNearClose,
@@ -46,6 +48,7 @@ export interface StrokeLayoutState {
   currentStrokeView: ViewType | null
   currentStrokePreview: { x: number; y: number } | null
   isDrawing: boolean
+  editingSketchObjectId: string | null
 }
 
 export interface StrokeLayoutActions {
@@ -69,6 +72,10 @@ export interface StrokeLayoutActions {
   setAutoConnectPaths: (on: boolean) => void
   toggleAutoConnectPaths: () => void
   setSmoothDrawing: (on: boolean) => void
+  setEditingSketchObject: (objectId: string | null) => void
+  updateSelectedSketchSource: (changes: EditableSketchSourcePatch) => void
+  commitSketchSourceEdit: () => void
+  convertSelectedSketchToMesh: () => void
 }
 
 export type StrokeSlice = StrokeLayoutState & StrokeLayoutActions
@@ -91,6 +98,7 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   currentStrokeView: null,
   currentStrokePreview: null,
   isDrawing: false,
+  editingSketchObjectId: null,
 }
 
 export function clearStrokeDraftState(): Pick<
@@ -245,6 +253,41 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     },
 
     clearExtrudeDrag: () => set({ extrudeDragAnchor: null } as Partial<T>),
+
+    setEditingSketchObject: (objectId) => {
+      if (objectId) {
+        const object = store().objects.find((candidate) => candidate.id === objectId)
+        if (!isSketchDoodleObject(object)) return
+      }
+      set({ editingSketchObjectId: objectId } as unknown as Partial<T>)
+    },
+
+    updateSelectedSketchSource: (changes) => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!isSketchDoodleObject(object)) return
+      const updated = regenerateSketchObjectFromSource(object, changes)
+      if (!updated) return
+      set(patch({ objects: objects.map((candidate) => candidate.id === object.id ? updated : candidate) }))
+    },
+
+    commitSketchSourceEdit: () => {
+      store().pushHistory('Edit sketch')
+    },
+
+    convertSelectedSketchToMesh: () => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!isSketchDoodleObject(object)) return
+      const { sketchSource: _source, ...meshObject } = object
+      set(patch({
+        objects: objects.map((candidate) => candidate.id === object.id ? meshObject : candidate),
+        editingSketchObjectId: null,
+      }))
+      store().commitHistory('Convert sketch to mesh')
+    },
 
     startStroke: (point, view) => {
       const { autoConnectPaths, lastStrokeEndpoint, closeThreshold } = store()

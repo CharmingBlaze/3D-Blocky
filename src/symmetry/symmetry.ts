@@ -119,6 +119,11 @@ export function mirrorSceneObject(
           position: mirrorWorldPoint(base.transform.position, axis, plane),
         }
       : undefined,
+    // Mirroring bakes world-space geometry. Retained source coordinates would
+    // otherwise regenerate the unmirrored original when edited later.
+    sketchSource: undefined,
+    vectorSource: undefined,
+    primitiveSource: undefined,
   }
   return prepareSceneObject(mirrored)
 }

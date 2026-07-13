@@ -26,6 +26,8 @@ export interface MeshPickHit {
   vertex?: number
   edge?: [number, number]
   face?: number
+  /** Viewport that produced this hit (hover / pick source). */
+  viewportSlot?: number
 }
 
 const _ndc = new THREE.Vector2()
@@ -289,12 +291,13 @@ export function pickKnifeHit(
   rect: DOMRect,
   camera: THREE.Camera,
   objects: SceneObject[],
-  preferredObjectId?: string | null
+  preferredObjectId?: string | null,
+  modifiers: { shiftKey?: boolean; ctrlKey?: boolean } = {}
 ): {
   objectId: string
   world: Vec3
   local: Vec3
-  snap: 'vertex' | 'edge' | 'face'
+  snap: 'vertex' | 'edge' | 'face' | 'face-center' | 'grid'
   vertexIndex: number | null
   edge: [number, number] | null
   faceIndex: number | null
@@ -314,7 +317,7 @@ export function pickKnifeHit(
     const obj = targetId ? objects.find((o) => o.id === targetId) : null
     if (!obj) return null
 
-    const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 12, false)
+    const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 12, true)
     if (vi !== null) {
       const local = { ...obj.positions[vi]! }
       return {
@@ -327,9 +330,17 @@ export function pickKnifeHit(
         faceIndex: null,
       }
     }
-    const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 10, false)
+    const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 10, true)
     if (edge) {
-      const local = closestPointOnEdgeLocal(obj, edge, clientX, clientY, rect, camera)
+      const local = closestPointOnEdgeLocal(
+        obj,
+        edge,
+        clientX,
+        clientY,
+        rect,
+        camera,
+        modifiers.shiftKey ? 0.25 : null
+      )
       return {
         objectId: obj.id,
         world: worldPointFromObject(obj, local),
@@ -353,7 +364,7 @@ export function pickKnifeHit(
   }
   const faceWorld = worldPointFromObject(obj, faceLocal)
 
-  const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 11, false)
+  const vi = pickNearestVertex(obj, clientX, clientY, rect, camera, 11, true)
   if (vi !== null) {
     const local = { ...obj.positions[vi]! }
     const world = worldPointFromObject(obj, local)
@@ -373,9 +384,17 @@ export function pickKnifeHit(
   }
 
   // Edge snap is the main Blockbench cue — prefer edges whenever nearby.
-  const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 18, false)
+  const edge = pickNearestEdge(obj, clientX, clientY, rect, camera, 18, true)
   if (edge) {
-    const local = closestPointOnEdgeLocal(obj, edge, clientX, clientY, rect, camera)
+    const local = closestPointOnEdgeLocal(
+      obj,
+      edge,
+      clientX,
+      clientY,
+      rect,
+      camera,
+      modifiers.shiftKey ? 0.25 : null
+    )
     const world = worldPointFromObject(obj, local)
     const screen = projectWorldToScreen(world, camera, rect)
     const dist = Math.hypot(clientX - screen.x, clientY - screen.y)
@@ -389,6 +408,32 @@ export function pickKnifeHit(
         edge,
         faceIndex: faceHit.faceIndex,
       }
+    }
+  }
+
+  if (modifiers.shiftKey) {
+    const local = faceCentroidLocal(obj, faceHit.faceIndex)
+    return {
+      objectId: obj.id,
+      world: worldPointFromObject(obj, local),
+      local,
+      snap: 'face-center',
+      vertexIndex: null,
+      edge: null,
+      faceIndex: faceHit.faceIndex,
+    }
+  }
+
+  if (modifiers.ctrlKey) {
+    const local = snapPointToFaceGrid(obj, faceHit.faceIndex, faceLocal)
+    return {
+      objectId: obj.id,
+      world: worldPointFromObject(obj, local),
+      local,
+      snap: 'grid',
+      vertexIndex: null,
+      edge: null,
+      faceIndex: faceHit.faceIndex,
     }
   }
 
@@ -409,7 +454,8 @@ function closestPointOnEdgeLocal(
   clientX: number,
   clientY: number,
   rect: DOMRect,
-  camera: THREE.Camera
+  camera: THREE.Camera,
+  quantizeStep: number | null = null
 ): Vec3 {
   const [a, b] = edge
   const pa = obj.positions[a]!
@@ -423,10 +469,66 @@ function closestPointOnEdgeLocal(
   const lenSq = dx * dx + dy * dy
   let t = lenSq < 1e-8 ? 0 : ((clientX - sa.x) * dx + (clientY - sa.y) * dy) / lenSq
   t = Math.max(0, Math.min(1, t))
+  if (quantizeStep) t = Math.round(t / quantizeStep) * quantizeStep
   return {
     x: pa.x + (pb.x - pa.x) * t,
     y: pa.y + (pb.y - pa.y) * t,
     z: pa.z + (pb.z - pa.z) * t,
+  }
+}
+
+function faceCentroidLocal(obj: SceneObject, faceIndex: number): Vec3 {
+  const face = obj.faces[faceIndex] ?? []
+  if (face.length === 0) return { x: 0, y: 0, z: 0 }
+  const center = { x: 0, y: 0, z: 0 }
+  for (const vi of face) {
+    const point = obj.positions[vi]!
+    center.x += point.x
+    center.y += point.y
+    center.z += point.z
+  }
+  center.x /= face.length
+  center.y /= face.length
+  center.z /= face.length
+  return center
+}
+
+/** Snap within the hit face without moving the point away from its surface plane. */
+function snapPointToFaceGrid(
+  obj: SceneObject,
+  faceIndex: number,
+  point: Vec3,
+  step = 0.25
+): Vec3 {
+  const face = obj.faces[faceIndex] ?? []
+  if (face.length < 3) return point
+  const origin = obj.positions[face[0]!]!
+  const edgeEnd = obj.positions[face[1]!]!
+  const edge = new THREE.Vector3()
+    .subVectors(
+      new THREE.Vector3(edgeEnd.x, edgeEnd.y, edgeEnd.z),
+      new THREE.Vector3(origin.x, origin.y, origin.z)
+    )
+    .normalize()
+  const normal = new THREE.Vector3()
+  for (let i = 1; i + 1 < face.length && normal.lengthSq() < 1e-10; i++) {
+    const a = obj.positions[face[i]!]!
+    const b = obj.positions[face[i + 1]!]!
+    normal.crossVectors(
+      new THREE.Vector3(a.x - origin.x, a.y - origin.y, a.z - origin.z),
+      new THREE.Vector3(b.x - origin.x, b.y - origin.y, b.z - origin.z)
+    )
+  }
+  if (edge.lengthSq() < 1e-10 || normal.lengthSq() < 1e-10) return point
+  normal.normalize()
+  const across = new THREE.Vector3().crossVectors(normal, edge).normalize()
+  const delta = new THREE.Vector3(point.x - origin.x, point.y - origin.y, point.z - origin.z)
+  const u = Math.round(delta.dot(edge) / step) * step
+  const v = Math.round(delta.dot(across) / step) * step
+  return {
+    x: origin.x + edge.x * u + across.x * v,
+    y: origin.y + edge.y * u + across.y * v,
+    z: origin.z + edge.z * u + across.z * v,
   }
 }
 
@@ -653,6 +755,7 @@ export function resolveMarqueeMeshObjectId(
     startY: number
     endX: number
     endY: number
+    slotIndex?: import('../scene/viewTypes').ViewportSlotIndex
   },
   cullBackVertices = false
 ): string | null {
@@ -664,15 +767,16 @@ export function resolveMarqueeMeshObjectId(
     startY,
     endX,
     endY,
+    slotIndex = 0,
   } = hints
 
   if (meshSelectionObjectId) return meshSelectionObjectId
   if (selectedObjectId) return selectedObjectId
   if (selectionObjectIds.length === 1) return selectionObjectIds[0]!
 
-  const pickStart = pickObjectAt(startX, startY, viewportRect, camera)
+  const pickStart = pickObjectAt(startX, startY, viewportRect, camera, slotIndex)
   if (pickStart) return pickStart
-  const pickEnd = pickObjectAt(endX, endY, viewportRect, camera)
+  const pickEnd = pickObjectAt(endX, endY, viewportRect, camera, slotIndex)
   if (pickEnd) return pickEnd
 
   const objectIds = objectsInScreenRect(objects, screenRect, camera, viewportRect)

@@ -19,6 +19,7 @@ export interface PixelDocument {
 
 export type PixelTool =
   | 'pencil'
+  | 'paintBrush'
   | 'eraser'
   | 'line'
   | 'rectangle'

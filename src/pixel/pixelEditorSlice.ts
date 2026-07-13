@@ -12,6 +12,7 @@ import {
   loadImageFileToImageData,
 } from './pixelDocument'
 import type { PixelDocument, PixelLayer, PixelSelection, PixelTool } from './pixelTypes'
+import type { PixelBrushShape } from './pixelBrushTypes'
 import {
   drawEllipseOnLayer,
   drawLineOnLayer,
@@ -22,6 +23,13 @@ import {
   paintWithSymmetry,
   rgbaToBytes,
 } from './pixelTools'
+import type { SoftBrushParams } from './softBrush'
+import {
+  beginSoftBrushStroke,
+  continueSoftBrushStroke,
+  paintSoftBrushDab,
+  resetSoftBrushStroke,
+} from './softBrush'
 import { uploadPixelDocumentTexture } from '../rendering/textureCache'
 import {
   clearPixelCompositeCache,
@@ -40,6 +48,13 @@ export interface PixelEditorState {
   pixelEditorDocId: string | null
   pixelEditorTool: PixelTool
   pixelEditorBrushSize: number
+  pixelEditorBrushShape: PixelBrushShape
+  /** Paint Brush hardness 0–1 (0 = soft edge, 1 = hard). */
+  pixelEditorBrushHardness: number
+  /** Paint Brush opacity 0–1. */
+  pixelEditorBrushOpacity: number
+  /** Paint Brush flow 0–1 (paint per dab). */
+  pixelEditorBrushFlow: number
   pixelEditorPixelPerfect: boolean
   pixelEditorSymmetryH: boolean
   pixelEditorSymmetryV: boolean
@@ -50,6 +65,8 @@ export interface PixelEditorState {
   pixelEditorPanY: number
   pixelEditorSelection: PixelSelection | null
   pixelEditorFillTolerance: number
+  /** Floating tool strip position inside the pixel canvas viewport. */
+  pixelEditorToolbarPosition: { x: number; y: number }
   /** Active pen color for canvas + paint-on-model — does not change object materials. */
   pixelEditorColor: Rgba4
   pixelEditorPaletteId: string
@@ -64,6 +81,10 @@ export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorDocId: null,
   pixelEditorTool: 'pencil',
   pixelEditorBrushSize: 1,
+  pixelEditorBrushShape: 'round',
+  pixelEditorBrushHardness: 0.35,
+  pixelEditorBrushOpacity: 1,
+  pixelEditorBrushFlow: 0.8,
   pixelEditorPixelPerfect: false,
   pixelEditorSymmetryH: false,
   pixelEditorSymmetryV: false,
@@ -74,6 +95,7 @@ export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorPanY: 0,
   pixelEditorSelection: null,
   pixelEditorFillTolerance: 32,
+  pixelEditorToolbarPosition: { x: 10, y: 10 },
   pixelEditorColor: hexToRgba4('#6ecbf5'),
   pixelEditorPaletteId: 'pico8',
   pixelEditorCustomPalettes: [],
@@ -160,8 +182,9 @@ export function paintAtPixel(
   tool: 'pencil' | 'eraser',
   symH: boolean,
   symV: boolean,
-  options?: { sync?: 'immediate' | 'raf' }
+  options?: { sync?: 'immediate' | 'raf'; round?: boolean }
 ): Record<string, PixelDocument> {
+  const round = options?.round ?? true
   return updatePixelDocument(
     docs,
     docId,
@@ -173,7 +196,7 @@ export function paintAtPixel(
       const bytes =
         tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
       const pixels = clonePixelLayer(layer).pixels
-      paintWithSymmetry(pixels, doc.width, doc.height, px, py, brushSize, bytes, symH, symV)
+      paintWithSymmetry(pixels, doc.width, doc.height, px, py, brushSize, bytes, symH, symV, round)
       return {
         ...doc,
         layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
@@ -193,9 +216,10 @@ export function paintStrokeOnDocument(
   pixelPerfect: boolean,
   symH: boolean,
   symV: boolean,
-  options?: { sync?: 'immediate' | 'raf' }
+  options?: { sync?: 'immediate' | 'raf'; round?: boolean }
 ): Record<string, PixelDocument> {
   if (points.length === 0) return docs
+  const round = options?.round ?? true
   return updatePixelDocument(
     docs,
     docId,
@@ -214,7 +238,8 @@ export function paintStrokeOnDocument(
         bytes,
         pixelPerfect,
         symH,
-        symV
+        symV,
+        round
       )
       return {
         ...doc,
@@ -224,6 +249,109 @@ export function paintStrokeOnDocument(
     options
   )
 }
+
+function mirrorSoftBrushCoords(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  symH: boolean,
+  symV: boolean
+): { x: number; y: number }[] {
+  const coords = [{ x, y }]
+  if (symH) coords.push({ x: width - 1 - x, y })
+  if (symV) coords.push({ x, y: height - 1 - y })
+  if (symH && symV) coords.push({ x: width - 1 - x, y: height - 1 - y })
+  return coords
+}
+
+/** Adobe-style soft Paint Brush stroke (hardness / opacity / flow / spacing). */
+export function paintSoftBrushStrokeOnDocument(
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  points: { x: number; y: number }[],
+  color: Rgba4,
+  params: SoftBrushParams,
+  symH: boolean,
+  symV: boolean,
+  options?: { sync?: 'immediate' | 'raf'; erase?: boolean; restart?: boolean }
+): Record<string, PixelDocument> {
+  if (points.length === 0) return docs
+  const erase = options?.erase ?? false
+  if (options?.restart) resetSoftBrushStroke()
+  const brushColor = rgbaToBytes(color) as [number, number, number, number]
+
+  return updatePixelDocument(
+    docs,
+    docId,
+    (doc) => {
+      const layer = getActiveLayer(doc)
+      if (!layer) return doc
+      const pixels = clonePixelLayer(layer).pixels
+      const stampMirrors =
+        symH || symV
+          ? (px: number, py: number) => {
+              for (const c of mirrorSoftBrushCoords(px, py, doc.width, doc.height, symH, symV)) {
+                if (Math.abs(c.x - px) < 1e-6 && Math.abs(c.y - py) < 1e-6) continue
+                paintSoftBrushDab(pixels, doc.width, doc.height, c.x, c.y, brushColor, params, erase)
+              }
+            }
+          : undefined
+
+      const first = points[0]!
+      if (points.length === 1 || options?.restart) {
+        beginSoftBrushStroke(
+          pixels,
+          doc.width,
+          doc.height,
+          first.x,
+          first.y,
+          brushColor,
+          params,
+          erase,
+          stampMirrors
+        )
+        for (let i = 1; i < points.length; i++) {
+          const p = points[i]!
+          continueSoftBrushStroke(
+            pixels,
+            doc.width,
+            doc.height,
+            p.x,
+            p.y,
+            brushColor,
+            params,
+            erase,
+            stampMirrors
+          )
+        }
+      } else {
+        for (let i = 0; i < points.length; i++) {
+          const p = points[i]!
+          continueSoftBrushStroke(
+            pixels,
+            doc.width,
+            doc.height,
+            p.x,
+            p.y,
+            brushColor,
+            params,
+            erase,
+            stampMirrors
+          )
+        }
+      }
+
+      return {
+        ...doc,
+        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
+      }
+    },
+    options
+  )
+}
+
+export { resetSoftBrushStroke }
 
 export function applyShapeToDocument(
   docs: Record<string, PixelDocument>,

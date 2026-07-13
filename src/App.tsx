@@ -69,6 +69,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 export default function App() {
   const [graphicsNotice, setGraphicsNotice] = useState<string | null>(null)
+  const uvEditorOpen = useAppStore((state) => state.uvEditorOpen)
 
   useEffect(() => subscribeGraphicsNotice(setGraphicsNotice), [])
 
@@ -388,6 +389,14 @@ export default function App() {
         const s = store()
         s.setViewportXRay(!s.viewportXRay)
       }
+      if (e.key === 'Backspace') {
+        const knifeState = store()
+        if (knifeState.activeTool === 'knife' && knifeState.knifeDraft?.points.length) {
+          e.preventDefault()
+          knifeState.knifeRemoveLastPoint()
+          return
+        }
+      }
       if (e.code === 'KeyM' && !e.repeat && !ctrlOrMeta && !e.altKey) {
         const mergeState = store()
         if (mergeState.selectionMode === 'vertex' && mergeState.meshSelection) {
@@ -460,7 +469,13 @@ export default function App() {
       <div className="app">
       <div className="app-body">
         <div className="app-main">
-          <ViewportLayout />
+          {uvEditorOpen ? (
+            <Suspense fallback={null}>
+              <UVEditorPanel workspace />
+            </Suspense>
+          ) : (
+            <ViewportLayout />
+          )}
         </div>
         <Suspense fallback={null}>
           <SidePanelHost />
@@ -473,8 +488,8 @@ export default function App() {
         </div>
       )}
 
-      <TransformToolbar />
-      <PrimitivesToolbar />
+      {!uvEditorOpen && <TransformToolbar />}
+      {!uvEditorOpen && <PrimitivesToolbar />}
       <Suspense fallback={null}>
         <AppOverlays />
       </Suspense>
@@ -492,7 +507,6 @@ function SidePanelHost() {
 function AppOverlays() {
   const showToolRing = useAppStore((s) => s.showToolRing)
   const showExportDialog = useAppStore((s) => s.showExportDialog)
-  const uvEditorOpen = useAppStore((s) => s.uvEditorOpen)
   const materialEditorOpen = useAppStore((s) => s.materialEditorOpen)
   const pixelEditorOpen = useAppStore((s) => s.pixelEditorOpen)
   const meshModalOpen = useAppStore((s) => !!(s.meshModal || s.objectTransformModal))
@@ -506,7 +520,6 @@ function AppOverlays() {
         <ExportDialog onClose={() => useAppStore.getState().setShowExportDialog(false)} />
       )}
       {meshModalOpen && <MeshModalController />}
-      {uvEditorOpen && <UVEditorPanel />}
       {materialEditorOpen && <MaterialEditorPanel />}
       {pixelEditorOpen && <PixelEditorPanel />}
     </>

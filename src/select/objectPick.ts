@@ -3,6 +3,7 @@ import { getPickTargets } from './pickRegistry'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { ensureTransform, worldPointFromObject } from '../mesh/objectTransform'
 import { getLocalAabb } from './meshPickGeometryCache'
+import type { ViewportSlotIndex } from '../scene/viewTypes'
 
 const raycaster = new THREE.Raycaster()
 const ndc = new THREE.Vector2()
@@ -12,9 +13,10 @@ export function pickObjectAt(
   clientX: number,
   clientY: number,
   rect: DOMRect,
-  camera: THREE.Camera
+  camera: THREE.Camera,
+  slotIndex: ViewportSlotIndex = 0
 ): string | null {
-  const targets = getPickTargets()
+  const targets = getPickTargets(slotIndex)
   if (targets.length === 0) return null
 
   ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1

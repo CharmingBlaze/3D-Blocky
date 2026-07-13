@@ -5,6 +5,54 @@ import * as THREE from 'three'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/appStore'
 import { useTheme } from '../theme/useTheme'
+import { previewKnifeCutWorldPoints } from '../mesh/meshKnife'
+import { worldDeltaToLocal } from '../mesh/objectTransform'
+import type { SceneObject } from '../mesh/HalfEdgeMesh'
+import type { KnifeDraft } from '../store/cadMeshToolsSlice'
+
+type KnifeIntersectionCacheEntry = {
+  object: SceneObject
+  points: [number, number, number][]
+}
+
+// KnifeVisuals is mounted once per visible Quad View pane. Share the identical
+// topology preview so pointer movement traverses the mesh only once, not four times.
+const knifeIntersectionCache = new WeakMap<KnifeDraft, KnifeIntersectionCacheEntry>()
+
+function knifeCutIntersections(
+  knifeDraft: KnifeDraft,
+  knifeObject: SceneObject
+): [number, number, number][] {
+  const cached = knifeIntersectionCache.get(knifeDraft)
+  if (cached?.object === knifeObject) return cached.points
+
+  const path = knifeDraft.hover
+    ? [...knifeDraft.points, knifeDraft.hover]
+    : knifeDraft.points
+  if (path.length < 2) return []
+
+  const localForward = worldDeltaToLocal(knifeObject, knifeDraft.viewForward)
+  const intersections: [number, number, number][] = []
+  const seen = new Set<string>()
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i]!
+    const b = path[i + 1]!
+    for (const point of previewKnifeCutWorldPoints(
+      knifeObject,
+      a.local,
+      b.local,
+      localForward
+    )) {
+      const tuple: [number, number, number] = [point.x, point.y, point.z]
+      const key = `${Math.round(point.x * 1e5)},${Math.round(point.y * 1e5)},${Math.round(point.z * 1e5)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      intersections.push(tuple)
+    }
+  }
+  knifeIntersectionCache.set(knifeDraft, { object: knifeObject, points: intersections })
+  return intersections
+}
 
 /** Camera-facing square vertex handle (Blockbench-style). */
 function KnifeSquare({
@@ -78,9 +126,12 @@ function dashSizes(pts: [number, number, number][]): { dash: number; gap: number
  */
 export function KnifeVisuals() {
   const { accent, accentGreen, accentOrange } = useTheme()
-  const { knifeDraft, activeTool } = useAppStore(
+  const { knifeDraft, knifeObject, activeTool } = useAppStore(
     useShallow((s) => ({
       knifeDraft: s.knifeDraft,
+      knifeObject: s.knifeDraft
+        ? (s.objects.find((object) => object.id === s.knifeDraft!.objectId) ?? null)
+        : null,
       activeTool: s.activeTool,
     }))
   )
@@ -94,6 +145,11 @@ export function KnifeVisuals() {
 
   const snapGreen = accentGreen && accentGreen !== '#000000' ? accentGreen : '#2fd15a'
   const snapOrange = accentOrange && accentOrange !== '#000000' ? accentOrange : '#ffb347'
+
+  const cutIntersections = useMemo(() => {
+    if (!knifeDraft || !knifeObject) return []
+    return knifeCutIntersections(knifeDraft, knifeObject)
+  }, [knifeDraft, knifeObject])
 
   if (activeTool !== 'knife' || !knifeDraft) return null
 
@@ -120,9 +176,17 @@ export function KnifeVisuals() {
   const previewDash = Math.max(0.06, dash * 1.05)
   const previewGap = Math.max(0.05, gap * 1.15)
 
-  const snapped = hover?.snap === 'edge' || hover?.snap === 'vertex'
+  const snapped = hover?.snap !== 'face'
   const hoverFill =
-    hover?.snap === 'vertex' ? '#ffffff' : hover?.snap === 'edge' ? snapGreen : snapOrange
+    hover?.snap === 'vertex' || hover?.snap === 'path'
+      ? '#ffffff'
+      : hover?.snap === 'edge'
+        ? snapGreen
+        : hover?.snap === 'face-center'
+          ? '#50d8ff'
+          : hover?.snap === 'grid'
+            ? '#d59cff'
+            : snapOrange
 
   return (
     <group renderOrder={28}>
@@ -151,13 +215,23 @@ export function KnifeVisuals() {
         </>
       )}
 
+      {cutIntersections.map((point, i) => (
+        <KnifeSquare
+          key={`knife-crossing-${i}`}
+          position={point}
+          fill={lineColor}
+          outline="#f7fbff"
+          sizePx={5}
+        />
+      ))}
+
       {placed.map((p, i) => (
         <KnifeSquare
           key={`knife-pt-${i}`}
           position={[p.world.x, p.world.y, p.world.z]}
-          fill="#141414"
-          outline="#f5f5f5"
-          sizePx={7}
+          fill={i === placed.length - 1 ? lineColor : '#141414'}
+          outline="#ffffff"
+          sizePx={i === placed.length - 1 ? 8 : 7}
         />
       ))}
 

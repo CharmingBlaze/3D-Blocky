@@ -13,6 +13,7 @@ import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import { stampDrawMaterial } from '../material/materialEditorSlice'
+import { rebuildObjectIndex, getObjectIndex } from './objectIndex'
 import type { UvTextureInfo } from './appStore'
 
 export type { SymmetryAxis } from '../symmetry/symmetry'
@@ -102,8 +103,10 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
       }
       setPartial((s) => {
         const st = s as unknown as SceneStore
+        const objects = [...st.objects, ...batch]
+        rebuildObjectIndex(objects)
         return {
-          objects: [...st.objects, ...batch],
+          objects,
           selectedObjectId: batch[0].id,
           selectionObjectIds: batch.map((b) => b.id),
         }
@@ -112,10 +115,13 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
     },
 
     updateObject: (id, updates) => {
-      if (
+      const topologyChanged = Boolean(
         updates.faces ||
         updates.positions ||
-        updates.faceGroups ||
+        updates.faceGroups
+      )
+      if (
+        topologyChanged ||
         updates.subdEnabled !== undefined ||
         updates.subdLevels !== undefined
       ) {
@@ -123,9 +129,26 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
         invalidateSubdivisionPreviewCache(id)
         clearSculptSession(id)
       }
-      setPartial((s) => ({
-        objects: s.objects.map((o) => (o.id === id ? { ...o, ...updates } : o)),
-      }))
+      setPartial((s) => {
+        const proceduralReset = topologyChanged
+          ? { sketchSource: undefined, vectorSource: undefined, primitiveSource: undefined }
+          : {}
+        const index = getObjectIndex(id)
+        if (index === undefined) {
+          const objects = s.objects.map((o) => (o.id === id ? { ...o, ...proceduralReset, ...updates } : o))
+          rebuildObjectIndex(objects)
+          return { objects }
+        }
+        const current = s.objects[index]
+        if (!current || current.id !== id) {
+          const objects = s.objects.map((o) => (o.id === id ? { ...o, ...proceduralReset, ...updates } : o))
+          rebuildObjectIndex(objects)
+          return { objects }
+        }
+        const objects = s.objects.slice()
+        objects[index] = { ...current, ...proceduralReset, ...updates }
+        return { objects }
+      })
     },
 
     removeObject: (id) => {
@@ -138,8 +161,10 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
           st.objectTextures,
           st.pixelDocuments
         )
+        const objects = st.objects.filter((o) => o.id !== id)
+        rebuildObjectIndex(objects)
         return {
-          objects: st.objects.filter((o) => o.id !== id),
+          objects,
           selectedObjectId: st.selectedObjectId === id ? null : st.selectedObjectId,
           selectionObjectIds: st.selectionObjectIds.filter((oid) => oid !== id),
           objectTextures,
@@ -155,26 +180,48 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
     },
 
     updateObjectTransform: (id, transform) => {
-      setPartial((s) => ({
-        objects: s.objects.map((o) => {
-          if (o.id !== id) return o
-          const current = ensureTransform(o)
-          if (transformsEqual(current, transform)) return o
-          return { ...o, transform: cloneTransform(transform) }
-        }),
-      }))
+      setPartial((s) => {
+        let index = getObjectIndex(id)
+        if (index === undefined || s.objects[index]?.id !== id) {
+          rebuildObjectIndex(s.objects)
+          index = getObjectIndex(id)
+        }
+        if (index === undefined) return {}
+        const current = s.objects[index]!
+        const curTr = ensureTransform(current)
+        if (transformsEqual(curTr, transform)) return {}
+        const objects = s.objects.slice()
+        objects[index] = { ...current, transform: cloneTransform(transform) }
+        return { objects }
+      })
     },
 
     updateSelectionObjectTransforms: (transforms) => {
-      setPartial((s) => ({
-        objects: s.objects.map((o) => {
-          const next = transforms[o.id]
-          if (!next) return o
-          const current = ensureTransform(o)
-          if (transformsEqual(current, next)) return o
-          return { ...o, transform: cloneTransform(next) }
-        }),
-      }))
+      setPartial((s) => {
+        const ids = Object.keys(transforms)
+        if (ids.length === 0) return {}
+        let objects = s.objects
+        let changed = false
+        for (const id of ids) {
+          const next = transforms[id]
+          if (!next) continue
+          let index = getObjectIndex(id)
+          if (index === undefined || objects[index]?.id !== id) {
+            rebuildObjectIndex(objects)
+            index = getObjectIndex(id)
+          }
+          if (index === undefined) continue
+          const current = objects[index]!
+          const curTr = ensureTransform(current)
+          if (transformsEqual(curTr, next)) continue
+          if (!changed) {
+            objects = objects.slice()
+            changed = true
+          }
+          objects[index] = { ...current, transform: cloneTransform(next) }
+        }
+        return changed ? { objects } : {}
+      })
     },
 
     setSymmetryEnabled: (on) => setPartial({ symmetryEnabled: on }),
@@ -216,8 +263,10 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
       })
       setPartial((s) => {
         const st = s as unknown as SceneStore
+        const objects = [...st.objects, ...pasted]
+        rebuildObjectIndex(objects)
         return {
-          objects: [...st.objects, ...pasted],
+          objects,
           selectedObjectId: pasted[pasted.length - 1]?.id ?? null,
           selectionObjectIds: pasted.map((p) => p.id),
         }

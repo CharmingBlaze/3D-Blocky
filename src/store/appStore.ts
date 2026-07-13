@@ -4,6 +4,7 @@ import { ensurePositiveVolume } from '../mesh/meshWinding'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
+import { rebuildObjectIndex } from './objectIndex'
 import type { FloatingPanelState } from '../components/FloatingPanel'
 import {
   applyGradientOnObjects,
@@ -31,17 +32,26 @@ import {
   importImageAsNewDocument,
   mergeLayerDown,
   paintAtPixel,
+  paintSoftBrushStrokeOnDocument,
   paintStrokeOnDocument,
   patchPixelLayer,
   pixelEditorInitialState,
   reorderPixelLayer,
+  resetSoftBrushStroke,
   sampleColorFromDocument,
   syncPixelDocumentGpu,
   flushPixelDocumentGpuSync,
   resyncAllPixelDocuments,
 } from '../pixel/pixelEditorSlice'
+import {
+  clearSelectionOnDocument,
+  copySelectionToClipboard,
+  cutSelectionOnDocument,
+  pasteClipboardOnDocument,
+} from '../pixel/pixelClipboard'
 import { resizePixelDocument as resizePixelDoc } from '../pixel/pixelDocument'
 import type { PixelBlendMode, PixelSelection, PixelTool } from '../pixel/pixelTypes'
+import type { PixelBrushShape } from '../pixel/pixelBrushTypes'
 import { compositeLayers } from '../pixel/compositeLayers'
 import { exportCompositeToPngBlob } from '../pixel/pixelTools'
 import { serializePixelDocument, parsePixelDocumentFile } from '../pixel/pixelDocumentIO'
@@ -200,6 +210,10 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   pixelEditorDocId: string | null
   pixelEditorTool: PixelTool
   pixelEditorBrushSize: number
+  pixelEditorBrushShape: PixelBrushShape
+  pixelEditorBrushHardness: number
+  pixelEditorBrushOpacity: number
+  pixelEditorBrushFlow: number
   pixelEditorPixelPerfect: boolean
   pixelEditorSymmetryH: boolean
   pixelEditorSymmetryV: boolean
@@ -210,6 +224,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   pixelEditorPanY: number
   pixelEditorSelection: PixelSelection | null
   pixelEditorFillTolerance: number
+  pixelEditorToolbarPosition: { x: number; y: number }
   pixelEditorColor: Rgba4
   pixelEditorPaletteId: string
   pixelEditorCustomPalettes: CustomPalette[]
@@ -251,8 +266,16 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   }) => void
   setPixelEditorPanel: (panel: FloatingPanelState) => void
   setPixelEditorSelection: (selection: PixelSelection | null) => void
+  copyPixelSelection: () => boolean
+  cutPixelSelection: () => boolean
+  pastePixelClipboard: () => boolean
+  deletePixelSelection: () => boolean
   setPixelEditorTool: (tool: PixelTool) => void
   setPixelEditorBrushSize: (size: number) => void
+  setPixelEditorBrushShape: (shape: PixelBrushShape) => void
+  setPixelEditorBrushHardness: (hardness: number) => void
+  setPixelEditorBrushOpacity: (opacity: number) => void
+  setPixelEditorBrushFlow: (flow: number) => void
   setPixelEditorPixelPerfect: (on: boolean) => void
   setPixelEditorSymmetryH: (on: boolean) => void
   setPixelEditorSymmetryV: (on: boolean) => void
@@ -260,6 +283,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   setPixelEditorShapeFilled: (on: boolean) => void
   setPixelEditorView: (zoom: number, panX: number, panY: number) => void
   setPixelEditorFillTolerance: (t: number) => void
+  setPixelEditorToolbarPosition: (pos: { x: number; y: number }) => void
   setPixelEditorActiveLayer: (layerId: string) => void
   setPixelEditorColorLive: (color: Rgba4) => void
   commitPixelEditorColor: (color: Rgba4) => void
@@ -285,7 +309,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
     layerId: string,
     patch: Partial<{ name: string; visible: boolean; opacity: number; blendMode: PixelBlendMode }>
   ) => void
-  paintPixelStroke: (points: { x: number; y: number }[], tool?: 'pencil' | 'eraser') => void
+  paintPixelStroke: (points: { x: number; y: number }[], tool?: 'pencil' | 'eraser', options?: { round?: boolean }) => void
   paintPixelShape: (
     tool: 'line' | 'rectangle' | 'ellipse',
     x0: number,
@@ -358,6 +382,7 @@ function restoreSceneToStore(
   clearSculptSession()
   const restored = sanitizeSceneSnapshot(snapshot)
   const objects = ensureTexturedSceneUvs(restored.objects)
+  rebuildObjectIndex(objects)
   const imageSelection = sanitizeImageSelectionIds(
     restored.referenceImages,
     restored.billboardImages,
@@ -899,9 +924,76 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setPixelEditorPanel: (panel) => set({ pixelEditorPanel: panel }),
   setPixelEditorSelection: (selection) => set({ pixelEditorSelection: selection }),
+
+  copyPixelSelection: () => {
+    const { pixelEditorDocId, pixelDocuments, pixelEditorSelection } = get()
+    if (!pixelEditorDocId || !pixelEditorSelection) return false
+    const doc = pixelDocuments[pixelEditorDocId]
+    if (!doc) return false
+    return copySelectionToClipboard(doc, pixelEditorSelection)
+  },
+
+  cutPixelSelection: () => {
+    const { pixelEditorDocId, pixelDocuments, pixelEditorSelection } = get()
+    if (!pixelEditorDocId || !pixelEditorSelection) return false
+    get().beginPixelEdit()
+    const next = cutSelectionOnDocument(pixelDocuments, pixelEditorDocId, pixelEditorSelection)
+    if (!next) return false
+    set((s) => ({
+      pixelDocuments: next,
+      pixelEditorSelection: null,
+      pixelTextureRevision: s.pixelTextureRevision + 1,
+    }))
+    get().commitPixelEdit()
+    return true
+  },
+
+  pastePixelClipboard: () => {
+    const { pixelEditorDocId, pixelDocuments, pixelEditorSelection } = get()
+    if (!pixelEditorDocId) return false
+    get().beginPixelEdit()
+    const result = pasteClipboardOnDocument(
+      pixelDocuments,
+      pixelEditorDocId,
+      pixelEditorSelection
+    )
+    if (!result) return false
+    set((s) => ({
+      pixelDocuments: result.docs,
+      pixelEditorSelection: result.pasted,
+      pixelTextureRevision: s.pixelTextureRevision + 1,
+    }))
+    get().commitPixelEdit()
+    return true
+  },
+
+  deletePixelSelection: () => {
+    const { pixelEditorDocId, pixelDocuments, pixelEditorSelection } = get()
+    if (!pixelEditorDocId || !pixelEditorSelection) return false
+    get().beginPixelEdit()
+    const next = clearSelectionOnDocument(
+      pixelDocuments,
+      pixelEditorDocId,
+      pixelEditorSelection
+    )
+    set((s) => ({
+      pixelDocuments: next,
+      pixelTextureRevision: s.pixelTextureRevision + 1,
+    }))
+    get().commitPixelEdit()
+    return true
+  },
+
   setPixelEditorTool: (tool) => set({ pixelEditorTool: tool }),
   setPixelEditorBrushSize: (size) =>
-    set({ pixelEditorBrushSize: Math.max(1, Math.min(32, Math.round(size))) }),
+    set({ pixelEditorBrushSize: Math.max(1, Math.min(64, Math.round(size))) }),
+  setPixelEditorBrushShape: (shape) => set({ pixelEditorBrushShape: shape }),
+  setPixelEditorBrushHardness: (hardness) =>
+    set({ pixelEditorBrushHardness: Math.max(0, Math.min(1, hardness)) }),
+  setPixelEditorBrushOpacity: (opacity) =>
+    set({ pixelEditorBrushOpacity: Math.max(0, Math.min(1, opacity)) }),
+  setPixelEditorBrushFlow: (flow) =>
+    set({ pixelEditorBrushFlow: Math.max(0, Math.min(1, flow)) }),
   setPixelEditorPixelPerfect: (on) => set({ pixelEditorPixelPerfect: on }),
   setPixelEditorSymmetryH: (on) => set({ pixelEditorSymmetryH: on }),
   setPixelEditorSymmetryV: (on) => set({ pixelEditorSymmetryV: on }),
@@ -911,7 +1003,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ pixelEditorZoom: zoom, pixelEditorPanX: panX, pixelEditorPanY: panY }),
   setPixelEditorFillTolerance: (t) =>
     set({ pixelEditorFillTolerance: Math.max(0, Math.min(255, Math.round(t))) }),
-
+  setPixelEditorToolbarPosition: (pos) =>
+    set({
+      pixelEditorToolbarPosition: {
+        x: Math.round(pos.x),
+        y: Math.round(pos.y),
+      },
+    }),
   setPixelEditorColorLive: (color) => set({ pixelEditorColor: color }),
 
   commitPixelEditorColor: (color) => set({ pixelEditorColor: color }),
@@ -968,6 +1066,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   commitPixelEdit: () => {
     const pending = get().pixelEditHistoryPending
+    resetSoftBrushStroke()
     flushPixelDocumentGpuSync()
     if (pendingTextureRevisionRaf) {
       cancelAnimationFrame(pendingTextureRevisionRaf)
@@ -1252,17 +1351,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     }))
   },
 
-  paintPixelStroke: (points, tool = 'pencil') => {
+  paintPixelStroke: (points, tool = 'pencil', options) => {
     const {
       pixelEditorDocId,
       pixelDocuments,
       pixelEditorColor,
       pixelEditorBrushSize,
+      pixelEditorBrushShape,
+      pixelEditorBrushHardness,
+      pixelEditorBrushOpacity,
+      pixelEditorBrushFlow,
+      pixelEditorTool,
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
     } = get()
     if (!pixelEditorDocId || points.length === 0) return
+
+    if (pixelEditorTool === 'paintBrush' && tool !== 'eraser') {
+      const docs = paintSoftBrushStrokeOnDocument(
+        pixelDocuments,
+        pixelEditorDocId,
+        points,
+        pixelEditorColor,
+        {
+          size: pixelEditorBrushSize,
+          hardness: pixelEditorBrushHardness,
+          opacity: pixelEditorBrushOpacity,
+          flow: pixelEditorBrushFlow,
+          shape: pixelEditorBrushShape,
+        },
+        pixelEditorSymmetryH,
+        pixelEditorSymmetryV,
+        { sync: 'raf', restart: points.length === 1 }
+      )
+      set({ pixelDocuments: docs })
+      scheduleTextureRevisionBump(set)
+      return
+    }
+
+    // Pencil / eraser stay hard pixel tips.
+    const round = options?.round ?? true
     const docs = paintStrokeOnDocument(
       pixelDocuments,
       pixelEditorDocId,
@@ -1273,7 +1402,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf' }
+      { sync: 'raf', round }
     )
     set({ pixelDocuments: docs })
     scheduleTextureRevisionBump(set)
@@ -1364,10 +1493,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelDocuments,
       pixelEditorColor,
       pixelEditorBrushSize,
+      pixelEditorBrushShape,
+      pixelEditorBrushHardness,
+      pixelEditorBrushOpacity,
+      pixelEditorBrushFlow,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
       pixelEditorTool,
     } = get()
+    if (pixelEditorTool === 'paintBrush') {
+      const docs = paintSoftBrushStrokeOnDocument(
+        pixelDocuments,
+        docId,
+        [{ x, y }],
+        pixelEditorColor,
+        {
+          size: pixelEditorBrushSize,
+          hardness: pixelEditorBrushHardness,
+          opacity: pixelEditorBrushOpacity,
+          flow: pixelEditorBrushFlow,
+          shape: pixelEditorBrushShape,
+        },
+        pixelEditorSymmetryH,
+        pixelEditorSymmetryV,
+        { sync: 'raf', restart: true }
+      )
+      set({ pixelDocuments: docs })
+      scheduleTextureRevisionBump(set)
+      return
+    }
     const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
     const docs = paintAtPixel(
       pixelDocuments,
@@ -1379,7 +1533,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       tool,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf' }
+      { sync: 'raf', round: true }
     )
     set({ pixelDocuments: docs })
     scheduleTextureRevisionBump(set)
@@ -1390,12 +1544,37 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelDocuments,
       pixelEditorColor,
       pixelEditorBrushSize,
+      pixelEditorBrushShape,
+      pixelEditorBrushHardness,
+      pixelEditorBrushOpacity,
+      pixelEditorBrushFlow,
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
       pixelEditorTool,
     } = get()
     if (points.length === 0) return
+    if (pixelEditorTool === 'paintBrush') {
+      const docs = paintSoftBrushStrokeOnDocument(
+        pixelDocuments,
+        docId,
+        points,
+        pixelEditorColor,
+        {
+          size: pixelEditorBrushSize,
+          hardness: pixelEditorBrushHardness,
+          opacity: pixelEditorBrushOpacity,
+          flow: pixelEditorBrushFlow,
+          shape: pixelEditorBrushShape,
+        },
+        pixelEditorSymmetryH,
+        pixelEditorSymmetryV,
+        { sync: 'raf' }
+      )
+      set({ pixelDocuments: docs })
+      scheduleTextureRevisionBump(set)
+      return
+    }
     const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
     const docs = paintStrokeOnDocument(
       pixelDocuments,
@@ -1407,7 +1586,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf' }
+      { sync: 'raf', round: true }
     )
     set({ pixelDocuments: docs })
     scheduleTextureRevisionBump(set)
