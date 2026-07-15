@@ -86,11 +86,31 @@ function blendLayer(
 }
 
 /** Flatten all visible layers top-down into RGBA pixels (top-left origin). */
-export function compositeLayers(doc: PixelDocument): Uint8ClampedArray {
+export function compositeLayers(
+  doc: PixelDocument,
+  outBuffer?: Uint8ClampedArray
+): Uint8ClampedArray {
   const { width, height, layers } = doc
-  const out = new Uint8ClampedArray(width * height * 4)
-  for (const layer of layers) {
-    if (!layer.visible) continue
+  const len = width * height * 4
+  const visible = layers.filter((l) => l.visible && l.opacity > 0)
+  // Fast path: single full-opacity normal layer — copy (or alias via outBuffer).
+  if (
+    visible.length === 1 &&
+    visible[0]!.blendMode === 'normal' &&
+    visible[0]!.opacity >= 1 - 1e-6
+  ) {
+    const src = visible[0]!.pixels
+    if (outBuffer && outBuffer.length === len) {
+      outBuffer.set(src)
+      return outBuffer
+    }
+    return new Uint8ClampedArray(src)
+  }
+
+  const out =
+    outBuffer && outBuffer.length === len ? outBuffer : new Uint8ClampedArray(len)
+  if (outBuffer && outBuffer.length === len) out.fill(0)
+  for (const layer of visible) {
     blendLayer(out, layer, width, height)
   }
   return out

@@ -33,3 +33,4 @@ export type ViewportInvalidateReason =
   | 'layout'
   | 'fit'
   | 'manual'
+  | 'pixel-texture'

@@ -27,15 +27,17 @@ import {
   bucketFillDocument,
   createBlankDocumentForObject,
   deletePixelLayer,
+  detachPixelDocumentForEditing,
   duplicatePixelLayer,
   importImageAsLayer,
   importImageAsNewDocument,
   mergeLayerDown,
-  paintAtPixel,
-  paintSoftBrushStrokeOnDocument,
-  paintStrokeOnDocument,
+  paintAtPixelLive,
+  paintSoftBrushStrokeOnDocumentLive,
+  paintStrokeOnDocumentLive,
   patchPixelLayer,
   pixelEditorInitialState,
+  publishPixelDocumentIdentity,
   reorderPixelLayer,
   resetSoftBrushStroke,
   sampleColorFromDocument,
@@ -487,17 +489,6 @@ function purgeTextureResourcesForObjects(
     }
   }
   return { objectTextures: nextTextures, pixelDocuments: nextDocs }
-}
-
-let pendingTextureRevisionRaf = 0
-function scheduleTextureRevisionBump(
-  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void
-): void {
-  if (pendingTextureRevisionRaf) return
-  pendingTextureRevisionRaf = requestAnimationFrame(() => {
-    pendingTextureRevisionRaf = 0
-    set((s) => ({ pixelTextureRevision: s.pixelTextureRevision + 1 }))
-  })
 }
 
 function sanitizeImageSelectionIds(
@@ -1068,20 +1059,35 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   beginPixelEdit: () => {
-    if (!get().pixelEditHistoryPending) {
-      set({ pixelEditHistoryPending: true })
+    if (get().pixelEditHistoryPending) return
+    const { pixelEditorDocId, pixelDocuments } = get()
+    // Detach pixel buffers from any shared history snapshot before in-place strokes.
+    if (pixelEditorDocId && pixelDocuments[pixelEditorDocId]) {
+      set({
+        pixelEditHistoryPending: true,
+        pixelDocuments: detachPixelDocumentForEditing(pixelDocuments, pixelEditorDocId),
+      })
+      return
     }
+    set({ pixelEditHistoryPending: true })
   },
 
   commitPixelEdit: () => {
     const pending = get().pixelEditHistoryPending
     resetSoftBrushStroke()
     flushPixelDocumentGpuSync()
-    if (pendingTextureRevisionRaf) {
-      cancelAnimationFrame(pendingTextureRevisionRaf)
-      pendingTextureRevisionRaf = 0
-    }
-    set({ pixelEditHistoryPending: false, pixelTextureRevision: get().pixelTextureRevision + 1 })
+    const { pixelEditorDocId, pixelDocuments } = get()
+    // New doc/layer identities (shared buffers) so UV/hair/etc. effects keyed on
+    // `pixelDoc` reload after in-place strokes — map-only spread is not enough.
+    const published =
+      pixelEditorDocId && pixelDocuments[pixelEditorDocId]
+        ? publishPixelDocumentIdentity(pixelDocuments, pixelEditorDocId)
+        : { ...pixelDocuments }
+    set({
+      pixelEditHistoryPending: false,
+      pixelTextureRevision: get().pixelTextureRevision + 1,
+      pixelDocuments: published,
+    })
     if (pending) get().commitHistory('Pixel edit')
   },
 
@@ -1401,7 +1407,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!pixelEditorDocId || points.length === 0) return
 
     if (pixelEditorTool === 'paintBrush' && tool !== 'eraser') {
-      const docs = paintSoftBrushStrokeOnDocument(
+      paintSoftBrushStrokeOnDocumentLive(
         pixelDocuments,
         pixelEditorDocId,
         points,
@@ -1415,16 +1421,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         pixelEditorSymmetryH,
         pixelEditorSymmetryV,
-        { sync: 'raf', restart: points.length === 1 }
+        { restart: points.length === 1 }
       )
-      set({ pixelDocuments: docs })
-      scheduleTextureRevisionBump(set)
       return
     }
 
     // Pencil / eraser stay hard pixel tips.
     const round = options?.round ?? true
-    const docs = paintStrokeOnDocument(
+    paintStrokeOnDocumentLive(
       pixelDocuments,
       pixelEditorDocId,
       points,
@@ -1434,10 +1438,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf', round }
+      { round }
     )
-    set({ pixelDocuments: docs })
-    scheduleTextureRevisionBump(set)
   },
 
   paintPixelShape: (tool, x0, y0, x1, y1) => {
@@ -1534,7 +1536,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorTool,
     } = get()
     if (pixelEditorTool === 'paintBrush') {
-      const docs = paintSoftBrushStrokeOnDocument(
+      paintSoftBrushStrokeOnDocumentLive(
         pixelDocuments,
         docId,
         [{ x, y }],
@@ -1548,14 +1550,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         pixelEditorSymmetryH,
         pixelEditorSymmetryV,
-        { sync: 'raf', restart: true }
+        { restart: true }
       )
-      set({ pixelDocuments: docs })
-      scheduleTextureRevisionBump(set)
       return
     }
     const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
-    const docs = paintAtPixel(
+    paintAtPixelLive(
       pixelDocuments,
       docId,
       x,
@@ -1565,10 +1565,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       tool,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf', round: true }
+      { round: true }
     )
-    set({ pixelDocuments: docs })
-    scheduleTextureRevisionBump(set)
   },
 
   paintOnModelStroke: (docId, points) => {
@@ -1587,7 +1585,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } = get()
     if (points.length === 0) return
     if (pixelEditorTool === 'paintBrush') {
-      const docs = paintSoftBrushStrokeOnDocument(
+      paintSoftBrushStrokeOnDocumentLive(
         pixelDocuments,
         docId,
         points,
@@ -1600,15 +1598,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           shape: pixelEditorBrushShape,
         },
         pixelEditorSymmetryH,
-        pixelEditorSymmetryV,
-        { sync: 'raf' }
+        pixelEditorSymmetryV
       )
-      set({ pixelDocuments: docs })
-      scheduleTextureRevisionBump(set)
       return
     }
     const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
-    const docs = paintStrokeOnDocument(
+    paintStrokeOnDocumentLive(
       pixelDocuments,
       docId,
       points,
@@ -1618,10 +1613,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorPixelPerfect,
       pixelEditorSymmetryH,
       pixelEditorSymmetryV,
-      { sync: 'raf', round: true }
+      { round: true }
     )
-    set({ pixelDocuments: docs })
-    scheduleTextureRevisionBump(set)
   },
 
   paintOnModelShape: (docId, tool, x0, y0, x1, y1) => {

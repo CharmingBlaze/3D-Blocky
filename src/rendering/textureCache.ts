@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { rgbaBufferHasAlpha } from '../images/imageAlpha'
 import { clearPixelCompositeCache } from '../pixel/pixelCompositeCache'
+import { invalidateAllViewports } from './viewportInvalidation'
 
 const cache = new Map<string, THREE.Texture>()
 const pixelDocCache = new Map<string, THREE.DataTexture>()
@@ -39,10 +40,14 @@ export function uploadPixelDocumentTexture(
   height: number
 ): void {
   let tex = pixelDocCache.get(docId)
-  const data = new Uint8Array(pixels)
-  pixelDocHasAlpha.set(docId, rgbaBufferHasAlpha(pixels))
+  const prevAlpha = pixelDocHasAlpha.get(docId) ?? false
+  const nextAlpha = rgbaBufferHasAlpha(pixels)
+  pixelDocHasAlpha.set(docId, nextAlpha)
+  let identityChanged = false
   if (!tex || tex.image.width !== width || tex.image.height !== height) {
     tex?.dispose()
+    // DataTexture requires Uint8Array; copy once on create. Updates reuse image.data.
+    const data = new Uint8Array(pixels)
     tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.wrapS = THREE.ClampToEdgeWrapping
@@ -52,12 +57,37 @@ export function uploadPixelDocumentTexture(
     tex.magFilter = THREE.NearestFilter
     tex.needsUpdate = true
     pixelDocCache.set(docId, tex)
+    identityChanged = true
   } else {
     const image = tex.image as { data: Uint8Array; width: number; height: number }
-    image.data.set(data)
+    image.data.set(pixels)
     tex.needsUpdate = true
   }
-  pixelListeners.get(docId)?.forEach((fn) => fn())
+  // Demand-render viewports immediately so paint shows live without React tree churn.
+  invalidateAllViewports('pixel-texture')
+  // Wake React only when texture identity or alpha mode changes (material path).
+  // Per-texel updates are picked up via needsUpdate + viewport invalidation.
+  if (identityChanged || prevAlpha !== nextAlpha) {
+    pixelListeners.get(docId)?.forEach((fn) => fn())
+  }
+  // Always notify data listeners (clones that share image.data need needsUpdate).
+  dataListeners.get(docId)?.forEach((fn) => fn())
+}
+
+const dataListeners = new Map<string, Set<() => void>>()
+
+/** Subscribe to live pixel-document texel uploads (every GPU update). */
+export function subscribePixelDocumentTexture(docId: string, fn: () => void): () => void {
+  let set = dataListeners.get(docId)
+  if (!set) {
+    set = new Set()
+    dataListeners.set(docId, set)
+  }
+  set.add(fn)
+  return () => {
+    set!.delete(fn)
+    if (set!.size === 0) dataListeners.delete(docId)
+  }
 }
 
 export function getPixelDocumentTexture(docId: string): THREE.DataTexture | undefined {
@@ -77,6 +107,7 @@ export function releasePixelDocumentTexture(docId: string): void {
   }
   pixelDocHasAlpha.delete(docId)
   pixelListeners.delete(docId)
+  dataListeners.delete(docId)
   clearPixelCompositeCache(docId)
 }
 

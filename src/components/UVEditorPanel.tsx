@@ -43,7 +43,7 @@ import {
 } from '../uv/uvSnap'
 import { type UvUnwrapMethod } from '../uv/uvUnwrap'
 import type { Uv2 } from '../uv/uvTypes'
-import { clearUvDraft, scheduleUvDraft } from '../uv/uvDraftRelay'
+import { clearUvDraft, clearUvDraftIfMatch, scheduleUvDraft } from '../uv/uvDraftRelay'
 import {
   applyFaceDragOverlayTransform,
   applyFaceRotateOverlayTransform,
@@ -480,6 +480,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   const texId = activeTextureId
   const texture = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
   const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
+  const pixelTextureRevision = useAppStore((s) => s.pixelTextureRevision)
   const texW = pixelDoc?.width ?? texture?.width ?? 256
   const texH = pixelDoc?.height ?? texture?.height ?? 256
   const zoom = uvEditorZoom
@@ -1950,10 +1951,10 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
 
   const flushDraftUvs = useCallback(() => {
     cancelPreviewRelay()
-    if (objectId) clearUvDraft(objectId)
     if (!objectId || !draftUvsRef.current) {
       draftUvsRef.current = null
       pendingTopologyRef.current = null
+      if (objectId) clearUvDraft(objectId)
       return
     }
     const draft = draftUvsRef.current
@@ -1962,7 +1963,10 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     const baseUvs = liveObj?.uvs?.length ? liveObj.uvs : ensured?.uvs
     draftUvsRef.current = null
     pendingTopologyRef.current = null
-    if (!baseUvs) return
+    if (!baseUvs) {
+      clearUvDraftIfMatch(objectId, draft)
+      return
+    }
     const updates: Array<{ uvIndex: number; u: number; v: number }> = []
     for (let i = 0; i < draft.length; i++) {
       const orig = baseUvs[i]
@@ -1971,7 +1975,10 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         updates.push({ uvIndex: i, u: d.u, v: d.v })
       }
     }
-    if (updates.length === 0) return
+    if (updates.length === 0) {
+      clearUvDraftIfMatch(objectId, draft)
+      return
+    }
     if (pendingTopology?.objectId === objectId) {
       updateObject(objectId, {
         uvs: draft.map((uv) => ({ ...uv })),
@@ -1981,6 +1988,9 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     } else {
       setObjectUvPoints(objectId, updates, false)
     }
+    // Keep the GPU draft alive through the store commit/render boundary. Clearing
+    // synchronously here briefly restored the old UV buffer in the 3D preview.
+    requestAnimationFrame(() => clearUvDraftIfMatch(objectId, draft))
   }, [objectId, ensured, setObjectUvPoints, updateObject, cancelPreviewRelay])
 
   useEffect(() => {
@@ -2019,7 +2029,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [pixelDoc, texture?.url, scheduleRedraw])
+  }, [pixelDoc, pixelTextureRevision, texture?.url, scheduleRedraw])
 
   useEffect(() => {
     return () => {

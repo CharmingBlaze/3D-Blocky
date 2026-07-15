@@ -63,6 +63,16 @@ export function clearUvDraft(objectId?: string): void {
   notify(null)
 }
 
+/** Clear only the draft that was just committed, without erasing a newer gesture. */
+export function clearUvDraftIfMatch(objectId: string, uvs: readonly Uv2[]): void {
+  if (pendingSnapshot?.objectId === objectId && pendingSnapshot.uvs === uvs) {
+    if (pendingRaf != null) cancelAnimationFrame(pendingRaf)
+    pendingRaf = null
+    pendingSnapshot = null
+  }
+  if (currentDraft?.objectId === objectId && currentDraft.uvs === uvs) notify(null)
+}
+
 export function getUvDraftForTests(): UvDraftSnapshot | null {
   return currentDraft
 }

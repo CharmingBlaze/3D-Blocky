@@ -13,7 +13,7 @@ import { useAppStore } from '../store/appStore'
 import { VIEWPORT_XRAY_OPACITY } from '../store/viewportSlice'
 import { ensureObjectUVs } from '../uv/uvObject'
 import { resolveSubdivisionPreview } from '../mesh/subdivisionSurface'
-import { useLoadedTexture, usePixelDocumentTexture, pixelDocumentTextureHasAlpha } from '../rendering/textureCache'
+import { useLoadedTexture, usePixelDocumentTexture, pixelDocumentTextureHasAlpha, subscribePixelDocumentTexture } from '../rendering/textureCache'
 import {
   patchPixelTextureBlendShader,
   PIXEL_TEXTURE_BLEND_CACHE_KEY,
@@ -27,7 +27,7 @@ import {
 } from '../mesh/meshTopology'
 import { subscribeUvDraft } from '../uv/uvDraftRelay'
 import { patchMeshGeometryUvs } from '../uv/patchMeshGeometryUvs'
-import { compositeLayers } from '../pixel/compositeLayers'
+import { getPixelCompositeCache } from '../pixel/pixelCompositeCache'
 
 interface MeshRendererProps {
   object: SceneObject
@@ -312,7 +312,14 @@ export const MeshRenderer = memo(function MeshRenderer({
     [materialSettings, object.id]
   )
   const textureMeta = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
-  const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
+  // Presence only — do not subscribe to pixel buffer contents (strokes mutate in place).
+  const hasPixelDoc = useAppStore((s) => Boolean(texId && s.pixelDocuments[texId]))
+  const pixelDocWidth = useAppStore((s) => (texId ? s.pixelDocuments[texId]?.width ?? 0 : 0))
+  const pixelDocHeight = useAppStore((s) => (texId ? s.pixelDocuments[texId]?.height ?? 0 : 0))
+  const pixelDocSize =
+    hasPixelDoc && pixelDocWidth > 0 && pixelDocHeight > 0
+      ? { width: pixelDocWidth, height: pixelDocHeight }
+      : null
   const textureUrl = textureMeta?.url ?? null
   const config = VIEWPORT_DISPLAY_CONFIG[displayMode]
   const subdPreviewActive = Boolean(
@@ -327,8 +334,8 @@ export const MeshRenderer = memo(function MeshRenderer({
     !subdPreviewActive &&
     materialSettings.mode === 'texture' &&
     config.supportsTexture &&
-    Boolean(pixelDoc || textureUrl)
-  const usePixelTexture = Boolean(pixelDoc && useTexture)
+    Boolean(hasPixelDoc || textureUrl)
+  const usePixelTexture = Boolean(hasPixelDoc && useTexture)
   const meshSide = materialSettings.doubleSided ? THREE.DoubleSide : THREE.FrontSide
   const meshOpacity = materialSettings.opacity
   const xrayOpacity = viewportXRay
@@ -343,53 +350,84 @@ export const MeshRenderer = memo(function MeshRenderer({
     return { ...preview, smoothShading: true }
   }, [object, useTexture, subdPreviewActive])
 
-  const urlTexture = useLoadedTexture(useTexture && !pixelDoc && textureUrl ? textureUrl : null)
-  const dataTexture = usePixelDocumentTexture(pixelDoc ? texId : null)
-  const texture = pixelDoc ? dataTexture : urlTexture
+  const urlTexture = useLoadedTexture(useTexture && !hasPixelDoc && textureUrl ? textureUrl : null)
+  const dataTexture = usePixelDocumentTexture(hasPixelDoc ? texId : null)
+  const texture = hasPixelDoc ? dataTexture : urlTexture
   // Enable cutout/blend only when the live composite (or URL map) actually has alpha —
   // covers PNG/WebP/GIF and Pixel Editor erases, not opaque JPEG fills.
   const textureHasAlpha =
     useTexture &&
-    (pixelDoc && texId
+    (hasPixelDoc && texId
       ? pixelDocumentTextureHasAlpha(texId)
       : Boolean(textureUrl))
+
+  const needsPixelProcessing = Boolean(
+    hasPixelDoc &&
+      (materialSettings.textureLumaAlpha ||
+        (materialSettings.textureBrightness ?? 1) !== 1 ||
+        (materialSettings.textureShadowDetail ?? 0) > 0 ||
+        materialSettings.textureGradient)
+  )
+  // Rebuild material map clone on stroke commit (not every dab). Live dabs use
+  // subscribePixelDocumentTexture → needsUpdate; commit revision forces a clean reload.
+  const pixelTextureRevision = useAppStore((s) =>
+    hasPixelDoc ? s.pixelTextureRevision : 0
+  )
+
   const sampledTexture = useMemo(() => {
     if (!texture) return null
     let clone: THREE.Texture
-    if (pixelDoc && (materialSettings.textureLumaAlpha || (materialSettings.textureBrightness ?? 1) !== 1 || (materialSettings.textureShadowDetail ?? 0) > 0 || materialSettings.textureGradient)) {
-      const source = compositeLayers(pixelDoc)
-      const data = new Uint8Array(source.length)
-      const brightness = Math.max(0.25, Math.min(3, materialSettings.textureBrightness ?? 1))
-      const detail = Math.max(0, Math.min(1, materialSettings.textureShadowDetail ?? 0))
-      const gamma = 1 - detail * 0.58
-      for (let i = 0; i < source.length; i += 4) {
-        let r = Math.min(255, Math.pow(source[i]! / 255, gamma) * 255 * brightness)
-        let g = Math.min(255, Math.pow(source[i + 1]! / 255, gamma) * 255 * brightness)
-        let b = Math.min(255, Math.pow(source[i + 2]! / 255, gamma) * 255 * brightness)
-        const gradient = materialSettings.textureGradient
-        if (gradient) {
-          const pixel = i / 4
-          const x = (pixel % pixelDoc.width) / Math.max(1, pixelDoc.width - 1) - 0.5
-          const y = Math.floor(pixel / pixelDoc.width) / Math.max(1, pixelDoc.height - 1) - 0.5
-          const rad = gradient.angle * Math.PI / 180
-          const t = Math.max(0, Math.min(1, 0.5 + x * Math.cos(rad) + y * Math.sin(rad)))
-          r *= gradient.start[0] + (gradient.end[0] - gradient.start[0]) * t
-          g *= gradient.start[1] + (gradient.end[1] - gradient.start[1]) * t
-          b *= gradient.start[2] + (gradient.end[2] - gradient.start[2]) * t
+    if (needsPixelProcessing && pixelDocSize && texId) {
+      const cached = getPixelCompositeCache(texId)
+      const source =
+        cached && cached.width === pixelDocSize.width && cached.height === pixelDocSize.height
+          ? cached.pixels
+          : null
+      if (!source) {
+        // Composite not ready yet — fall back to raw GPU texture.
+        clone = texture.clone()
+      } else {
+        const data = new Uint8Array(source.length)
+        const brightness = Math.max(0.25, Math.min(3, materialSettings.textureBrightness ?? 1))
+        const detail = Math.max(0, Math.min(1, materialSettings.textureShadowDetail ?? 0))
+        const gamma = 1 - detail * 0.58
+        for (let i = 0; i < source.length; i += 4) {
+          let r = Math.min(255, Math.pow(source[i]! / 255, gamma) * 255 * brightness)
+          let g = Math.min(255, Math.pow(source[i + 1]! / 255, gamma) * 255 * brightness)
+          let b = Math.min(255, Math.pow(source[i + 2]! / 255, gamma) * 255 * brightness)
+          const gradient = materialSettings.textureGradient
+          if (gradient) {
+            const pixel = i / 4
+            const x = (pixel % pixelDocSize.width) / Math.max(1, pixelDocSize.width - 1) - 0.5
+            const y =
+              Math.floor(pixel / pixelDocSize.width) / Math.max(1, pixelDocSize.height - 1) - 0.5
+            const rad = (gradient.angle * Math.PI) / 180
+            const t = Math.max(0, Math.min(1, 0.5 + x * Math.cos(rad) + y * Math.sin(rad)))
+            r *= gradient.start[0] + (gradient.end[0] - gradient.start[0]) * t
+            g *= gradient.start[1] + (gradient.end[1] - gradient.start[1]) * t
+            b *= gradient.start[2] + (gradient.end[2] - gradient.start[2]) * t
+          }
+          data[i] = r
+          data[i + 1] = g
+          data[i + 2] = b
+          const luma = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
+          data[i + 3] = materialSettings.textureLumaAlpha
+            ? Math.round(source[i + 3]! * Math.max(0, Math.min(1, (luma - 0.025) / 0.32)))
+            : source[i + 3]!
         }
-        data[i] = r; data[i + 1] = g; data[i + 2] = b
-        const luma = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
-        data[i + 3] = materialSettings.textureLumaAlpha
-          ? Math.round(source[i + 3]! * Math.max(0, Math.min(1, (luma - 0.025) / 0.32)))
-          : source[i + 3]!
+        const processed = new THREE.DataTexture(
+          data,
+          pixelDocSize.width,
+          pixelDocSize.height,
+          THREE.RGBAFormat
+        )
+        processed.colorSpace = THREE.SRGBColorSpace
+        processed.flipY = true
+        processed.magFilter = THREE.LinearFilter
+        processed.minFilter = THREE.LinearMipmapLinearFilter
+        processed.generateMipmaps = true
+        clone = processed
       }
-      const processed = new THREE.DataTexture(data, pixelDoc.width, pixelDoc.height, THREE.RGBAFormat)
-      processed.colorSpace = THREE.SRGBColorSpace
-      processed.flipY = true
-      processed.magFilter = THREE.LinearFilter
-      processed.minFilter = THREE.LinearMipmapLinearFilter
-      processed.generateMipmaps = true
-      clone = processed
     } else {
       clone = texture.clone()
       // DataTexture.clone() can drop upload flags — keep sRGB + flip so the image isn't washed/gray.
@@ -402,11 +440,12 @@ export const MeshRenderer = memo(function MeshRenderer({
       }
     }
     const wrap = materialSettings.textureWrap ?? 'clamp'
-    clone.wrapS = clone.wrapT = wrap === 'repeat'
-      ? THREE.RepeatWrapping
-      : wrap === 'mirror'
-        ? THREE.MirroredRepeatWrapping
-        : THREE.ClampToEdgeWrapping
+    clone.wrapS = clone.wrapT =
+      wrap === 'repeat'
+        ? THREE.RepeatWrapping
+        : wrap === 'mirror'
+          ? THREE.MirroredRepeatWrapping
+          : THREE.ClampToEdgeWrapping
     const repeat = materialSettings.textureRepeat ?? [1, 1]
     const offset = materialSettings.textureOffset ?? [0, 0]
     clone.repeat.set(Math.max(0.01, repeat[0]), Math.max(0.01, repeat[1]))
@@ -415,8 +454,41 @@ export const MeshRenderer = memo(function MeshRenderer({
     clone.rotation = ((materialSettings.textureRotation ?? 0) * Math.PI) / 180
     clone.needsUpdate = true
     return clone
-  }, [texture, pixelDoc, materialSettings.textureWrap, materialSettings.textureRepeat, materialSettings.textureOffset, materialSettings.textureRotation, materialSettings.textureLumaAlpha, materialSettings.textureBrightness, materialSettings.textureShadowDetail, materialSettings.textureGradient])
+  }, [
+    texture,
+    needsPixelProcessing,
+    pixelTextureRevision,
+    pixelDocSize?.width,
+    pixelDocSize?.height,
+    texId,
+    materialSettings.textureWrap,
+    materialSettings.textureRepeat,
+    materialSettings.textureOffset,
+    materialSettings.textureRotation,
+    materialSettings.textureLumaAlpha,
+    materialSettings.textureBrightness,
+    materialSettings.textureShadowDetail,
+    materialSettings.textureGradient,
+  ])
+
+  const sampledTextureRef = useRef(sampledTexture)
+  sampledTextureRef.current = sampledTexture
   useEffect(() => () => sampledTexture?.dispose(), [sampledTexture])
+
+  // Live paint: shared DataTexture image data updates in place — mark the material map dirty.
+  useEffect(() => {
+    if (!texId || !usePixelTexture) return
+    return subscribePixelDocumentTexture(texId, () => {
+      const map = sampledTextureRef.current
+      if (!map) return
+      if (needsPixelProcessing) {
+        // Processed maps own a separate buffer — rebuild on next commit/revision.
+        return
+      }
+      map.needsUpdate = true
+      invalidate()
+    })
+  }, [texId, usePixelTexture, needsPixelProcessing, invalidate])
   const textureTint = materialSettings.textureTint
     ? `#${materialSettings.textureTint.slice(0, 3).map((n) => {
         // 0% = keep image colors (matches PaletteBar "Texture color amount").
@@ -534,7 +606,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         renderOrder={0}
       >
         <MeshMaterial
-          key={`${flatShading ? 'flat' : 'smooth'}-${texture ? `${textureUrl}-${texture.uuid}` : textureUrl ?? 'no-tex'}-${textureHasAlpha ? 'alpha' : 'opaque'}`}
+          key={`${flatShading ? 'flat' : 'smooth'}-${useTexture ? `${texId ?? textureUrl ?? 'tex'}-${textureHasAlpha ? 'alpha' : 'opaque'}` : 'no-tex'}`}
           config={config}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}

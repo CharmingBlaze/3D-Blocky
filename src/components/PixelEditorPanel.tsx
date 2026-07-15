@@ -20,6 +20,7 @@ import { listSceneTextures } from '../uv/sceneTextures'
 import { constrainPixelShape } from '../pixel/uvPaint'
 import { PIXEL_BRUSH_SHAPES, isPixelFreehandPaintTool, type PixelBrushShape } from '../pixel/pixelBrushTypes'
 import { drawMarchingAnts, pointInPixelSelection } from '../pixel/pixelMarchingAnts'
+import { pointerToDocumentPixel } from '../pixel/pixelCanvasCoordinates'
 
 /** Adobe-style tool groups for the floating toolbar. */
 const TOOL_GROUPS: { id: PixelTool; label: string; title: string }[][] = [
@@ -55,7 +56,6 @@ export function PixelEditorPanel() {
       open: s.pixelEditorOpen,
       panel: s.pixelEditorPanel,
       docId: s.pixelEditorDocId,
-      docs: s.pixelDocuments,
       tool: s.pixelEditorTool,
       brushSize: s.pixelEditorBrushSize,
       brushShape: s.pixelEditorBrushShape,
@@ -113,15 +113,23 @@ export function PixelEditorPanel() {
     }))
   )
 
-  const pixelDocuments = useAppStore((s) => s.pixelDocuments)
+  // Subscribe only to the open document — not the whole docs map (strokes mutate in place).
+  const doc = useAppStore((s) => (s.pixelEditorDocId ? s.pixelDocuments[s.pixelEditorDocId] : null))
+  const pixelDocListKey = useAppStore((s) =>
+    Object.keys(s.pixelDocuments)
+      .map((id) => {
+        const d = s.pixelDocuments[id]!
+        return `${id}:${d.width}x${d.height}`
+      })
+      .sort()
+      .join('|')
+  )
   const objectTextures = useAppStore((s) => s.objectTextures)
   const sceneObjects = useAppStore((s) => s.objects)
-  const sceneTextures = useMemo(
-    () => listSceneTextures(pixelDocuments, objectTextures, sceneObjects),
-    [pixelDocuments, objectTextures, sceneObjects]
-  )
-
-  const doc = store.docId ? store.docs[store.docId] : null
+  const sceneTextures = useMemo(() => {
+    const { pixelDocuments } = useAppStore.getState()
+    return listSceneTextures(pixelDocuments, objectTextures, sceneObjects)
+  }, [pixelDocListKey, objectTextures, sceneObjects])
   const objectId = store.selectedObjectId ?? store.selectionObjectIds[0] ?? null
   const obj = useAppStore((s) => (objectId ? s.objects.find((o) => o.id === objectId) : null))
   const mat = obj ? resolveEffectiveMaterial(obj) : null
@@ -130,6 +138,7 @@ export function PixelEditorPanel() {
   )
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasStackRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const [customW, setCustomW] = useState(64)
@@ -191,19 +200,22 @@ export function PixelEditorPanel() {
 
   const screenToPixel = useCallback(
     (clientX: number, clientY: number, continuous = false) => {
-      const vp = viewportRef.current
-      if (!vp || !doc) return null
-      const rect = vp.getBoundingClientRect()
-      const fx = (clientX - rect.left - store.panX) / store.zoom
-      const fy = (clientY - rect.top - store.panY) / store.zoom
-      if (fx < 0 || fy < 0 || fx >= doc.width || fy >= doc.height) return null
-      if (continuous) return { x: fx, y: fy }
-      return { x: Math.floor(fx), y: Math.floor(fy) }
+      const canvasStack = canvasStackRef.current
+      if (!canvasStack || !doc) return null
+      return pointerToDocumentPixel(
+        clientX,
+        clientY,
+        canvasStack.getBoundingClientRect(),
+        doc.width,
+        doc.height,
+        continuous
+      )
     },
-    [doc, store.panX, store.panY, store.zoom]
+    [doc]
   )
 
   const canvasSizeRef = useRef({ w: 0, h: 0 })
+  const imageDataRef = useRef<ImageData | null>(null)
   const docRef = useRef(doc)
   docRef.current = doc
 
@@ -214,10 +226,17 @@ export function PixelEditorPanel() {
       canvas.width = width
       canvas.height = height
       canvasSizeRef.current = { w: width, h: height }
+      imageDataRef.current = null
     }
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0)
+    let imageData = imageDataRef.current
+    if (!imageData || imageData.width !== width || imageData.height !== height) {
+      imageData = new ImageData(width, height)
+      imageDataRef.current = imageData
+    }
+    imageData.data.set(pixels)
+    ctx.putImageData(imageData, 0, 0)
   }, [])
 
   // Shared composite cache keeps 2D canvas synced with 3D paint without double-flattening every pointer move.
@@ -1073,7 +1092,7 @@ export function PixelEditorPanel() {
       >
         {renderFloatingToolbar()}
         {doc ? (
-          <div className="px-canvas-stack" style={canvasStyle}>
+          <div ref={canvasStackRef} className="px-canvas-stack" style={canvasStyle}>
             <canvas ref={canvasRef} className="px-canvas" style={{ width: '100%', height: '100%' }} />
             <canvas ref={overlayRef} className="px-canvas px-overlay" style={{ width: '100%', height: '100%' }} />
           </div>

@@ -34,6 +34,7 @@ import { uploadPixelDocumentTexture } from '../rendering/textureCache'
 import {
   clearPixelCompositeCache,
   setPixelCompositeCache,
+  acquirePixelCompositeBuffer,
 } from './pixelCompositeCache'
 
 export interface PixelEditorState {
@@ -109,7 +110,8 @@ export function syncPixelDocumentGpu(
 ): void {
   const doc = docs[docId]
   if (!doc) return
-  const composite = compositeLayers(doc)
+  const buffer = acquirePixelCompositeBuffer(docId, doc.width, doc.height)
+  const composite = compositeLayers(doc, buffer)
   setPixelCompositeCache(docId, composite, doc.width, doc.height)
   uploadPixelDocumentTexture(docId, composite, doc.width, doc.height)
 }
@@ -154,6 +156,17 @@ export function resyncAllPixelDocuments(docs: Record<string, PixelDocument>): vo
   for (const id of Object.keys(docs)) syncPixelDocumentGpu(docs, id)
 }
 
+/**
+ * Shallow-clone doc structure for immutable updates. Pixel buffers stay shared until
+ * an updater replaces a layer's `pixels` (avoids cloning every layer on each stroke).
+ */
+function draftPixelDocument(doc: PixelDocument): PixelDocument {
+  return {
+    ...doc,
+    layers: doc.layers.map((l) => ({ ...l })),
+  }
+}
+
 export function updatePixelDocument(
   docs: Record<string, PixelDocument>,
   docId: string,
@@ -162,10 +175,195 @@ export function updatePixelDocument(
 ): Record<string, PixelDocument> {
   const doc = docs[docId]
   if (!doc) return docs
-  const next = { ...docs, [docId]: updater(clonePixelDocument(doc)) }
+  const next = { ...docs, [docId]: updater(draftPixelDocument(doc)) }
   if (options?.sync === 'raf') schedulePixelDocumentGpuSync(next, docId)
   else syncPixelDocumentGpu(next, docId)
   return next
+}
+
+/**
+ * Clone the open document once so in-place stroke painting cannot mutate undo history.
+ * Returns the same `docs` reference when already detached / missing.
+ */
+export function detachPixelDocumentForEditing(
+  docs: Record<string, PixelDocument>,
+  docId: string
+): Record<string, PixelDocument> {
+  const doc = docs[docId]
+  if (!doc) return docs
+  return { ...docs, [docId]: clonePixelDocument(doc) }
+}
+
+/**
+ * Publish a new document/layer object identity after in-place strokes so React
+ * effects keyed on `pixelDoc` (UV editor, hair preview, etc.) reload.
+ * Pixel buffers are reused — no deep clone.
+ */
+export function publishPixelDocumentIdentity(
+  docs: Record<string, PixelDocument>,
+  docId: string
+): Record<string, PixelDocument> {
+  const doc = docs[docId]
+  if (!doc) return docs
+  return {
+    ...docs,
+    [docId]: {
+      ...doc,
+      layers: doc.layers.map((l) => ({ ...l })),
+    },
+  }
+}
+
+function paintLiveOnActiveLayer(
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  paint: (pixels: Uint8ClampedArray, doc: PixelDocument) => void
+): boolean {
+  const doc = docs[docId]
+  if (!doc) return false
+  const layer = getActiveLayer(doc)
+  if (!layer) return false
+  paint(layer.pixels, doc)
+  schedulePixelDocumentGpuSync(docs, docId)
+  return true
+}
+
+/** In-place pencil/eraser stamp — no document clone, no Zustand publish. */
+export function paintAtPixelLive(
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  x: number,
+  y: number,
+  color: Rgba4,
+  brushSize: number,
+  tool: 'pencil' | 'eraser',
+  symH: boolean,
+  symV: boolean,
+  options?: { round?: boolean }
+): void {
+  const round = options?.round ?? true
+  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
+    const bytes =
+      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
+    paintWithSymmetry(
+      pixels,
+      doc.width,
+      doc.height,
+      Math.floor(x),
+      Math.floor(y),
+      brushSize,
+      bytes,
+      symH,
+      symV,
+      round
+    )
+  })
+}
+
+/** In-place hard stroke segment — no document clone, no Zustand publish. */
+export function paintStrokeOnDocumentLive(
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  points: { x: number; y: number }[],
+  color: Rgba4,
+  brushSize: number,
+  tool: 'pencil' | 'eraser',
+  pixelPerfect: boolean,
+  symH: boolean,
+  symV: boolean,
+  options?: { round?: boolean }
+): void {
+  if (points.length === 0) return
+  const round = options?.round ?? true
+  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
+    const bytes =
+      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
+    drawStrokeWithSymmetry(
+      pixels,
+      doc.width,
+      doc.height,
+      points.map((p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })),
+      brushSize,
+      bytes,
+      pixelPerfect,
+      symH,
+      symV,
+      round
+    )
+  })
+}
+
+/** In-place soft brush — no document clone, no Zustand publish. */
+export function paintSoftBrushStrokeOnDocumentLive(
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  points: { x: number; y: number }[],
+  color: Rgba4,
+  params: SoftBrushParams,
+  symH: boolean,
+  symV: boolean,
+  options?: { erase?: boolean; restart?: boolean }
+): void {
+  if (points.length === 0) return
+  const erase = options?.erase ?? false
+  if (options?.restart) resetSoftBrushStroke()
+  const brushColor = rgbaToBytes(color) as [number, number, number, number]
+
+  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
+    const stampMirrors =
+      symH || symV
+        ? (px: number, py: number) => {
+            for (const c of mirrorSoftBrushCoords(px, py, doc.width, doc.height, symH, symV)) {
+              if (Math.abs(c.x - px) < 1e-6 && Math.abs(c.y - py) < 1e-6) continue
+              paintSoftBrushDab(pixels, doc.width, doc.height, c.x, c.y, brushColor, params, erase)
+            }
+          }
+        : undefined
+
+    const first = points[0]!
+    if (points.length === 1 || options?.restart) {
+      beginSoftBrushStroke(
+        pixels,
+        doc.width,
+        doc.height,
+        first.x,
+        first.y,
+        brushColor,
+        params,
+        erase,
+        stampMirrors
+      )
+      for (let i = 1; i < points.length; i++) {
+        const p = points[i]!
+        continueSoftBrushStroke(
+          pixels,
+          doc.width,
+          doc.height,
+          p.x,
+          p.y,
+          brushColor,
+          params,
+          erase,
+          stampMirrors
+        )
+      }
+    } else {
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i]!
+        continueSoftBrushStroke(
+          pixels,
+          doc.width,
+          doc.height,
+          p.x,
+          p.y,
+          brushColor,
+          params,
+          erase,
+          stampMirrors
+        )
+      }
+    }
+  })
 }
 
 export function releasePixelDocumentResources(docId: string): void {

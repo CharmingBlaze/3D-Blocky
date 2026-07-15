@@ -24,12 +24,13 @@ export function setPixelCompositeCache(
   // Reuse buffer when size matches to cut alloc churn during strokes.
   let entry: PixelCompositeEntry
   if (prev && prev.width === width && prev.height === height && prev.pixels.length === pixels.length) {
-    prev.pixels.set(pixels)
+    // Caller may already have written into prev.pixels (composite into cache buffer).
+    if (prev.pixels !== pixels) prev.pixels.set(pixels)
     prev.version += 1
     entry = prev
   } else {
     entry = {
-      pixels: new Uint8ClampedArray(pixels),
+      pixels: prev?.pixels === pixels ? pixels : new Uint8ClampedArray(pixels),
       width,
       height,
       version: (prev?.version ?? 0) + 1,
@@ -38,6 +39,22 @@ export function setPixelCompositeCache(
   }
   notify(docId)
   return entry
+}
+
+/** Mutable composite buffer for in-place flattening during live strokes. */
+export function acquirePixelCompositeBuffer(
+  docId: string,
+  width: number,
+  height: number
+): Uint8ClampedArray {
+  const prev = cache.get(docId)
+  const len = width * height * 4
+  if (prev && prev.width === width && prev.height === height && prev.pixels.length === len) {
+    return prev.pixels
+  }
+  const pixels = new Uint8ClampedArray(len)
+  cache.set(docId, { pixels, width, height, version: prev?.version ?? 0 })
+  return pixels
 }
 
 export function getPixelCompositeCache(docId: string): PixelCompositeEntry | undefined {
