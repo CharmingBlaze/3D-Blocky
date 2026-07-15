@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { rgbaBufferHasAlpha } from '../images/imageAlpha'
 import { clearPixelCompositeCache } from '../pixel/pixelCompositeCache'
 
 const cache = new Map<string, THREE.Texture>()
 const pixelDocCache = new Map<string, THREE.DataTexture>()
+const pixelDocHasAlpha = new Map<string, boolean>()
 const loadListeners = new Map<string, Set<() => void>>()
 const pixelListeners = new Map<string, Set<() => void>>()
 
@@ -38,6 +40,7 @@ export function uploadPixelDocumentTexture(
 ): void {
   let tex = pixelDocCache.get(docId)
   const data = new Uint8Array(pixels)
+  pixelDocHasAlpha.set(docId, rgbaBufferHasAlpha(pixels))
   if (!tex || tex.image.width !== width || tex.image.height !== height) {
     tex?.dispose()
     tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
@@ -61,12 +64,18 @@ export function getPixelDocumentTexture(docId: string): THREE.DataTexture | unde
   return pixelDocCache.get(docId)
 }
 
+/** Whether the live GPU composite for this pixel doc has any non-opaque texels. */
+export function pixelDocumentTextureHasAlpha(docId: string): boolean {
+  return pixelDocHasAlpha.get(docId) ?? false
+}
+
 export function releasePixelDocumentTexture(docId: string): void {
   const tex = pixelDocCache.get(docId)
   if (tex) {
     tex.dispose()
     pixelDocCache.delete(docId)
   }
+  pixelDocHasAlpha.delete(docId)
   pixelListeners.delete(docId)
   clearPixelCompositeCache(docId)
 }

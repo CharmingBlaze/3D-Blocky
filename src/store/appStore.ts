@@ -573,6 +573,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createImageDropSlice<AppState>(set, get, {
     reconcileBlobUrls: () => reconcileAppBlobUrls(get),
     addObject: (obj, options) => get().addObject(obj, options),
+    updateObject: (id, updates) => get().updateObject(id, updates),
   }),
   ...createProjectIoSlice<AppState>(set, get, {
     reconcileBlobUrls: () => reconcileAppBlobUrls(get),

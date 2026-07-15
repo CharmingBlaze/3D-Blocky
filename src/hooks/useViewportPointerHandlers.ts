@@ -1916,8 +1916,8 @@ export function useViewportPointerHandlers({
       const camera = cameraRef.current
       if (!rect || !camera) return
 
-      // Object drops always mean "texture this object". Empty-space drops use
-      // the explicit References & Images placement mode below.
+      // Object drops texture that mesh. Empty-space drops create a new editable
+      // image plane (default), or a reference/billboard when that mode is selected.
       const objectId = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
       if (objectId) {
         try {

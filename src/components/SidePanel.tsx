@@ -1691,8 +1691,20 @@ export function SidePanel() {
           <SideSection title="References & images" order={50}>
             <div className="side-create-label">Placement</div>
             <p className="side-color-hint muted">
-              Pick one mode, then drag an image into any viewport.
+              Drag an image into empty viewport space to place it. Drop onto an existing object to texture that object instead.
             </p>
+            <label
+              className="side-checkbox"
+              title="Selectable mesh — move, rotate, scale, UV and Pixel edit like any object"
+            >
+              <input
+                type="radio"
+                name="image-drop-mode"
+                checked={imageDropMode === 'textured-plane'}
+                onChange={() => setImageDropMode('textured-plane')}
+              />
+              <span>3D image object</span>
+            </label>
             <label className="side-checkbox" title="2D overlay — drag to move, corner handle to resize">
               <input
                 type="radio"
@@ -1711,16 +1723,7 @@ export function SidePanel() {
               />
               <span>3D Billboard</span>
             </label>
-            <label className="side-checkbox" title="3D textured quad in the scene">
-              <input
-                type="radio"
-                name="image-drop-mode"
-                checked={imageDropMode === 'textured-plane'}
-                onChange={() => setImageDropMode('textured-plane')}
-              />
-              <span>3D Textured plane</span>
-            </label>
-            <label className="side-checkbox" title="Disable image drag-and-drop">
+            <label className="side-checkbox" title="Disable empty-space image placement">
               <input
                 type="radio"
                 name="image-drop-mode"
@@ -1818,11 +1821,11 @@ export function SidePanel() {
             )}
             {imageDropMode === 'textured-plane' && (
               <p className="side-color-hint muted">
-                Drops an aspect-correct, double-sided textured mesh you can move and UV edit like any object.
+                Creates an aspect-correct, double-sided mesh with a linked pixel document — select it, transform with W/E/R, then open UV or Pixel Editor.
               </p>
             )}
             <p className="side-color-hint muted">
-              Drop an image directly on any existing object to texture it and open its UV workspace.
+              Drop on an existing object (or into the UV editor) to retexture that selection instead of creating a new object.
             </p>
           </SideSection>
 

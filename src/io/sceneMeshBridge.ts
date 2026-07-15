@@ -115,7 +115,8 @@ export function sceneObjectToThreeMesh(
       flatShading,
       transparent: true,
       opacity: effMat.opacity,
-      alphaTest: 0.02,
+      alphaTest: 0.05,
+      depthWrite: effMat.opacity >= 1,
       side: effMat.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
     })
   } else {

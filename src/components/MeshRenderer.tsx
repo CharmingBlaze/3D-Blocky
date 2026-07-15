@@ -13,7 +13,7 @@ import { useAppStore } from '../store/appStore'
 import { VIEWPORT_XRAY_OPACITY } from '../store/viewportSlice'
 import { ensureObjectUVs } from '../uv/uvObject'
 import { resolveSubdivisionPreview } from '../mesh/subdivisionSurface'
-import { useLoadedTexture, usePixelDocumentTexture } from '../rendering/textureCache'
+import { useLoadedTexture, usePixelDocumentTexture, pixelDocumentTextureHasAlpha } from '../rendering/textureCache'
 import {
   patchPixelTextureBlendShader,
   PIXEL_TEXTURE_BLEND_CACHE_KEY,
@@ -223,6 +223,8 @@ function MeshMaterial({
     ? () => PIXEL_TEXTURE_BLEND_CACHE_KEY
     : undefined
 
+  // PNG/WebP cutouts: alphaTest discards clear texels (see-through). Keep depthWrite on so
+  // opaque texels occlude the scene — depthWrite:false lets transparent grids paint over the image.
   const isTransparent = xray || (pixelTextureBlend ? opacity < 1 : opacity < 1 || textureAlpha)
   // Flat vs smooth is controlled by geometry normals (HalfEdgeMesh.toMeshData), not
   // material.flatShading — toggling that flag often fails to recompile the shader in R3F.
@@ -233,9 +235,8 @@ function MeshMaterial({
     wireframe: wireframe ?? config.wireframe,
     transparent: isTransparent,
     opacity,
-    alphaTest: pixelTextureBlend ? undefined : !xray && textureAlpha ? 0.02 : undefined,
-    // X-Ray: don't write depth so occluded mesh/overlays remain visible (Blender-like).
-    depthWrite: xray ? false : pixelTextureBlend ? opacity >= 1 : opacity >= 1,
+    alphaTest: pixelTextureBlend ? undefined : !xray && textureAlpha ? 0.05 : undefined,
+    depthWrite: xray ? false : opacity < 1 ? false : true,
     depthTest: true,
     map: useTexture ? (map ?? undefined) : undefined,
     color: useTexture && !pixelTextureBlend ? textureTint : undefined,
@@ -264,6 +265,11 @@ function MeshMaterial({
       )
     case 'standard':
     default:
+      // Alpha cutout images (PNG/WebP drops): unlit so the photo isn't washed gray by PBR.
+      // Opaque textured meshes keep standard lighting.
+      if (useTexture && textureAlpha) {
+        return <meshBasicMaterial {...common} toneMapped={false} />
+      }
       return (
         <meshStandardMaterial
           {...common}
@@ -271,7 +277,7 @@ function MeshMaterial({
           metalness={0}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
-          toneMapped
+          toneMapped={!useTexture}
         />
       )
   }
@@ -340,6 +346,13 @@ export const MeshRenderer = memo(function MeshRenderer({
   const urlTexture = useLoadedTexture(useTexture && !pixelDoc && textureUrl ? textureUrl : null)
   const dataTexture = usePixelDocumentTexture(pixelDoc ? texId : null)
   const texture = pixelDoc ? dataTexture : urlTexture
+  // Enable cutout/blend only when the live composite (or URL map) actually has alpha —
+  // covers PNG/WebP/GIF and Pixel Editor erases, not opaque JPEG fills.
+  const textureHasAlpha =
+    useTexture &&
+    (pixelDoc && texId
+      ? pixelDocumentTextureHasAlpha(texId)
+      : Boolean(textureUrl))
   const sampledTexture = useMemo(() => {
     if (!texture) return null
     let clone: THREE.Texture
@@ -379,6 +392,14 @@ export const MeshRenderer = memo(function MeshRenderer({
       clone = processed
     } else {
       clone = texture.clone()
+      // DataTexture.clone() can drop upload flags — keep sRGB + flip so the image isn't washed/gray.
+      clone.colorSpace = THREE.SRGBColorSpace
+      if ('flipY' in texture) clone.flipY = texture.flipY
+      if (texture instanceof THREE.DataTexture) {
+        clone.magFilter = THREE.NearestFilter
+        clone.minFilter = THREE.NearestFilter
+        clone.generateMipmaps = false
+      }
     }
     const wrap = materialSettings.textureWrap ?? 'clamp'
     clone.wrapS = clone.wrapT = wrap === 'repeat'
@@ -398,7 +419,8 @@ export const MeshRenderer = memo(function MeshRenderer({
   useEffect(() => () => sampledTexture?.dispose(), [sampledTexture])
   const textureTint = materialSettings.textureTint
     ? `#${materialSettings.textureTint.slice(0, 3).map((n) => {
-        const strength = Math.max(0, Math.min(1, materialSettings.textureTintStrength ?? 1))
+        // 0% = keep image colors (matches PaletteBar "Texture color amount").
+        const strength = Math.max(0, Math.min(1, materialSettings.textureTintStrength ?? 0))
         return Math.round((1 + (n - 1) * strength) * 255).toString(16).padStart(2, '0')
       }).join('')}`
     : '#ffffff'
@@ -512,7 +534,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         renderOrder={0}
       >
         <MeshMaterial
-          key={`${flatShading ? 'flat' : 'smooth'}-${texture ? `${textureUrl}-${texture.uuid}` : textureUrl ?? 'no-tex'}`}
+          key={`${flatShading ? 'flat' : 'smooth'}-${texture ? `${textureUrl}-${texture.uuid}` : textureUrl ?? 'no-tex'}-${textureHasAlpha ? 'alpha' : 'opaque'}`}
           config={config}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
@@ -522,7 +544,7 @@ export const MeshRenderer = memo(function MeshRenderer({
           textureTint={textureTint}
           useVertexColors={useVertexColors}
           useTexture={useTexture}
-          textureAlpha={useTexture}
+          textureAlpha={textureHasAlpha}
           pixelTextureBlend={false}
           xray={viewportXRay}
         />

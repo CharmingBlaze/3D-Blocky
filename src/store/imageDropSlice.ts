@@ -8,7 +8,10 @@ import {
   type ReferenceImage,
 } from '../images/imageDropTypes'
 import { loadImageFile } from '../images/loadImageFile'
-import { createTexturedPlaneObject } from '../images/createTexturedPlane'
+import { createEditableImagePlaneObject } from '../images/createTexturedPlane'
+import { importImageAsNewDocument } from '../pixel/pixelEditorSlice'
+import { setObjectMaterialMode } from '../material/materialEditorSlice'
+import type { PixelDocument } from '../pixel/pixelTypes'
 import type { ViewType } from '../scene/viewTypes'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
@@ -46,7 +49,8 @@ export interface ImageDropLayoutActions {
 export type ImageDropSlice = ImageDropLayoutState & ImageDropLayoutActions
 
 export const imageDropInitialState: ImageDropLayoutState = {
-  imageDropMode: 'off',
+  /** Default: empty-space drops create a selectable, editable image mesh. */
+  imageDropMode: 'textured-plane',
   referenceImages: [],
   selectedReferenceImageId: null,
   billboardImages: [],
@@ -59,10 +63,14 @@ export interface ImageDropSliceDeps {
     obj: SceneObject,
     options?: { skipHistory?: boolean; skipSymmetry?: boolean }
   ) => void
+  updateObject: (id: string, updates: Partial<SceneObject>) => void
 }
 
 type ImageDropStore = ImageDropLayoutState & {
   objectTextures: Record<string, UvTextureInfo>
+  pixelDocuments: Record<string, PixelDocument>
+  pixelEditorDocId: string | null
+  pixelTextureRevision: number
   selectedObjectId: string | null
   selectionObjectIds: string[]
   meshSelection: MeshComponentSelection | null
@@ -95,6 +103,81 @@ export function createImageDropSlice<T extends ImageDropLayoutState>(
     dropImageInView: async (view, file, world, referenceNorm) => {
       const mode = store().imageDropMode
       if (mode === 'off') return
+
+      if (mode === 'textured-plane') {
+        // Same import path as UV/material texture load so Pixel + UV editors work.
+        const { docs, docId } = await importImageAsNewDocument(store().pixelDocuments, file)
+        const doc = docs[docId]!
+        const name = file.name.replace(/\.[^.]+$/, '') || 'Image'
+        const obj = createEditableImagePlaneObject(
+          name,
+          view,
+          world,
+          DEFAULT_IMAGE_WORLD_WIDTH,
+          doc.width,
+          doc.height,
+          docId
+        )
+        // Same material path as Material/UV "Import texture…" (mode + textureId).
+        const textured = setObjectMaterialMode(obj, 'texture', docId)
+        const prepared = prepareSceneObject({
+          ...textured,
+          material: {
+            ...textured.material!,
+            textureWrap: 'clamp',
+            textureRepeat: [1, 1],
+            textureOffset: [0, 0],
+            textureRotation: 0,
+            textureTint: [1, 1, 1, 1],
+            textureTintStrength: 0,
+            opacity: 1,
+            // Dual faces already cover both sides; FrontSide avoids z-fighting over alpha holes.
+            doubleSided: false,
+          },
+        })
+        setPartial((s) => {
+          const st = s as unknown as ImageDropStore
+          return {
+            pixelDocuments: docs,
+            pixelEditorDocId: docId,
+            objectTextures: {
+              ...st.objectTextures,
+              [docId]: {
+                url: '',
+                name,
+                width: doc.width,
+                height: doc.height,
+              },
+            },
+            pixelTextureRevision: st.pixelTextureRevision + 1,
+            selectedReferenceImageId: null,
+            selectedBillboardImageId: null,
+          }
+        })
+        deps.addObject(prepared, { skipHistory: true, skipSymmetry: true })
+        // addObject stamps drawDoubleSided — keep FrontSide dual-face image cards.
+        const mat = prepared.material
+        if (mat) {
+          deps.updateObject(prepared.id, {
+            material: {
+              ...mat,
+              mode: 'texture',
+              textureId: docId,
+              textureWrap: 'clamp',
+              textureRepeat: [1, 1],
+              textureOffset: [0, 0],
+              textureRotation: 0,
+              textureTint: [1, 1, 1, 1],
+              textureTintStrength: 0,
+              opacity: 1,
+              doubleSided: false,
+            },
+          })
+        }
+        deps.reconcileBlobUrls()
+        store().commitHistory('Image plane')
+        return
+      }
 
       const loaded = await loadImageFile(file)
       const aspect = loaded.width / Math.max(loaded.height, 1)
@@ -145,38 +228,6 @@ export function createImageDropSlice<T extends ImageDropLayoutState>(
         }))
         deps.reconcileBlobUrls()
         store().commitHistory('Billboard image')
-        return
-      }
-
-      if (mode === 'textured-plane') {
-        const obj = createTexturedPlaneObject(
-          loaded.name,
-          view,
-          world,
-          DEFAULT_IMAGE_WORLD_WIDTH,
-          aspect
-        )
-        const prepared = prepareSceneObject(obj)
-        prepared.material = { ...prepared.material!, textureId: prepared.id, doubleSided: true }
-        setPartial((s) => {
-          const st = s as unknown as ImageDropStore
-          return {
-            objectTextures: {
-              ...st.objectTextures,
-              [prepared.id]: {
-                url: loaded.url,
-                name: loaded.name,
-                width: loaded.width,
-                height: loaded.height,
-              },
-            },
-            selectedReferenceImageId: null,
-            selectedBillboardImageId: null,
-          }
-        })
-        deps.addObject(prepared, { skipHistory: true, skipSymmetry: true })
-        deps.reconcileBlobUrls()
-        store().commitHistory('Image plane')
       }
     },
 
