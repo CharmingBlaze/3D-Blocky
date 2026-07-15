@@ -47,7 +47,8 @@ import type { ObjectTransform } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SculptTool } from '../sculpt/sculptTools'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
-import { cloneTransform, ensureTransform, selectionWorldCenter } from '../mesh/objectTransform'
+import { cloneTransform, ensureTransform, selectionWorldCenter, localPointFromWorld } from '../mesh/objectTransform'
+import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
 import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
 import {
@@ -297,6 +298,7 @@ export function useViewportPointerHandlers({
         const meshEditHover =
           store.activeTool === 'loop-cut' ||
           store.activeTool === 'knife' ||
+          store.activeTool === 'mirror-knife' ||
           store.activeTool === 'bend'
         if (!isComponentSelectionMode(store.selectionMode) && !meshEditHover) {
           store.setMeshHover(null)
@@ -520,9 +522,9 @@ export function useViewportPointerHandlers({
               world: { ...point.world },
               local: { ...point.local },
               snap: 'path' as const,
-              vertexIndex: null,
-              edge: null,
-              faceIndex: hit.faceIndex,
+              vertexIndex: point.vertexIndex ?? null,
+              edge: point.edge ?? null,
+              faceIndex: point.faceIndex ?? hit.faceIndex,
             }
           }
         }
@@ -721,11 +723,39 @@ export function useViewportPointerHandlers({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (useAppStore.getState().meshModal || useAppStore.getState().objectTransformModal) return
+      const store = useAppStore.getState()
+      if (store.meshModal || store.objectTransformModal) return
+
+      if ((store.activeTool === 'knife' || store.activeTool === 'mirror-knife') && e.button === 2) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (store.knifeDraft?.points.length || store.knifeDraft?.completedPaths?.length) {
+          store.knifeCancel()
+        } else {
+          store.setActiveTool('select')
+        }
+        return
+      }
+
+      if (store.activeTool === 'loop-cut' && e.button === 2) {
+        if (store.loopCutDraft) {
+          e.preventDefault()
+          e.stopPropagation()
+          if (store.loopCutDraft.locked) {
+            store.loopCutSetT(0.5)
+            store.loopCutBegin(store.loopCutDraft.objectId, store.loopCutDraft.seedEdge, false)
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            }
+          } else {
+            store.loopCutCancel()
+            store.setActiveTool('select')
+          }
+          return
+        }
+      }
 
       if (e.button === 0) beginPointerInteraction()
-
-      const store = useAppStore.getState()
       if (
         e.button === 1 &&
         store.activeTool === 'primitive-box' &&
@@ -996,7 +1026,15 @@ export function useViewportPointerHandlers({
       if (activeTool === 'loop-cut' && e.button === 0 && rect && camera) {
         const store = useAppStore.getState()
         if (store.loopCutDraft) {
-          loopCutCommit()
+          if (!store.loopCutDraft.locked) {
+            loopCutBegin(store.loopCutDraft.objectId, store.loopCutDraft.seedEdge, true)
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } else {
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            }
+            loopCutCommit()
+          }
           return
         }
         camera.updateMatrixWorld()
@@ -1010,13 +1048,14 @@ export function useViewportPointerHandlers({
           store.selectedObjectId
         )
         if (hit?.edge) {
-          loopCutBegin(hit.objectId, edgeKey(hit.edge[0], hit.edge[1]))
+          loopCutBegin(hit.objectId, edgeKey(hit.edge[0], hit.edge[1]), true)
           selectObject(hit.objectId)
+          e.currentTarget.setPointerCapture(e.pointerId)
         }
         return
       }
 
-      if (activeTool === 'knife' && e.button === 0 && rect && camera) {
+      if ((activeTool === 'knife' || activeTool === 'mirror-knife') && e.button === 0 && rect && camera) {
         const store = useAppStore.getState()
         const preferred =
           store.knifeDraft?.objectId ??
@@ -1033,11 +1072,54 @@ export function useViewportPointerHandlers({
           store.knifeDraft.points.length >= 1 &&
           now - previousClick.t < 350 &&
           Math.hypot(e.clientX - previousClick.x, e.clientY - previousClick.y) < 10
+
+        let targetHit = { ...hit }
+        const draft = store.knifeDraft
+        const lastPt = draft?.points && draft.points.length > 0 ? draft.points[draft.points.length - 1] : null
+
+        if (draft?.angleConstrained && lastPt && camera && rect) {
+          const project = (w: Vec3) => {
+            const temp = new Vector3(w.x, w.y, w.z).project(camera)
+            const x = rect.left + (temp.x * 0.5 + 0.5) * rect.width
+            const y = rect.top + (-temp.y * 0.5 + 0.5) * rect.height
+            return { x, y }
+          }
+          const unproject = (sx: number, sy: number) => {
+            const obj = store.objects.find((o) => o.id === draft.objectId)
+            const tr = obj ? ensureTransform(obj).position : { x: 0, y: 0, z: 0 }
+            const through = new Vector3(tr.x, tr.y, tr.z)
+            const plane = buildCameraDragPlane(camera, through)
+            const pt = clientToCameraPlane(sx, sy, rect, camera, plane)
+            return pt ? { x: pt.x, y: pt.y, z: pt.z } : null
+          }
+
+          const constrainedWorld = constrainKnifeEndWorld(
+            lastPt.world,
+            targetHit.world,
+            project,
+            unproject,
+            true
+          )
+
+          const obj = store.objects.find((o) => o.id === draft.objectId)
+          const constrainedLocal = obj ? localPointFromWorld(obj, constrainedWorld) : { ...constrainedWorld }
+          targetHit.world = constrainedWorld
+          targetHit.local = constrainedLocal
+        }
+
         knifeAddPoint(
-          hit.objectId,
-          { world: hit.world, local: hit.local, snap: hit.snap },
+          targetHit.objectId,
+          {
+            world: targetHit.world,
+            local: targetHit.local,
+            snap: targetHit.snap,
+            vertexIndex: targetHit.vertexIndex,
+            edge: targetHit.edge,
+            faceIndex: targetHit.faceIndex,
+          },
           view,
-          getCameraViewForward(camera)
+          getCameraViewForward(camera),
+          { x: camera.position.x, y: camera.position.y, z: camera.position.z }
         )
         if (isDoubleClick) {
           knifeClickRef.current = { t: 0, x: 0, y: 0 }
@@ -1415,20 +1497,115 @@ export function useViewportPointerHandlers({
 
       const store = useAppStore.getState()
 
-      if (store.activeTool === 'knife') {
+      if (store.activeTool === 'loop-cut' && rect && camera) {
+        const draft = store.loopCutDraft
+        if (!draft || !draft.locked) {
+          const preferred = draft?.objectId ?? store.selectedObjectId
+          const hit = pickMeshComponent(
+            'edge',
+            e.clientX,
+            e.clientY,
+            rect,
+            camera,
+            store.objects,
+            preferred
+          )
+          if (hit?.edge) {
+            loopCutBegin(hit.objectId, edgeKey(hit.edge[0], hit.edge[1]), false)
+          } else {
+            if (draft) {
+              store.loopCutCancel()
+            }
+          }
+        } else {
+          const obj = store.objects.find((o) => o.id === draft.objectId)
+          if (obj) {
+            const [vA, vB] = parseEdgeKey(draft.seedEdge)
+            if (vA < obj.positions.length && vB < obj.positions.length) {
+              const worldA = worldPointFromObject(obj, obj.positions[vA]!)
+              const worldB = worldPointFromObject(obj, obj.positions[vB]!)
+
+              const project = (w: Vec3) => {
+                const temp = new THREE.Vector3(w.x, w.y, w.z).project(camera)
+                const x = rect.left + (temp.x * 0.5 + 0.5) * rect.width
+                const y = rect.top + (-temp.y * 0.5 + 0.5) * rect.height
+                return { x, y }
+              }
+
+              const projA = project(worldA)
+              const projB = project(worldB)
+
+              const AB = { x: projB.x - projA.x, y: projB.y - projA.y }
+              const AM = { x: e.clientX - projA.x, y: e.clientY - projA.y }
+              const dot = AM.x * AB.x + AM.y * AB.y
+              const lenSq = AB.x * AB.x + AB.y * AB.y
+              let t = lenSq > 1 ? dot / lenSq : 0.5
+              t = Math.max(0.01, Math.min(0.99, t))
+              store.loopCutSetT(t)
+            }
+          }
+        }
+        return
+      }
+
+      if (store.activeTool === 'knife' || store.activeTool === 'mirror-knife') {
         const preferred =
           store.knifeDraft?.objectId ??
           store.selectedObjectId ??
           (store.selectionObjectIds.length === 1 ? store.selectionObjectIds[0] : null)
         const hit = resolveKnifeHit(e.clientX, e.clientY, preferred, e.shiftKey, e.ctrlKey || e.metaKey)
         if (hit) {
+          let targetHit = { ...hit }
+          const draft = store.knifeDraft
+          const lastPt = draft?.points && draft.points.length > 0 ? draft.points[draft.points.length - 1] : null
+
+          if (draft?.angleConstrained && lastPt && cameraRef.current && rect) {
+            const project = (w: Vec3) => {
+              const temp = new Vector3(w.x, w.y, w.z).project(cameraRef.current!)
+              const x = rect.left + (temp.x * 0.5 + 0.5) * rect.width
+              const y = rect.top + (-temp.y * 0.5 + 0.5) * rect.height
+              return { x, y }
+            }
+            const unproject = (sx: number, sy: number) => {
+              const obj = store.objects.find((o) => o.id === draft.objectId)
+              const tr = obj ? ensureTransform(obj).position : { x: 0, y: 0, z: 0 }
+              const through = new Vector3(tr.x, tr.y, tr.z)
+              const plane = buildCameraDragPlane(cameraRef.current!, through)
+              const pt = clientToCameraPlane(sx, sy, rect, cameraRef.current!, plane)
+              return pt ? { x: pt.x, y: pt.y, z: pt.z } : null
+            }
+
+            const constrainedWorld = constrainKnifeEndWorld(
+              lastPt.world,
+              targetHit.world,
+              project,
+              unproject,
+              true
+            )
+
+            const obj = store.objects.find((o) => o.id === draft.objectId)
+            const constrainedLocal = obj ? localPointFromWorld(obj, constrainedWorld) : { ...constrainedWorld }
+            targetHit.world = constrainedWorld
+            targetHit.local = constrainedLocal
+          }
+
           knifeHover(
-            hit.objectId,
-            { world: hit.world, local: hit.local, snap: hit.snap },
+            targetHit.objectId,
+            {
+              world: targetHit.world,
+              local: targetHit.local,
+              snap: targetHit.snap,
+              vertexIndex: targetHit.vertexIndex,
+              edge: targetHit.edge,
+              faceIndex: targetHit.faceIndex,
+            },
             view,
             cameraRef.current
               ? getCameraViewForward(cameraRef.current)
-              : { x: 0, y: 0, z: -1 }
+              : { x: 0, y: 0, z: -1 },
+            cameraRef.current
+              ? { x: cameraRef.current.position.x, y: cameraRef.current.position.y, z: cameraRef.current.position.z }
+              : undefined
           )
         } else {
           knifeClearHover()
@@ -1597,7 +1774,7 @@ export function useViewportPointerHandlers({
         }
         return
       }
-      if (store.activeTool === 'knife' && store.knifeDraft) {
+      if ((store.activeTool === 'knife' || store.activeTool === 'mirror-knife') && store.knifeDraft) {
         // Blockbench-style: clicks place points; Enter confirms. Pointer-up only releases capture.
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId)
@@ -1846,7 +2023,12 @@ export function useViewportPointerHandlers({
       if (store.loopCutDraft && store.activeTool === 'loop-cut') {
         e.preventDefault()
         e.stopPropagation()
-        loopCutAdjustWheel(e.deltaY)
+        if (store.loopCutDraft.locked) {
+          loopCutAdjustWheel(e.deltaY)
+        } else {
+          const delta = e.deltaY > 0 ? -1 : 1
+          store.loopCutAdjustCount(delta)
+        }
         return
       }
       if (store.adjustRoundedBoxWheel(e.deltaY, e.shiftKey)) {

@@ -320,7 +320,11 @@ export function ViewportPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onContextMenu={view === 'perspective' ? (e) => e.preventDefault() : undefined}
+      onContextMenu={
+        view === 'perspective' || activeTool === 'knife' || activeTool === 'mirror-knife'
+          ? (e) => e.preventDefault()
+          : undefined
+      }
       title={
         view === 'perspective'
           ? 'Alt + left-drag to orbit · Shift + Alt or Ctrl + left-drag to pan · two-finger scroll to zoom'
@@ -336,7 +340,6 @@ export function ViewportPanel({
         containerRef={containerRef}
         cameraRef={cameraRef}
         marqueeRect={marqueeRect}
-        knifeDraft={cadPreview.knifeDraft}
       />
 
       <ViewportRenderContext.Provider value={{ layoutVisible, continuousFrames }}>

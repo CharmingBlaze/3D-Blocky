@@ -144,7 +144,7 @@ export function localPointFromWorld(obj: SceneObject, world: Vec3): Vec3 {
   _v.set(world.x, world.y, world.z)
   _v.sub(new THREE.Vector3(tr.position.x, tr.position.y, tr.position.z))
   _invRot.makeRotationFromEuler(
-    new THREE.Euler(-tr.rotation.x, -tr.rotation.y, -tr.rotation.z, 'XYZ')
+    new THREE.Euler(-tr.rotation.x, -tr.rotation.y, -tr.rotation.z, 'ZYX')
   )
   _v.applyMatrix4(_invRot)
   _v.x /= tr.scale.x || 1
@@ -161,7 +161,7 @@ export function worldDeltaToLocal(obj: SceneObject, delta: Vec3): Vec3 {
   const tr = ensureTransform(obj)
   _dir.set(delta.x, delta.y, delta.z)
   _invRot.makeRotationFromEuler(
-    new THREE.Euler(-tr.rotation.x, -tr.rotation.y, -tr.rotation.z, 'XYZ')
+    new THREE.Euler(-tr.rotation.x, -tr.rotation.y, -tr.rotation.z, 'ZYX')
   )
   _dir.applyMatrix4(_invRot)
   _dir.x /= tr.scale.x || 1

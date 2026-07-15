@@ -63,16 +63,37 @@ export function weldSceneObjectCoincidentVertices(obj: SceneObject): SceneObject
     )
     .filter((group) => group.length > 0)
 
+  // Merge coincident verts but keep face-corner UV rings (indexed independently of positions).
   return {
     ...obj,
     positions: newPositions,
     faces: newFaces,
     faceColors: newFaceColors,
     faceGroups: faceGroups?.length ? faceGroups : identityFaceGroups(newFaces.length),
-    uvs: undefined,
-    faceUvIndices: undefined,
-    cornerColors: undefined,
-    faceColorIndices: undefined,
+    uvs: obj.uvs,
+    faceUvIndices: obj.faceUvIndices
+      ? (() => {
+          const out: number[][] = []
+          for (let fi = 0; fi < obj.faces.length; fi++) {
+            if (!oldToNewFace.has(fi)) continue
+            const ring = obj.faceUvIndices[fi]
+            out.push(ring ? [...ring] : [])
+          }
+          return out
+        })()
+      : undefined,
+    cornerColors: obj.cornerColors,
+    faceColorIndices: obj.faceColorIndices
+      ? (() => {
+          const out: number[][] = []
+          for (let fi = 0; fi < obj.faces.length; fi++) {
+            if (!oldToNewFace.has(fi)) continue
+            const ring = obj.faceColorIndices[fi]
+            out.push(ring ? [...ring] : [])
+          }
+          return out
+        })()
+      : undefined,
   }
 }
 

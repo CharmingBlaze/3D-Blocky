@@ -2,7 +2,8 @@ import * as THREE from 'three'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SelectionMode } from '../store/appStore'
-import { ensureTransform, getObjectPivot, worldPointFromObject } from '../mesh/objectTransform'
+import { ensureTransform, getObjectPivot, worldPointFromObject, localPointFromWorld } from '../mesh/objectTransform'
+import { buildCameraDragPlane, clientToCameraPlane } from '../utils/screenToWorld'
 import {
   isEdgeOverlayPickable,
 } from '../mesh/edgeOverlay'
@@ -297,7 +298,7 @@ export function pickKnifeHit(
   objectId: string
   world: Vec3
   local: Vec3
-  snap: 'vertex' | 'edge' | 'face' | 'face-center' | 'grid'
+  snap: 'vertex' | 'edge' | 'face' | 'face-center' | 'grid' | 'space'
   vertexIndex: number | null
   edge: [number, number] | null
   faceIndex: number | null
@@ -313,7 +314,9 @@ export function pickKnifeHit(
 
   if (!faceHit) {
     // Ray missed faces — still allow screen-space snap on the preferred object.
-    const targetId = preferredObjectId
+    const targetId = preferredObjectId ??
+      objects.find((o) => !o.topologyLocked)?.id ??
+      objects[0]?.id
     const obj = targetId ? objects.find((o) => o.id === targetId) : null
     if (!obj) return null
 
@@ -351,6 +354,7 @@ export function pickKnifeHit(
         faceIndex: null,
       }
     }
+
     return null
   }
 

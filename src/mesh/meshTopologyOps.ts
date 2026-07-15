@@ -10,6 +10,83 @@ import { type Vec3, faceNormal, sub3, dot3 } from '../utils/math'
 import { remapFaceGroupsAfterReplace, splitFaceGroupsAfterCut } from './faceGroups'
 import { cloneMaterial } from '../material/materialTypes'
 
+type Uv2 = { u: number; v: number }
+
+function lerpUv(a: Uv2, b: Uv2, t: number): Uv2 {
+  return { u: a.u + (b.u - a.u) * t, v: a.v + (b.v - a.v) * t }
+}
+
+/** Lightweight topology sanity checks for cut regression tests. */
+export function validateCutTopology(obj: SceneObject): string[] {
+  const errors: string[] = []
+  for (let fi = 0; fi < obj.faces.length; fi++) {
+    const face = obj.faces[fi]!
+    if (face.length < 3) errors.push(`face ${fi}: fewer than 3 verts`)
+    if (new Set(face).size < face.length) errors.push(`face ${fi}: duplicate verts`)
+    for (const vi of face) {
+      if (vi < 0 || vi >= obj.positions.length) errors.push(`face ${fi}: out-of-range vert`)
+    }
+    // Degenerate (near-zero area) faces leave holes / z-fight after cuts.
+    if (face.length >= 3) {
+      let area2 = 0
+      const o = obj.positions[face[0]!]!
+      for (let i = 1; i + 1 < face.length; i++) {
+        const a = obj.positions[face[i]!]!
+        const b = obj.positions[face[i + 1]!]!
+        const abx = a.x - o.x
+        const aby = a.y - o.y
+        const abz = a.z - o.z
+        const acx = b.x - o.x
+        const acy = b.y - o.y
+        const acz = b.z - o.z
+        const cx = aby * acz - abz * acy
+        const cy = abz * acx - abx * acz
+        const cz = abx * acy - aby * acx
+        area2 += Math.hypot(cx, cy, cz)
+      }
+      if (area2 < 1e-10) errors.push(`face ${fi}: degenerate area`)
+    }
+  }
+
+  // Edge valence: closed meshes should not grow non-manifold (3+) edges from a cut.
+  const edgeUse = new Map<string, number>()
+  for (const face of obj.faces) {
+    for (let i = 0; i < face.length; i++) {
+      const k = edgeKey(face[i]!, face[(i + 1) % face.length]!)
+      edgeUse.set(k, (edgeUse.get(k) ?? 0) + 1)
+    }
+  }
+  for (const [k, n] of edgeUse) {
+    if (n > 2) errors.push(`edge ${k}: non-manifold (${n} faces)`)
+  }
+
+  if (obj.faceGroups) {
+    const covered = new Set<number>()
+    for (const group of obj.faceGroups) {
+      for (const fi of group) {
+        if (fi < 0 || fi >= obj.faces.length) errors.push(`faceGroups: invalid face ${fi}`)
+        if (covered.has(fi)) errors.push(`faceGroups: face ${fi} in multiple groups`)
+        covered.add(fi)
+      }
+    }
+    for (let fi = 0; fi < obj.faces.length; fi++) {
+      if (!covered.has(fi)) errors.push(`faceGroups: face ${fi} missing`)
+    }
+  }
+  if (obj.faceUvIndices) {
+    if (obj.faceUvIndices.length !== obj.faces.length) {
+      errors.push('faceUvIndices length mismatch')
+    } else {
+      for (let fi = 0; fi < obj.faces.length; fi++) {
+        if (obj.faceUvIndices[fi]!.length !== obj.faces[fi]!.length) {
+          errors.push(`face ${fi}: UV ring length mismatch`)
+        }
+      }
+    }
+  }
+  return errors
+}
+
 export function removeUnreferencedVertices(obj: SceneObject): SceneObject {
   const used = new Set<number>()
   for (const face of obj.faces) {
@@ -173,8 +250,24 @@ export function splitEdgeAt(
   b: number,
   t: number
 ): number {
-  const pa = positions[a]
-  const pb = positions[b]
+  return splitEdgeAtWithUv(positions, faces, null, null, a, b, t)
+}
+
+/**
+ * Split edge a-b at t across all incident faces, optionally interpolating UV rings.
+ * Shared by knife and loop-cut so seams stay in sync.
+ */
+export function splitEdgeAtWithUv(
+  positions: Vec3[],
+  faces: number[][],
+  faceUvIndices: number[][] | null,
+  uvs: Uv2[] | null,
+  a: number,
+  b: number,
+  t: number
+): number {
+  const pa = positions[a]!
+  const pb = positions[b]!
   const u = Math.max(0.001, Math.min(0.999, t))
   const newVi = positions.length
   positions.push({
@@ -184,27 +277,45 @@ export function splitEdgeAt(
   })
 
   const newFaces: number[][] = []
-  for (const face of faces) {
+  const newFaceUvs: number[][] | null = faceUvIndices ? [] : null
+
+  for (let fi = 0; fi < faces.length; fi++) {
+    const face = faces[fi]!
+    const faceUv = faceUvIndices?.[fi]
     let replaced = false
     for (let i = 0; i < face.length; i++) {
-      const va = face[i]
-      const vb = face[(i + 1) % face.length]
-      if (va === a && vb === b) {
-        newFaces.push([...face.slice(0, i + 1), newVi, ...face.slice(i + 1)])
-        replaced = true
-        break
-      }
-      if (va === b && vb === a) {
-        newFaces.push([...face.slice(0, i + 1), newVi, ...face.slice(i + 1)])
+      const va = face[i]!
+      const vb = face[(i + 1) % face.length]!
+      if ((va === a && vb === b) || (va === b && vb === a)) {
+        const next = [...face.slice(0, i + 1), newVi, ...face.slice(i + 1)]
+        newFaces.push(next)
+        if (newFaceUvs && faceUv && uvs) {
+          const ua = faceUv[i]!
+          const ub = faceUv[(i + 1) % faceUv.length]!
+          const uvA = uvs[ua] ?? { u: 0, v: 0 }
+          const uvB = uvs[ub] ?? { u: 0, v: 0 }
+          const newUvIndex = uvs.length
+          uvs.push(lerpUv(uvA, uvB, va === a ? u : 1 - u))
+          newFaceUvs.push([...faceUv.slice(0, i + 1), newUvIndex, ...faceUv.slice(i + 1)])
+        } else if (newFaceUvs) {
+          newFaceUvs.push(faceUv ? [...faceUv] : [])
+        }
         replaced = true
         break
       }
     }
-    if (!replaced) newFaces.push([...face])
+    if (!replaced) {
+      newFaces.push([...face])
+      if (newFaceUvs) newFaceUvs.push(faceUv ? [...faceUv] : [])
+    }
   }
 
   faces.length = 0
   faces.push(...newFaces)
+  if (faceUvIndices && newFaceUvs) {
+    faceUvIndices.length = 0
+    faceUvIndices.push(...newFaceUvs)
+  }
   return newVi
 }
 
@@ -288,67 +399,168 @@ export function splitFaceAtChord(
   vA: number,
   vB: number
 ): void {
-  const face = faces[fi]
+  splitFaceAtChordWithUv(faces, faceColors, null, fi, vA, vB)
+}
+
+/** True when a and b are neighbors on the face boundary (degenerate chord). */
+export function areAdjacentOnFace(face: number[], a: number, b: number): boolean {
+  const n = face.length
+  const ia = face.indexOf(a)
+  const ib = face.indexOf(b)
+  if (ia < 0 || ib < 0) return true
+  return (ia + 1) % n === ib || (ib + 1) % n === ia
+}
+
+/**
+ * Split a face into two polygons along chord vA–vB, optionally keeping UV rings aligned.
+ */
+export function splitFaceAtChordWithUv(
+  faces: number[][],
+  faceColors: number[],
+  faceUvIndices: number[][] | null,
+  fi: number,
+  vA: number,
+  vB: number
+): void {
+  const face = faces[fi]!
   const ia = face.indexOf(vA)
   const ib = face.indexOf(vB)
   if (ia < 0 || ib < 0 || ia === ib) return
 
-  const color = faceColors[fi]
+  const color = faceColors[fi]!
   const n = face.length
   const segA: number[] = []
   const segB: number[] = []
   let i = ia
   do {
-    segA.push(face[i])
+    segA.push(face[i]!)
     i = (i + 1) % n
   } while (i !== ib)
-  segA.push(face[ib])
+  segA.push(face[ib]!)
 
   i = ib
   do {
-    segB.push(face[i])
+    segB.push(face[i]!)
     i = (i + 1) % n
   } while (i !== ia)
-  segB.push(face[ia])
+  segB.push(face[ia]!)
 
   if (segA.length < 3 || segB.length < 3) return
 
+  let uvA: number[] | null = null
+  let uvB: number[] | null = null
+  const faceUv = faceUvIndices?.[fi]
+  if (faceUv && faceUv.length === n) {
+    uvA = []
+    uvB = []
+    i = ia
+    do {
+      uvA.push(faceUv[i]!)
+      i = (i + 1) % n
+    } while (i !== ib)
+    uvA.push(faceUv[ib]!)
+
+    i = ib
+    do {
+      uvB.push(faceUv[i]!)
+      i = (i + 1) % n
+    } while (i !== ia)
+    uvB.push(faceUv[ia]!)
+  }
+
+  // Both pieces walk the original ring direction, so winding matches the parent.
   faces[fi] = segA
   faces.push(segB)
   faceColors.push(color)
+  if (faceUvIndices) {
+    if (uvA && uvB) {
+      faceUvIndices[fi] = uvA
+      faceUvIndices.push(uvB)
+    } else {
+      faceUvIndices.push(faceUv ? [...faceUv] : [])
+    }
+  }
 }
 
-/** Insert an edge loop at parameter t along each edge in the loop (Blender Ctrl+R). */
+/** Insert an edge loop at parameter t along each edge in the loop (Blender/Blockbench). */
 export function insertEdgeLoop(
   obj: SceneObject,
   loopEdges: string[],
-  t = 0.5
+  t = 0.5,
+  seedEdge?: string
 ): SceneObject {
   if (loopEdges.length === 0) return cloneSceneObject(obj)
+
+  // Blockbench/Blender: opposite edges must share a consistent parametric direction
+  // or the inserted loop zig-zags instead of forming a clean ring.
+  const seed = seedEdge ?? loopEdges[0]!
+  const oriented = orientEdgeLoop(obj, loopEdges, seed)
+  const { object } = insertOrientedEdgeLoop(obj, oriented, t)
+  return removeUnreferencedVertices(object)
+}
+
+/**
+ * Insert one edge loop using oriented edges (u→v), preserving faceGroups and UV rings.
+ * Does not compact unused verts — callers that chain cuts keep indices stable, then
+ * `removeUnreferencedVertices` once at the end.
+ */
+export function insertOrientedEdgeLoop(
+  obj: SceneObject,
+  orientedEdges: { u: number; v: number }[],
+  t: number
+): { object: SceneObject; splitVerts: Map<string, number> } {
+  if (orientedEdges.length === 0) {
+    return { object: cloneSceneObject(obj), splitVerts: new Map() }
+  }
 
   const positions = obj.positions.map((p) => ({ ...p }))
   const faces = obj.faces.map((f) => [...f])
   const faceColors = [...obj.faceColors]
-  const splitMap = new Map<number, number[]>()
+  const beforeFaces = faces.length
+  const hasUv =
+    Boolean(obj.uvs?.length) &&
+    Boolean(obj.faceUvIndices?.length) &&
+    obj.faceUvIndices!.length === obj.faces.length
+  const uvs: Uv2[] | null = hasUv ? obj.uvs!.map((u) => ({ ...u })) : null
+  const faceUvIndices: number[][] | null = hasUv
+    ? obj.faceUvIndices!.map((f) => [...f])
+    : null
 
+  const splitMap = new Map<number, number[]>()
   const splitVerts = new Map<string, number>()
-  for (const key of loopEdges) {
-    const [a, b] = parseEdgeKey(key)
-    if (a >= positions.length || b >= positions.length) continue
-    const vi = splitEdgeAt(positions, faces, a, b, t)
+  const u = Math.max(0.001, Math.min(0.999, t))
+
+  for (const edge of orientedEdges) {
+    if (edge.u >= positions.length || edge.v >= positions.length) continue
+    const key = edgeKey(edge.u, edge.v)
+    if (splitVerts.has(key)) continue
+    const vi = splitEdgeAtWithUv(
+      positions,
+      faces,
+      faceUvIndices,
+      uvs,
+      edge.u,
+      edge.v,
+      u
+    )
     splitVerts.set(key, vi)
   }
 
   const splitVertSet = new Set(splitVerts.values())
-  for (let fi = 0; fi < faces.length; fi++) {
-    const face = faces[fi]
-    const onFace = face.filter((vi) => splitVertSet.has(vi))
-    if (onFace.length === 2) {
-      const before = faces.length
-      splitFaceAtChord(faces, faceColors, fi, onFace[0], onFace[1])
-      if (faces.length > before) {
-        splitMap.set(fi, [fi, faces.length - 1])
-      }
+  for (let fi = 0; fi < beforeFaces; fi++) {
+    const face = faces[fi]!
+    const onFace: number[] = []
+    for (const vi of face) {
+      if (splitVertSet.has(vi) && onFace[onFace.length - 1] !== vi) onFace.push(vi)
+    }
+    if (onFace.length < 2) continue
+    const a = onFace[0]!
+    const b = onFace[onFace.length - 1]!
+    if (areAdjacentOnFace(face, a, b)) continue
+    const before = faces.length
+    splitFaceAtChordWithUv(faces, faceColors, faceUvIndices, fi, a, b)
+    if (faces.length > before) {
+      splitMap.set(fi, [fi, faces.length - 1])
     }
   }
 
@@ -361,12 +573,22 @@ export function insertEdgeLoop(
         break
       }
     }
-    newFaceSourceOld.push(source)
+    newFaceSourceOld.push(source < beforeFaces ? source : 0)
   }
 
-  const faceGroups = splitFaceGroupsAfterCut(obj.faceGroups, obj.faces.length, newFaceSourceOld)
+  const faceGroups = splitFaceGroupsAfterCut(obj.faceGroups, beforeFaces, newFaceSourceOld)
 
-  return removeUnreferencedVertices({ ...obj, positions, faces, faceColors, faceGroups })
+  const object: SceneObject = {
+    ...obj,
+    positions,
+    faces,
+    faceColors,
+    faceGroups,
+    uvs: uvs ?? obj.uvs,
+    faceUvIndices: faceUvIndices ?? obj.faceUvIndices,
+  }
+
+  return { object, splitVerts }
 }
 
 export function loopCutPreviewPositions(
@@ -756,4 +978,111 @@ export function makeSelectionDoubleSided(
     },
     addedFaces,
   }
+}
+
+/** Insert multiple edge loops at specified tValues along each edge in the loop. */
+export function insertMultipleEdgeLoops(
+  obj: SceneObject,
+  loopEdges: string[],
+  seedEdge: string,
+  tValues: number[]
+): SceneObject {
+  if (loopEdges.length === 0 || tValues.length === 0) return cloneSceneObject(obj)
+
+  const orientedEdges = orientEdgeLoop(obj, loopEdges, seedEdge)
+  const sortedT = [...tValues].sort((a, b) => a - b)
+  let current = cloneSceneObject(obj)
+  let currentEdges = [...orientedEdges]
+  let prevT = 0
+
+  for (const tVal of sortedT) {
+    const denom = 1 - prevT
+    const tRelative = denom > 1e-5 ? (tVal - prevT) / denom : 0.5
+
+    const { object, splitVerts } = insertOrientedEdgeLoop(current, currentEdges, tRelative)
+    current = object
+
+    // Indices stay stable (no mid-pass compaction): next cut is midVert → original end.
+    currentEdges = currentEdges.flatMap((edge) => {
+      const vi = splitVerts.get(edgeKey(edge.u, edge.v))
+      if (vi === undefined) return []
+      return [{ u: vi, v: edge.v }]
+    })
+
+    prevT = tVal
+  }
+
+  return removeUnreferencedVertices(current)
+}
+
+export function orientEdgeLoop(
+  obj: SceneObject,
+  loopEdges: string[],
+  seedEdge: string
+): { u: number; v: number }[] {
+  const seed = parseEdgeKey(seedEdge)
+  const seedOriented = { u: seed[0], v: seed[1] } // Start orientation
+  const edgeSet = new Set(loopEdges)
+
+  // We walk around the loop.
+  // Let's build a map from each sorted edge to its oriented version.
+  const orientedMap = new Map<string, { u: number; v: number }>()
+  orientedMap.set(edgeKey(seed[0], seed[1]), seedOriented)
+
+  const edgeFaces = edgeFaceMap(obj)
+  const queue = [seedOriented]
+  const seen = new Set<string>([edgeKey(seed[0], seed[1])])
+
+  while (queue.length > 0) {
+    const curr = queue.shift()!
+    const currKey = edgeKey(curr.u, curr.v)
+
+    // Find faces sharing this edge
+    const faces = edgeFaces.get(currKey) ?? []
+    for (const fi of faces) {
+      const face = obj.faces[fi]
+      if (!face || face.length !== 4) continue
+
+      // Find opposite edge of the quad face
+      let foundIndex = -1
+      let forward = true
+      for (let i = 0; i < 4; i++) {
+        if (face[i] === curr.u && face[(i + 1) % 4] === curr.v) {
+          foundIndex = i
+          forward = true
+          break
+        }
+        if (face[i] === curr.v && face[(i + 1) % 4] === curr.u) {
+          foundIndex = i
+          forward = false
+          break
+        }
+      }
+      if (foundIndex === -1) continue
+
+      let opposite: { u: number; v: number }
+      if (forward) {
+        opposite = {
+          u: face[(foundIndex + 3) % 4]!,
+          v: face[(foundIndex + 2) % 4]!,
+        }
+      } else {
+        opposite = {
+          u: face[(foundIndex + 2) % 4]!,
+          v: face[(foundIndex + 3) % 4]!,
+        }
+      }
+
+      const oppKey = edgeKey(opposite.u, opposite.v)
+      if (edgeSet.has(oppKey) && !seen.has(oppKey)) {
+        seen.add(oppKey)
+        orientedMap.set(oppKey, opposite)
+        queue.push(opposite)
+      }
+    }
+  }
+
+  return loopEdges.map(
+    (key) => orientedMap.get(key) ?? { u: parseEdgeKey(key)[0], v: parseEdgeKey(key)[1] }
+  )
 }

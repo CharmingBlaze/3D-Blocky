@@ -1,9 +1,16 @@
 import type { SceneObject } from './HalfEdgeMesh'
 import { cloneSceneObject } from './meshOps'
 import { edgeKey } from './meshSelection'
-import { removeUnreferencedVertices, splitFaceAtChord } from './meshTopologyOps'
+import {
+  areAdjacentOnFace,
+  removeUnreferencedVertices,
+  splitEdgeAtWithUv,
+  splitFaceAtChord,
+  splitFaceAtChordWithUv,
+} from './meshTopologyOps'
 import { splitFaceGroupsAfterCut } from './faceGroups'
 import { weldSceneObjectCoincidentVertices } from './subdivisionSurface'
+import { cleanupCutTopology } from './meshKnifePath'
 import type { Vec3 } from '../utils/math'
 import { worldPointFromObject } from './objectTransform'
 
@@ -47,10 +54,6 @@ function normalize3(v: Vec3): Vec3 {
   const len = length3(v)
   if (len < EPS) return { x: 0, y: 1, z: 0 }
   return scale3(v, 1 / len)
-}
-
-function lerpUv(a: Uv2, b: Uv2, t: number): Uv2 {
-  return { u: a.u + (b.u - a.u) * t, v: a.v + (b.v - a.v) * t }
 }
 
 function signedDistance(normal: Vec3, planePoint: Vec3, p: Vec3): number {
@@ -216,135 +219,6 @@ function orderCutVertsOnFace(face: number[], cutSet: Set<number>): number[] {
   return ordered
 }
 
-function splitEdgeAtWithUv(
-  positions: Vec3[],
-  faces: number[][],
-  faceUvIndices: number[][] | null,
-  uvs: Uv2[] | null,
-  a: number,
-  b: number,
-  t: number
-): number {
-  const pa = positions[a]!
-  const pb = positions[b]!
-  const u = Math.max(0.001, Math.min(0.999, t))
-  const newVi = positions.length
-  positions.push({
-    x: pa.x + (pb.x - pa.x) * u,
-    y: pa.y + (pb.y - pa.y) * u,
-    z: pa.z + (pb.z - pa.z) * u,
-  })
-
-  const newFaces: number[][] = []
-  const newFaceUvs: number[][] | null = faceUvIndices ? [] : null
-
-  for (let fi = 0; fi < faces.length; fi++) {
-    const face = faces[fi]!
-    const faceUv = faceUvIndices?.[fi]
-    let replaced = false
-    for (let i = 0; i < face.length; i++) {
-      const va = face[i]!
-      const vb = face[(i + 1) % face.length]!
-      if ((va === a && vb === b) || (va === b && vb === a)) {
-        const next = [...face.slice(0, i + 1), newVi, ...face.slice(i + 1)]
-        newFaces.push(next)
-        if (newFaceUvs && faceUv && uvs) {
-          const ua = faceUv[i]!
-          const ub = faceUv[(i + 1) % faceUv.length]!
-          const uvA = uvs[ua] ?? { u: 0, v: 0 }
-          const uvB = uvs[ub] ?? { u: 0, v: 0 }
-          const newUvIndex = uvs.length
-          uvs.push(lerpUv(uvA, uvB, va === a ? u : 1 - u))
-          newFaceUvs.push([...faceUv.slice(0, i + 1), newUvIndex, ...faceUv.slice(i + 1)])
-        } else if (newFaceUvs) {
-          newFaceUvs.push(faceUv ? [...faceUv] : [])
-        }
-        replaced = true
-        break
-      }
-    }
-    if (!replaced) {
-      newFaces.push([...face])
-      if (newFaceUvs) newFaceUvs.push(faceUv ? [...faceUv] : [])
-    }
-  }
-
-  faces.length = 0
-  faces.push(...newFaces)
-  if (faceUvIndices && newFaceUvs) {
-    faceUvIndices.length = 0
-    faceUvIndices.push(...newFaceUvs)
-  }
-  return newVi
-}
-
-function splitFaceAtChordWithUv(
-  faces: number[][],
-  faceColors: number[],
-  faceUvIndices: number[][] | null,
-  fi: number,
-  vA: number,
-  vB: number
-): void {
-  const face = faces[fi]!
-  const ia = face.indexOf(vA)
-  const ib = face.indexOf(vB)
-  if (ia < 0 || ib < 0 || ia === ib) return
-
-  const color = faceColors[fi]!
-  const n = face.length
-  const segA: number[] = []
-  const segB: number[] = []
-  let i = ia
-  do {
-    segA.push(face[i]!)
-    i = (i + 1) % n
-  } while (i !== ib)
-  segA.push(face[ib]!)
-
-  i = ib
-  do {
-    segB.push(face[i]!)
-    i = (i + 1) % n
-  } while (i !== ia)
-  segB.push(face[ia]!)
-
-  if (segA.length < 3 || segB.length < 3) return
-
-  let uvA: number[] | null = null
-  let uvB: number[] | null = null
-  const faceUv = faceUvIndices?.[fi]
-  if (faceUv && faceUv.length === n) {
-    uvA = []
-    uvB = []
-    i = ia
-    do {
-      uvA.push(faceUv[i]!)
-      i = (i + 1) % n
-    } while (i !== ib)
-    uvA.push(faceUv[ib]!)
-
-    i = ib
-    do {
-      uvB.push(faceUv[i]!)
-      i = (i + 1) % n
-    } while (i !== ia)
-    uvB.push(faceUv[ia]!)
-  }
-
-  faces[fi] = segA
-  faces.push(segB)
-  faceColors.push(color)
-  if (faceUvIndices) {
-    if (uvA && uvB) {
-      faceUvIndices[fi] = uvA
-      faceUvIndices.push(uvB)
-    } else {
-      faceUvIndices.push(faceUv ? [...faceUv] : [])
-    }
-  }
-}
-
 function cutIsSafe(
   beforeFaces: number,
   beforeVerts: number,
@@ -495,9 +369,12 @@ function cutWeldedMeshOnce(
   for (let fi = 0; fi < beforeFaces; fi++) {
     if (!frontFaceSet.has(fi)) continue
     const ordered = orderCutVertsOnFace(faces[fi]!, cutVertSet)
-    if (ordered.length === 2) {
-      toSplit.push({ fi, a: ordered[0]!, b: ordered[1]! })
-    }
+    if (ordered.length < 2) continue
+    // Blockbench-style: one chord from outermost cut verts on the face ring.
+    const a = ordered[0]!
+    const b = ordered[ordered.length - 1]!
+    if (areAdjacentOnFace(faces[fi]!, a, b)) continue
+    toSplit.push({ fi, a, b })
   }
 
   const newFaceSourceOld: number[] = faces.map((_, fi) => fi)
@@ -558,7 +435,7 @@ export function knifeCutObject(
 
   const current = weldSceneObjectCoincidentVertices(cloneSceneObject(obj))
   const cut = cutWeldedMeshOnce(current, lineStart, lineEnd, viewForward)
-  return cut ?? obj
+  return cut ? cleanupCutTopology(cut) : obj
 }
 
 /** Apply multiple cut segments sequentially. */

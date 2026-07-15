@@ -80,6 +80,7 @@ const TOOL_LABELS: Record<string, string> = {
   'poly-draw': 'Draw · Poly',
   'boolean-hole': 'Hole · draw line',
   knife: 'Knife',
+  'mirror-knife': 'Mirror Knife',
   'loop-cut': 'Loop Cut',
 }
 
@@ -1604,6 +1605,14 @@ export function SidePanel() {
                 Knife
               </button>
               <button
+                className={`side-btn ${activeTool === 'mirror-knife' ? 'active' : ''}`}
+                onClick={() => setActiveTool('mirror-knife')}
+                disabled={selectionCount === 0}
+                title="Mirror Knife — symmetrically cuts on both sides of the symmetry plane (Shift+K)"
+              >
+                Mirror Knife
+              </button>
+              <button
                 className={`side-btn ${activeTool === 'loop-cut' ? 'active' : ''}`}
                 onClick={() => {
                   setSelectionMode('edge')
@@ -1615,9 +1624,9 @@ export function SidePanel() {
                 Loop Cut
               </button>
             </SideBtnGroup>
-            {activeTool === 'knife' && (
+            {(activeTool === 'knife' || activeTool === 'mirror-knife') && (
               <>
-                <div className="side-create-label">Knife</div>
+                <div className="side-create-label">{activeTool === 'mirror-knife' ? 'Mirror Knife' : 'Knife'}</div>
                 <p className="side-color-hint muted">
                   Click to place points · Shift snaps edge steps and face centers · Ctrl snaps
                   to the face grid · Enter applies · Backspace removes a point

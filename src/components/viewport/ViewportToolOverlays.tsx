@@ -68,7 +68,9 @@ export function ViewportToolOverlays({
         <PrimitiveBoxCanvas />
       )}
       {showToolPreviews && activeTool === 'poly-draw' && <PolyDrawVisuals />}
-      {showToolPreviews && activeTool === 'knife' && <KnifeVisuals />}
+      {showToolPreviews && (activeTool === 'knife' || activeTool === 'mirror-knife') && (
+        <KnifeVisuals />
+      )}
       {showToolPreviews && activeTool === 'bend' && <BendVisuals />}
       {showToolPreviews && activeTool === 'loop-cut' && <LoopCutVisuals />}
       {showToolPreviews && <DrawVertexOverlay />}

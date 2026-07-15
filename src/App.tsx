@@ -180,7 +180,15 @@ export default function App() {
         state.penCancelPath()
         state.cancelPrimitiveBoxDraft()
         state.polyDrawCancel()
-        state.knifeCancel()
+        if (state.activeTool === 'knife' || state.activeTool === 'mirror-knife') {
+          if (state.knifeDraft && (state.knifeDraft.points.length > 0 || state.knifeDraft.completedPaths?.length)) {
+            state.knifeCancel()
+          } else {
+            state.setActiveTool('select')
+          }
+        } else {
+          state.knifeCancel()
+        }
         state.bendCancel()
         state.loopCutCancel()
         state.clearMeshSelection()
@@ -188,9 +196,16 @@ export default function App() {
         state.setVertexMergeModifierHeld(false)
         if (state.maximizedSlot !== null) state.toggleMaximizedView()
       }
-      if (e.key === ' ') {
+      if (e.key === ' ' || e.code === 'Space') {
         const state = store()
         if (state.uvEditorOpen) return
+        if (state.activeTool === 'knife' || state.activeTool === 'mirror-knife') {
+          e.preventDefault()
+          if (state.knifeDraft && (state.knifeDraft.points.length >= 2 || state.knifeDraft.completedPaths?.length)) {
+            state.knifeApply()
+          }
+          return
+        }
         e.preventDefault()
         state.toggleMaximizedView()
       }
@@ -221,9 +236,25 @@ export default function App() {
           state.loopCutCommit()
           return
         }
-        if (state.activeTool === 'knife' && state.knifeDraft && state.knifeDraft.points.length >= 2) {
+        if ((state.activeTool === 'knife' || state.activeTool === 'mirror-knife') && state.knifeDraft && (state.knifeDraft.points.length >= 2 || state.knifeDraft.completedPaths?.length)) {
           e.preventDefault()
           state.knifeApply()
+        }
+      }
+      if (e.code === 'KeyC' && !ctrlOrMeta && !e.altKey) {
+        const state = store()
+        if ((state.activeTool === 'knife' || state.activeTool === 'mirror-knife') && state.knifeDraft) {
+          e.preventDefault()
+          state.knifeToggleAngleConstrained()
+          return
+        }
+      }
+      if (e.code === 'KeyE' && !ctrlOrMeta && !e.altKey) {
+        const state = store()
+        if ((state.activeTool === 'knife' || state.activeTool === 'mirror-knife') && state.knifeDraft) {
+          e.preventDefault()
+          state.knifeStartNewPath()
+          return
         }
       }
       if (e.key === 'f' || e.key === 'F') {
@@ -283,9 +314,18 @@ export default function App() {
           return
         }
       }
-      if ((e.code === 'KeyK') && !ctrlOrMeta && !e.altKey) {
+      if (e.code === 'KeyK' && !ctrlOrMeta && !e.altKey) {
         e.preventDefault()
-        useAppStore.getState().setActiveTool('knife')
+        const state = useAppStore.getState()
+        if ((state.activeTool === 'knife' || state.activeTool === 'mirror-knife') && state.knifeDraft && (state.knifeDraft.points.length >= 2 || state.knifeDraft.completedPaths?.length)) {
+          state.knifeApply()
+        } else {
+          if (e.shiftKey) {
+            state.setActiveTool('mirror-knife')
+          } else {
+            state.setActiveTool('knife')
+          }
+        }
         return
       }
       if (e.code === 'KeyU' && !ctrlOrMeta && !e.altKey && !e.repeat) {
@@ -395,7 +435,7 @@ export default function App() {
       }
       if (e.key === 'Backspace') {
         const knifeState = store()
-        if (knifeState.activeTool === 'knife' && knifeState.knifeDraft?.points.length) {
+        if ((knifeState.activeTool === 'knife' || knifeState.activeTool === 'mirror-knife') && knifeState.knifeDraft?.points.length) {
           e.preventDefault()
           knifeState.knifeRemoveLastPoint()
           return

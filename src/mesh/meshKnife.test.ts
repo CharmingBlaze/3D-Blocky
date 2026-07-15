@@ -3,6 +3,15 @@ import { primitiveBoxToSceneObject } from '../primitives/primitiveBoxCommit'
 import { heightAxisForView } from '../primitives/viewAxes'
 import { prepareSceneObject } from './objectTransform'
 import { knifeCutObject, previewKnifeCutLocalPoints } from './meshKnife'
+import {
+  attachKnifePoint,
+  cleanupCutTopology,
+  knifeCutPath,
+  pathHasAttachments,
+} from './meshKnifePath'
+import { validateCutTopology } from './meshTopologyOps'
+import { identityFaceGroups } from './faceGroups'
+import { mirrorKnifePath } from './knifeUtils'
 
 function makeBox() {
   return prepareSceneObject(
@@ -16,9 +25,10 @@ function makeBox() {
   )
 }
 
-describe('meshKnife', () => {
+describe('meshKnife topology quality', () => {
   it('cuts front faces along a view-aligned segment without exploding vertex count', () => {
     const obj = makeBox()
+    obj.faceGroups = identityFaceGroups(obj.faces.length)
     const beforeFaces = obj.faces.length
     const beforeVerts = obj.positions.length
 
@@ -32,19 +42,12 @@ describe('meshKnife', () => {
     expect(cut.faces.length).toBeGreaterThan(beforeFaces)
     expect(cut.positions.length).toBeGreaterThan(beforeVerts)
     expect(cut.positions.length).toBeLessThan(64)
-    // Keep n-gons — cuts must not force-triangulate every face into a mess.
     expect(cut.faces.some((f) => f.length >= 4)).toBe(true)
-    for (const p of cut.positions) {
-      expect(Number.isFinite(p.x)).toBe(true)
-      expect(Math.abs(p.x)).toBeLessThanOrEqual(2.01)
-      expect(Math.abs(p.y)).toBeLessThanOrEqual(2.01)
-      expect(Math.abs(p.z)).toBeLessThanOrEqual(2.01)
-    }
+    expect(validateCutTopology(cut)).toEqual([])
   })
 
   it('does not cut through the back of the mesh', () => {
     const obj = makeBox()
-    // Front face of the box is at z = +1 (normal +Z faces the camera looking -Z).
     const cut = knifeCutObject(
       obj,
       { x: -0.8, y: 0, z: 1 },
@@ -52,8 +55,6 @@ describe('meshKnife', () => {
       { x: 0, y: 0, z: -1 }
     )
 
-    // Back face corners should still be the only verts at z ≈ -1 with |x|=1,|y|=1
-    // (no new split verts on the back face interior edges at y=0).
     const backMidEdgeVerts = cut.positions.filter(
       (p) => Math.abs(p.z + 1) < 0.02 && Math.abs(p.y) < 0.02 && Math.abs(Math.abs(p.x) - 1) > 0.05
     )
@@ -102,7 +103,6 @@ describe('meshKnife', () => {
       { u: 1, v: 1 },
       { u: 0, v: 1 },
     ]
-    // Assign a simple UV index ring per face (clamp to available).
     obj.faceUvIndices = obj.faces.map((f) => f.map((_, i) => i % 4))
 
     const cut = knifeCutObject(
@@ -114,5 +114,87 @@ describe('meshKnife', () => {
 
     expect(cut.uvs?.length).toBeGreaterThan(0)
     expect(cut.faceUvIndices?.length).toBe(cut.faces.length)
+    expect(validateCutTopology(cut)).toEqual([])
+  })
+})
+
+describe('meshKnifePath Blockbench remesh', () => {
+  it('cuts a face via attached edge→edge path into clean polygons', () => {
+    const obj = makeBox()
+    obj.faceGroups = identityFaceGroups(obj.faces.length)
+
+    // Front face is typically at +Z. Pick midpoints of left and right edges.
+    const left = attachKnifePoint(obj, { x: -1, y: 0, z: 1 })
+    const right = attachKnifePoint(obj, { x: 1, y: 0, z: 1 })
+    expect(left.snap === 'edge' || left.snap === 'vertex').toBe(true)
+    expect(right.snap === 'edge' || right.snap === 'vertex').toBe(true)
+
+    const path = [left, right]
+    expect(pathHasAttachments(path)).toBe(true)
+
+    const cut = knifeCutPath(obj, path)
+    expect(cut.faces.length).toBeGreaterThan(obj.faces.length)
+    expect(validateCutTopology(cut)).toEqual([])
+    expect(cut.faces.every((f) => f.length >= 3)).toBe(true)
+  })
+
+  it('mirror path reattach + dual cut stays manifold', () => {
+    const obj = makeBox()
+    obj.faceGroups = identityFaceGroups(obj.faces.length)
+    const a = attachKnifePoint(obj, { x: -1, y: 0.3, z: 1 })
+    const b = attachKnifePoint(obj, { x: -0.2, y: -0.3, z: 1 })
+    const path = [a, b]
+
+    let cut = knifeCutPath(obj, path)
+    const mirrored = mirrorKnifePath(
+      path.map((p) => ({
+        world: p.local,
+        local: p.local,
+        snap: (p.snap as 'edge' | 'face' | 'vertex') ?? 'face',
+      })),
+      cut,
+      'x',
+      0
+    )
+    const reattached = mirrored.map((p) => attachKnifePoint(cut, p.local))
+    cut = knifeCutPath(cut, reattached)
+    cut = cleanupCutTopology(cut)
+
+    expect(validateCutTopology(cut)).toEqual([])
+    expect(cut.faces.length).toBeGreaterThan(obj.faces.length)
+  })
+
+  it('edge→face→edge path remeshes into quads/tris without holes', () => {
+    const obj = makeBox()
+    obj.faceGroups = identityFaceGroups(obj.faces.length)
+    const left = attachKnifePoint(obj, { x: -1, y: 0.4, z: 1 })
+    const mid = attachKnifePoint(obj, { x: 0, y: 0, z: 1 })
+    const right = attachKnifePoint(obj, { x: 1, y: -0.4, z: 1 })
+    expect(mid.snap).toBe('face')
+
+    const cut = knifeCutPath(obj, [left, mid, right])
+    expect(cut.faces.length).toBeGreaterThan(obj.faces.length)
+    expect(validateCutTopology(cut)).toEqual([])
+    // Cut face remeshes to tris/quads; shared-edge neighbors become n-gons (Blockbench).
+    expect(cut.faces.every((f) => f.length >= 3)).toBe(true)
+    expect(cut.faces.some((f) => f.length === 3)).toBe(true)
+  })
+
+  it('cleanup welds coincident seam verts and keeps manifold edges', () => {
+    const obj = makeBox()
+    const left = attachKnifePoint(obj, { x: -1, y: 0, z: 1 })
+    const right = attachKnifePoint(obj, { x: 1, y: 0, z: 1 })
+    const cut = cleanupCutTopology(knifeCutPath(obj, [left, right]))
+    expect(validateCutTopology(cut)).toEqual([])
+    // No duplicate positions at the cut seam.
+    for (let i = 0; i < cut.positions.length; i++) {
+      for (let j = i + 1; j < cut.positions.length; j++) {
+        const a = cut.positions[i]!
+        const b = cut.positions[j]!
+        const d =
+          (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
+        expect(d).toBeGreaterThan(1e-10)
+      }
+    }
   })
 })

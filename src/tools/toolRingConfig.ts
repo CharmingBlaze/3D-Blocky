@@ -126,7 +126,7 @@ export function categoryForActiveTool(tool: ActiveTool, fallback: ToolCategory):
   if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'bend') return 'transform'
   if (SCULPT_TOOLS.includes(tool)) return 'sculpt'
   if (tool === 'boolean-hole') return 'boolean'
-  if (tool === 'knife' || tool === 'loop-cut') return 'mesh'
+  if (tool === 'knife' || tool === 'mirror-knife' || tool === 'loop-cut') return 'mesh'
   if (tool.startsWith('select-')) return 'select'
   if (tool === 'vector-pen' || tool === 'vector-shape') return 'vector'
   if (tool === 'primitive-box' || tool === 'poly-draw' || tool === 'draw') return 'draw'

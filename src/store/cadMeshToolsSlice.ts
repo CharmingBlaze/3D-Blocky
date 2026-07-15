@@ -1,7 +1,18 @@
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { localPointFromWorld, worldDeltaToLocal } from '../mesh/objectTransform'
 import { knifeCutObject } from '../mesh/meshKnife'
-import { knifeSegmentLongEnough } from '../mesh/knifeUtils'
+import {
+  attachKnifePoint,
+  cleanupCutTopology,
+  knifeCutPath,
+  pathHasAttachments,
+} from '../mesh/meshKnifePath'
+import {
+  knifePathOnMirrorPlane,
+  knifeSegmentIsMirrorDuplicate,
+  knifeSegmentLongEnough,
+  mirrorKnifePath,
+} from '../mesh/knifeUtils'
 import {
   applyBendToObject,
   bendAngleFromScreenDelta,
@@ -10,7 +21,7 @@ import {
 import { cloneSceneObject } from '../mesh/meshOps'
 import {
   findEdgeLoop,
-  insertEdgeLoop,
+  insertMultipleEdgeLoops,
   isValidLoopSeed,
 } from '../mesh/meshTopologyOps'
 import {
@@ -53,14 +64,20 @@ export interface LoopCutDraft {
   seedEdge: string
   loopEdges: string[]
   t: number
+  numCuts: number
+  locked: boolean
 }
 
-export type KnifeSnapKind = 'vertex' | 'edge' | 'face' | 'face-center' | 'grid' | 'path'
+export type KnifeSnapKind = 'vertex' | 'edge' | 'face' | 'face-center' | 'grid' | 'path' | 'space'
 
 export interface KnifePoint {
   world: Vec3
   local: Vec3
   snap: KnifeSnapKind
+  /** Topology attachment (Blockbench-style) — used by path knife apply. */
+  vertexIndex?: number | null
+  edge?: [number, number] | null
+  faceIndex?: number | null
 }
 
 export interface KnifeDraft {
@@ -72,6 +89,9 @@ export interface KnifeDraft {
   viewForward: Vec3
   /** Non-destructive guidance when the current path cannot produce a cut. */
   feedback: string | null
+  angleConstrained?: boolean
+  completedPaths?: KnifePoint[][]
+  cameraPosition?: Vec3
 }
 
 export interface BendDraft {
@@ -112,17 +132,20 @@ export interface CadMeshToolsLayoutActions {
   polyDrawCancel: () => void
   polyDrawFinish: () => void
   flipLastPolyDrawFace: () => void
-  loopCutBegin: (objectId: string, seedEdge: string) => void
+  loopCutBegin: (objectId: string, seedEdge: string, locked?: boolean) => void
   loopCutSetT: (t: number) => void
   loopCutAdjustWheel: (deltaY: number) => void
+  loopCutAdjustCount: (delta: number) => void
   loopCutCommit: () => void
   loopCutCancel: () => void
-  knifeHover: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
+  knifeHover: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3, cameraPosition?: Vec3) => void
   knifeClearHover: () => void
-  knifeAddPoint: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3) => void
+  knifeAddPoint: (objectId: string, point: KnifePoint, view: ViewType, viewForward: Vec3, cameraPosition?: Vec3) => void
   knifeRemoveLastPoint: () => void
   knifeApply: (viewForward?: Vec3) => void
   knifeCancel: () => void
+  knifeToggleAngleConstrained: () => void
+  knifeStartNewPath: () => void
   /** @deprecated use knifeAddPoint / knifeApply — kept for transitional call sites */
   knifePointerDown: (objectId: string, world: Vec3, view: ViewType) => void
   knifePointerMove: (world: Vec3) => void
@@ -152,6 +175,7 @@ export const cadMeshToolsInitialState: CadMeshToolsLayoutState = {
 type CadMeshToolsHost = CadMeshToolsLayoutState & {
   objects: SceneObject[]
   activeColor: number
+  activeTool: string
   symmetryEnabled: boolean
   symmetryAxis: SymmetryAxis
   symmetryPlane: number
@@ -350,13 +374,17 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       get().commitHistory('Flip face')
     },
 
-    loopCutBegin: (objectId, seedEdge) => {
+    loopCutBegin: (objectId, seedEdge, locked = false) => {
       const obj = get().objects.find((o) => o.id === objectId)
       if (!obj || obj.topologyLocked) return
       if (!isValidLoopSeed(obj, seedEdge)) return
+
+      const prev = get().loopCutDraft
+      const numCuts = prev?.seedEdge === seedEdge ? prev.numCuts : 1
       const loopEdges = findEdgeLoop(obj, seedEdge)
+
       set({
-        loopCutDraft: { objectId, seedEdge, loopEdges, t: 0.5 },
+        loopCutDraft: { objectId, seedEdge, loopEdges, t: prev?.seedEdge === seedEdge ? prev.t : 0.5, numCuts, locked },
         activeTool: 'loop-cut',
         selectionMode: 'edge' as SelectionMode,
       } as unknown as Partial<S>)
@@ -377,6 +405,15 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       get().loopCutSetT(loopCutDraft.t + step)
     },
 
+    loopCutAdjustCount: (delta) => {
+      const { loopCutDraft } = get()
+      if (!loopCutDraft) return
+      const numCuts = Math.max(1, Math.min(32, (loopCutDraft.numCuts ?? 1) + delta))
+      set({
+        loopCutDraft: { ...loopCutDraft, numCuts },
+      } as unknown as Partial<S>)
+    },
+
     loopCutCommit: () => {
       const { loopCutDraft, objects } = get()
       if (!loopCutDraft) return
@@ -385,20 +422,41 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         set({ loopCutDraft: null } as unknown as Partial<S>)
         return
       }
-      const cut = insertEdgeLoop(obj, loopCutDraft.loopEdges, loopCutDraft.t)
+
+      const numCuts = loopCutDraft.numCuts ?? 1
+      const factor = (loopCutDraft.t - 0.5) * 2 // Translate t [0, 1] to slide factor [-1, 1]
+
+      const tValues: number[] = []
+      for (let i = 0; i < numCuts; i++) {
+        const tDefault = (i + 1) / (numCuts + 1)
+        if (factor > 0) {
+          tValues.push(tDefault + factor * (1 - tDefault))
+        } else if (factor < 0) {
+          tValues.push(tDefault + factor * tDefault)
+        } else {
+          tValues.push(tDefault)
+        }
+      }
+
+      const cut = insertMultipleEdgeLoops(obj, loopCutDraft.loopEdges, loopCutDraft.seedEdge, tValues)
+      const cleaned = cleanupCutTopology(cut)
       get().updateObject(obj.id, {
-        positions: cut.positions,
-        faces: cut.faces,
-        faceColors: cut.faceColors,
+        positions: cleaned.positions,
+        faces: cleaned.faces,
+        faceColors: cleaned.faceColors,
+        faceGroups: cleaned.faceGroups,
+        uvs: cleaned.uvs,
+        faceUvIndices: cleaned.faceUvIndices,
       })
       set({ loopCutDraft: null } as unknown as Partial<S>)
-      get().commitHistory('Loop cut')
+      get().commitHistory(numCuts === 1 ? 'Loop cut' : `Loop cut ×${numCuts}`)
     },
 
     loopCutCancel: () => set({ loopCutDraft: null } as unknown as Partial<S>),
 
-    knifeHover: (objectId, point, view, viewForward) => {
+    knifeHover: (objectId, point, view, viewForward, cameraPosition) => {
       const prev = get().knifeDraft
+      const keepTool = get().activeTool === 'mirror-knife' ? 'mirror-knife' : 'knife'
       if (prev && prev.objectId !== objectId) {
         set({
           knifeDraft: {
@@ -408,8 +466,9 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
             view,
             viewForward: { ...viewForward },
             feedback: null,
+            cameraPosition,
           },
-          activeTool: 'knife',
+          activeTool: keepTool,
         } as unknown as Partial<S>)
         return
       }
@@ -419,10 +478,13 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           points: prev?.points ?? [],
           hover: { ...point, world: { ...point.world }, local: { ...point.local } },
           view: prev?.view ?? view,
-          viewForward: { ...viewForward },
+          viewForward: prev?.points.length ? prev.viewForward : { ...viewForward },
           feedback: null,
+          angleConstrained: prev?.angleConstrained,
+          completedPaths: prev?.completedPaths,
+          cameraPosition: prev?.points.length ? prev.cameraPosition : (cameraPosition ?? prev?.cameraPosition),
         },
-        activeTool: 'knife',
+        activeTool: keepTool,
       } as unknown as Partial<S>)
     },
 
@@ -432,8 +494,9 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       set({ knifeDraft: { ...knifeDraft, hover: null } } as unknown as Partial<S>)
     },
 
-    knifeAddPoint: (objectId, point, view, viewForward) => {
+    knifeAddPoint: (objectId, point, view, viewForward, cameraPosition) => {
       const prev = get().knifeDraft
+      const keepTool = get().activeTool === 'mirror-knife' ? 'mirror-knife' : 'knife'
       const points =
         prev?.objectId === objectId ? [...prev.points] : ([] as KnifePoint[])
       const last = points[points.length - 1]
@@ -451,6 +514,9 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         world: { ...point.world },
         local: { ...point.local },
         snap: point.snap,
+        vertexIndex: point.vertexIndex ?? null,
+        edge: point.edge ? [point.edge[0], point.edge[1]] : null,
+        faceIndex: point.faceIndex ?? null,
       })
       set({
         knifeDraft: {
@@ -458,33 +524,58 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           points,
           hover: null,
           view,
-          viewForward: { ...viewForward },
+          viewForward: prev?.points.length ? prev.viewForward : { ...viewForward },
           feedback: null,
+          angleConstrained: prev?.angleConstrained,
+          completedPaths: prev?.completedPaths,
+          cameraPosition: prev?.points.length ? prev.cameraPosition : (cameraPosition ?? prev?.cameraPosition),
         },
-        activeTool: 'knife',
+        activeTool: keepTool,
       } as unknown as Partial<S>)
     },
 
     knifeRemoveLastPoint: () => {
       const { knifeDraft } = get()
       if (!knifeDraft) return
-      if (knifeDraft.points.length <= 1) {
-        set({ knifeDraft: null } as unknown as Partial<S>)
+      if (knifeDraft.points.length > 0) {
+        if (knifeDraft.points.length === 1 && (!knifeDraft.completedPaths || knifeDraft.completedPaths.length === 0)) {
+          set({ knifeDraft: null } as unknown as Partial<S>)
+          return
+        }
+        set({
+          knifeDraft: {
+            ...knifeDraft,
+            points: knifeDraft.points.slice(0, -1),
+            hover: null,
+            feedback: null,
+          },
+        } as unknown as Partial<S>)
         return
       }
-      set({
-        knifeDraft: {
-          ...knifeDraft,
-          points: knifeDraft.points.slice(0, -1),
-          hover: null,
-          feedback: null,
-        },
-      } as unknown as Partial<S>)
+
+      // Active path is empty, try to restore the last completed path
+      if (knifeDraft.completedPaths && knifeDraft.completedPaths.length > 0) {
+        const nextCompleted = [...knifeDraft.completedPaths]
+        const restored = nextCompleted.pop()!
+        set({
+          knifeDraft: {
+            ...knifeDraft,
+            completedPaths: nextCompleted,
+            points: restored,
+            hover: null,
+            feedback: null,
+          },
+        } as unknown as Partial<S>)
+      }
     },
 
     knifeApply: (viewForward) => {
-      const { knifeDraft, objects } = get()
-      if (!knifeDraft || knifeDraft.points.length < 2) return
+      const { knifeDraft, objects, activeTool } = get()
+      if (!knifeDraft) return
+
+      const allPaths = [...(knifeDraft.completedPaths ?? []), knifeDraft.points].filter((p) => p.length >= 2)
+      if (allPaths.length === 0) return
+
       const obj = objects.find((o) => o.id === knifeDraft.objectId)
       if (!obj || obj.topologyLocked) {
         set({
@@ -498,18 +589,99 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       }
 
       const forward = viewForward ?? knifeDraft.viewForward
-      const localForward = worldDeltaToLocal(obj, forward)
+      const hasCam = knifeDraft.cameraPosition && knifeDraft.view === 'perspective'
+      const localCamPos = hasCam ? localPointFromWorld(obj, knifeDraft.cameraPosition!) : null
       let current = obj
       let applied = 0
-      for (let i = 0; i + 1 < knifeDraft.points.length; i++) {
-        const a = knifeDraft.points[i]!
-        const b = knifeDraft.points[i + 1]!
-        if (!knifeSegmentLongEnough(a.local, b.local)) continue
-        const next = knifeCutObject(current, a.local, b.local, localForward)
-        if (next !== current) {
-          current = next
-          applied++
+
+      const planeForwardForSegment = (aLocal: Vec3, bLocal: Vec3): Vec3 => {
+        if (localCamPos) {
+          const mid = {
+            x: (aLocal.x + bLocal.x) * 0.5,
+            y: (aLocal.y + bLocal.y) * 0.5,
+            z: (aLocal.z + bLocal.z) * 0.5,
+          }
+          return {
+            x: mid.x - localCamPos.x,
+            y: mid.y - localCamPos.y,
+            z: mid.z - localCamPos.z,
+          }
         }
+        return worldDeltaToLocal(obj, forward)
+      }
+
+      /** Blockbench path remesh when attachments exist; plane bridge otherwise. */
+      const applyPath = (path: KnifePoint[]): number => {
+        let cuts = 0
+        if (pathHasAttachments(path)) {
+          const next = knifeCutPath(current, path)
+          if (next !== current) {
+            current = next
+            cuts++
+            return cuts
+          }
+        }
+        // Fallback / bridge: view-plane cut per segment (intermediate faces).
+        for (let i = 0; i + 1 < path.length; i++) {
+          const a = path[i]!
+          const b = path[i + 1]!
+          if (!knifeSegmentLongEnough(a.local, b.local)) continue
+          const next = knifeCutObject(
+            current,
+            a.local,
+            b.local,
+            planeForwardForSegment(a.local, b.local)
+          )
+          if (next !== current) {
+            current = next
+            cuts++
+          }
+        }
+        return cuts
+      }
+
+      // 1. Apply primary cuts (Blockbench-style path remesh).
+      for (const path of allPaths) {
+        applied += applyPath(path)
+      }
+
+      // 2. Mirror knife: mirror the path, reattach to topology, remesh both sides.
+      // Post-weld cleans seam duplicate verts (Blockbench auto-merge idea).
+      if (activeTool === 'mirror-knife') {
+        const { symmetryAxis, symmetryPlane } = get()
+        for (const path of allPaths) {
+          if (knifePathOnMirrorPlane(path, symmetryAxis, symmetryPlane)) continue
+
+          const mirroredPath = mirrorKnifePath(path, current, symmetryAxis, symmetryPlane)
+          if (
+            path.length >= 2 &&
+            knifeSegmentIsMirrorDuplicate(
+              path[0]!.local,
+              path[path.length - 1]!.local,
+              mirroredPath[0]!.local,
+              mirroredPath[mirroredPath.length - 1]!.local
+            )
+          ) {
+            continue
+          }
+
+          const reattached: KnifePoint[] = mirroredPath.map((p) => {
+            const att = attachKnifePoint(current, p.local, null)
+            return {
+              world: { ...p.world },
+              local: att.local,
+              snap: (att.snap as KnifePoint['snap']) ?? 'face',
+              vertexIndex: att.vertexIndex ?? null,
+              edge: att.edge ?? null,
+              faceIndex: att.faceIndex ?? null,
+            }
+          })
+          applied += applyPath(reattached)
+        }
+      }
+
+      if (applied > 0) {
+        current = cleanupCutTopology(current)
       }
 
       if (applied === 0) {
@@ -536,6 +708,33 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
     },
 
     knifeCancel: () => set({ knifeDraft: null } as unknown as Partial<S>),
+
+    knifeToggleAngleConstrained: () => {
+      const { knifeDraft } = get()
+      if (!knifeDraft) return
+      set({
+        knifeDraft: {
+          ...knifeDraft,
+          angleConstrained: !knifeDraft.angleConstrained,
+          feedback: null,
+        },
+      } as unknown as Partial<S>)
+    },
+
+    knifeStartNewPath: () => {
+      const { knifeDraft } = get()
+      if (!knifeDraft || knifeDraft.points.length === 0) return
+      const completed = knifeDraft.completedPaths ?? []
+      set({
+        knifeDraft: {
+          ...knifeDraft,
+          completedPaths: [...completed, knifeDraft.points],
+          points: [],
+          hover: null,
+          feedback: null,
+        },
+      } as unknown as Partial<S>)
+    },
 
     // Legacy drag API → maps onto point path (two-point stroke)
     knifePointerDown: (objectId, world, view) => {

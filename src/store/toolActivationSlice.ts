@@ -55,6 +55,7 @@ export type ActiveTool =
   | 'primitive-box'
   | 'poly-draw'
   | 'knife'
+  | 'mirror-knife'
   | 'loop-cut'
 
 export type MeshModalOp = MeshModalOpKind
