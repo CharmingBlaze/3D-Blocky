@@ -335,8 +335,6 @@ export function ViewportPanel({
 
       <ViewportDomOverlays
         view={view}
-        isActive={isActive}
-        activeTool={activeTool}
         containerRef={containerRef}
         cameraRef={cameraRef}
         marqueeRect={marqueeRect}

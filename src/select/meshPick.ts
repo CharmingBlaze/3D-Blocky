@@ -2,8 +2,7 @@ import * as THREE from 'three'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SelectionMode } from '../store/appStore'
-import { ensureTransform, getObjectPivot, worldPointFromObject, localPointFromWorld } from '../mesh/objectTransform'
-import { buildCameraDragPlane, clientToCameraPlane } from '../utils/screenToWorld'
+import { ensureTransform, getObjectPivot, worldPointFromObject } from '../mesh/objectTransform'
 import {
   isEdgeOverlayPickable,
 } from '../mesh/edgeOverlay'

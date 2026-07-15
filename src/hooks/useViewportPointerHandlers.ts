@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Vector3 } from 'three'
-import type * as THREE from 'three'
+import type { Camera } from 'three'
 import { useShallow } from 'zustand/react/shallow'
 import { pushViewportSharedInteraction, popViewportSharedInteraction } from '../rendering/viewportFrameLoop'
 import type { ViewportSlotIndex } from '../scene/viewTypes'
@@ -39,6 +39,7 @@ import {
   edgeKey,
   getAffectedVertices,
   meshSelectionWorldCenter,
+  parseEdgeKey,
   selectionHasComponents,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
@@ -47,7 +48,13 @@ import type { ObjectTransform } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SculptTool } from '../sculpt/sculptTools'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
-import { cloneTransform, ensureTransform, selectionWorldCenter, localPointFromWorld } from '../mesh/objectTransform'
+import {
+  cloneTransform,
+  ensureTransform,
+  localPointFromWorld,
+  selectionWorldCenter,
+  worldPointFromObject,
+} from '../mesh/objectTransform'
 import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
 import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
@@ -81,7 +88,7 @@ export interface UseViewportPointerHandlersParams {
   layoutVisible: boolean
   slotIndex: ViewportSlotIndex
   containerRef: React.RefObject<HTMLDivElement | null>
-  cameraRef: React.RefObject<THREE.Camera | null>
+  cameraRef: React.RefObject<Camera | null>
 }
 
 export function useViewportPointerHandlers({
@@ -732,7 +739,7 @@ export function useViewportPointerHandlers({
         if (store.knifeDraft?.points.length || store.knifeDraft?.completedPaths?.length) {
           store.knifeCancel()
         } else {
-          store.setActiveTool('select')
+          store.activateSelectTool()
         }
         return
       }
@@ -749,7 +756,7 @@ export function useViewportPointerHandlers({
             }
           } else {
             store.loopCutCancel()
-            store.setActiveTool('select')
+            store.activateSelectTool()
           }
           return
         }
@@ -1496,6 +1503,8 @@ export function useViewportPointerHandlers({
       }
 
       const store = useAppStore.getState()
+      const rect = containerRef.current?.getBoundingClientRect()
+      const camera = cameraRef.current
 
       if (store.activeTool === 'loop-cut' && rect && camera) {
         const draft = store.loopCutDraft
@@ -1526,7 +1535,7 @@ export function useViewportPointerHandlers({
               const worldB = worldPointFromObject(obj, obj.positions[vB]!)
 
               const project = (w: Vec3) => {
-                const temp = new THREE.Vector3(w.x, w.y, w.z).project(camera)
+                const temp = new Vector3(w.x, w.y, w.z).project(camera)
                 const x = rect.left + (temp.x * 0.5 + 0.5) * rect.width
                 const y = rect.top + (-temp.y * 0.5 + 0.5) * rect.height
                 return { x, y }

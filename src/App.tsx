@@ -184,7 +184,7 @@ export default function App() {
           if (state.knifeDraft && (state.knifeDraft.points.length > 0 || state.knifeDraft.completedPaths?.length)) {
             state.knifeCancel()
           } else {
-            state.setActiveTool('select')
+            state.activateSelectTool()
           }
         } else {
           state.knifeCancel()
