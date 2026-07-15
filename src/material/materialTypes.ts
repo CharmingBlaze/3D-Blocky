@@ -7,6 +7,16 @@ export interface Material {
   mode: MaterialMode
   solidColor?: Rgba4
   textureId?: string
+  /** Sampling used when UVs leave the 0–1 texture bounds. */
+  textureWrap?: 'clamp' | 'repeat' | 'mirror'
+  /** Multiplied with texture RGB; white preserves the original image. */
+  textureTint?: Rgba4
+  /** 0 keeps original texture colour; 1 applies the full multiplicative tint. */
+  textureTintStrength?: number
+  textureLumaAlpha?: boolean
+  textureBrightness?: number
+  textureShadowDetail?: number
+  textureGradient?: { start: Rgba4; end: Rgba4; angle: number }
   opacity: number
   doubleSided: boolean
 }
@@ -87,5 +97,9 @@ export function cloneMaterial(m: Material): Material {
   return {
     ...m,
     solidColor: m.solidColor ? [...m.solidColor] as Rgba4 : undefined,
+    textureTint: m.textureTint ? [...m.textureTint] as Rgba4 : undefined,
+    textureGradient: m.textureGradient
+      ? { start: [...m.textureGradient.start] as Rgba4, end: [...m.textureGradient.end] as Rgba4, angle: m.textureGradient.angle }
+      : undefined,
   }
 }

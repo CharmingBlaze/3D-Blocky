@@ -849,6 +849,7 @@ export function PixelEditorPanel() {
   )
 
   const brushSelected = store.tool === 'paintBrush'
+  const activeTool = TOOL_GROUPS.flat().find((tool) => tool.id === store.tool)
 
   const renderBrushSoftOption = (
     label: string,
@@ -1051,6 +1052,17 @@ export function PixelEditorPanel() {
   const renderCanvas = () => (
     <div className="px-stage">
       {paintOnModelHint}
+      <header className="px-stage-head">
+        <div className="px-stage-title">
+          <strong>{activeTool?.label ?? 'Tool'}</strong>
+          <span>{doc ? `${doc.width} × ${doc.height}px` : 'No texture open'}</span>
+        </div>
+        <div className="px-stage-readouts" aria-label="Canvas status">
+          {store.selection && <span className="px-stage-badge">Selection active</span>}
+          {store.paintOnModel && canPaintOnModel && <span className="px-stage-badge active">3D paint</span>}
+          <span className="px-stage-zoom">{Math.round(store.zoom * 100)}%</span>
+        </div>
+      </header>
       <div
         ref={viewportRef}
         className="px-viewport"
@@ -1073,13 +1085,15 @@ export function PixelEditorPanel() {
         )}
       </div>
       <footer className="px-statusbar">
-        <span>
-          Scroll zoom · Space pan · Ctrl+drag select · Esc/Ctrl+D deselect · Ctrl+C/X/V · Del
-        </span>
+        <span><kbd>Scroll</kbd> Zoom</span>
+        <span><kbd>Space</kbd> Pan</span>
+        <span><kbd>Ctrl</kbd> + drag Select</span>
+        <span><kbd>I</kbd> Pick</span>
+        <span><kbd>B</kbd> Fill</span>
         {fileMessage ? (
-          <span className="muted">{fileMessage}</span>
+          <span className="muted px-status-message">{fileMessage}</span>
         ) : (
-          <span>I pick · B bucket · P E L R O shortcuts</span>
+          <span className="px-status-message">Pencil P · Eraser E · Line L · Shapes R/O</span>
         )}
       </footer>
     </div>

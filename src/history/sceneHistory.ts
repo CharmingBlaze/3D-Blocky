@@ -253,6 +253,8 @@ function materialEqual(
     a.opacity === b.opacity &&
     a.doubleSided === b.doubleSided &&
     a.textureId === b.textureId &&
+    a.textureTintStrength === b.textureTintStrength &&
+    rgbaEqual(a.textureTint, b.textureTint) &&
     rgbaEqual(a.solidColor, b.solidColor)
   )
 }

@@ -244,8 +244,36 @@ export function inheritTextureMaterial(
  */
 export function applyActiveHairTexture(
   obj: SceneObject,
-  textureId: string | null | undefined
+  textureId: string | null | undefined,
+  settings?: import('../stroke/hairTextureSettings').HairTextureSettings
 ): SceneObject {
   if (!textureId) return obj
-  return setObjectMaterialMode(ensureObjectMaterial(obj), 'texture', textureId)
+  const textured = setObjectMaterialMode(ensureObjectMaterial(obj), 'texture', textureId)
+  if (!settings || !textured.material) return textured
+  const hex = settings.tintEnabled ? settings.tint.replace('#', '') : 'ffffff'
+  const value = Number.parseInt(hex, 16)
+  const tint = Number.isFinite(value)
+    ? [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255, 1] as const
+    : [1, 1, 1, 1] as const
+  const parseColor = (color: string) => {
+    const n = Number.parseInt(color.replace('#', ''), 16)
+    return Number.isFinite(n)
+      ? [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1] as const
+      : [1, 1, 1, 1] as const
+  }
+  return {
+    ...textured,
+    material: {
+      ...textured.material,
+      textureWrap: settings.wrap,
+      textureTint: settings.colorMode === 'tint' || settings.tintEnabled ? [...tint] : [1, 1, 1, 1],
+      textureGradient: settings.colorMode === 'gradient'
+        ? { start: [...parseColor(settings.gradientStart)], end: [...parseColor(settings.gradientEnd)], angle: settings.gradientAngle }
+        : undefined,
+      textureLumaAlpha: settings.removeDarkBackground,
+      textureBrightness: settings.brightness,
+      textureShadowDetail: settings.shadowDetail,
+      opacity: Math.max(0, Math.min(1, settings.opacity)),
+    },
+  }
 }

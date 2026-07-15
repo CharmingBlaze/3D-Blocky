@@ -73,12 +73,12 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       <meshStandardMaterial
         color={color}
         transparent
-        opacity={0.22}
-        flatShading
+        opacity={0.34}
+        flatShading={false}
         side={THREE.DoubleSide}
         depthWrite={false}
         emissive={color}
-        emissiveIntensity={0.04}
+        emissiveIntensity={0.08}
       />
     </mesh>
   )

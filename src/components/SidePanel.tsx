@@ -949,44 +949,41 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
-            <button
-              type="button"
-              className={`side-btn hair-texture-btn ${hairTextureId ? 'active' : ''}`}
-              onClick={() => setShowHairTextureDialog(true)}
-              title={
-                hairTextureId
-                  ? `Hair texture: ${hairTextureLabel ?? hairTextureId} — click to change or clear`
-                  : 'Choose a texture for hair strokes (or leave unset to use colors / materials)'
-              }
-            >
-              {hairTextureId
-                ? `Hair Texture · ${hairTextureLabel?.split(' (')[0] ?? 'On'}`
-                : 'Hair Texture'}
-            </button>
-            <div className="side-checkbox-row">
-              <label
-                className="side-checkbox"
-                title="Taper hair to a point at both ends (default)"
-              >
-                <input
-                  type="checkbox"
-                  checked={hairTipStyle === 'pointed'}
-                  onChange={() => setHairTipStyle('pointed')}
-                />
-                <span>Pointed</span>
-              </label>
-              <label
-                className="side-checkbox"
-                title="Keep full width/radius to blunt square ends"
-              >
-                <input
-                  type="checkbox"
-                  checked={hairTipStyle === 'square'}
-                  onChange={() => setHairTipStyle('square')}
-                />
-                <span>Square</span>
-              </label>
-            </div>
+            {strokeMode.startsWith('hair-') && (
+              <div className="hair-draw-options">
+                <div className="hair-draw-options-heading">
+                  <span>Hair setup</span>
+                  <span className="muted">for new strokes</span>
+                </div>
+                <button
+                  type="button"
+                  className={`side-btn hair-texture-btn ${hairTextureId ? 'active' : ''}`}
+                  onClick={() => setShowHairTextureDialog(true)}
+                  title={
+                    hairTextureId
+                      ? `Hair texture: ${hairTextureLabel ?? hairTextureId} — click to edit mapping and color`
+                      : 'Choose a texture for hair strokes (or keep the current palette color)'
+                  }
+                >
+                  {hairTextureId
+                    ? `Texture · ${hairTextureLabel?.split(' (')[0] ?? 'On'}`
+                    : 'Texture · Use current color'}
+                </button>
+                <div className="side-checkbox-row">
+                  <label className="side-checkbox" title="Taper hair to a point at both ends">
+                    <input type="radio" name="hair-tip" checked={hairTipStyle === 'pointed'} onChange={() => setHairTipStyle('pointed')} />
+                    <span>Pointed tips</span>
+                  </label>
+                  <label className="side-checkbox" title="Keep full width/radius to blunt ends">
+                    <input type="radio" name="hair-tip" checked={hairTipStyle === 'square'} onChange={() => setHairTipStyle('square')} />
+                    <span>Blunt tips</span>
+                  </label>
+                </div>
+                <p className="side-color-hint muted">
+                  Draw in a viewport to create a strand. Texture, mapping, and tips are saved on each new strand.
+                </p>
+              </div>
+            )}
             <SideBtnGroup cols={2}>
               <button
                 type="button"
@@ -1065,8 +1062,8 @@ export function SidePanel() {
                 label="Extrude depth"
                 value={selectedSketchSource?.extrudeDepth ?? extrudeAmount}
                 display={String(Math.round(selectedSketchSource?.extrudeDepth ?? extrudeAmount))}
-                min={-64}
-                max={64}
+                min={-256}
+                max={256}
                 step={1}
                 onChange={(value) => {
                   if (selectedSketchSource) updateSelectedSketchSource({ extrudeDepth: value })
@@ -1084,6 +1081,18 @@ export function SidePanel() {
                 <p className="side-color-hint muted">
                   Adjust depth for the selected doodle in real time.
                 </p>
+              )}
+              {selectedSketchSource?.kind === 'soft' && selectedSketchSource.isClosed && (
+                <SideSlider
+                  label="Inflation"
+                  value={selectedSketchSource.inflation ?? 0.65}
+                  display={`${Math.round((selectedSketchSource.inflation ?? 0.65) * 100)}%`}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={(value) => updateSelectedSketchSource({ inflation: value })}
+                  onCommit={commitSketchSourceEdit}
+                />
               )}
               {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
                 <p className="side-color-hint muted">

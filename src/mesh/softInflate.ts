@@ -1,14 +1,15 @@
 import { ensureCCW, signedArea } from './concaveTriangulate'
 import { type Vec2 } from '../utils/math'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
-import { reorientFacesOutward } from './meshWinding'
-import { meshCentroid } from './MeshBuilder'
+import { ensurePositiveVolume } from './meshWinding'
 
 export interface SoftInflateOptions {
   depth: number
   color?: number
   /** Slices from bottom pole to top pole (more = smoother pillow). */
   rings?: number
+  /** 0 = restrained/flat shoulder, 1 = full rounded pillow. */
+  inflation?: number
 }
 
 function polygonCentroid(poly: Vec2[]): { x: number; y: number } {
@@ -67,17 +68,18 @@ function stitchRingsUpward(
       const lo1 = ringLower[next]!
       const hi0 = ringUpper[si]!
       const hi1 = ringUpper[next]!
-      mesh.faces.push([lo0, lo1, hi1])
-      mesh.faces.push([lo0, hi1, hi0])
-      mesh.faceColors.push(color, color)
+      // One editable quad per boundary segment. The renderer triangulates this
+      // internally, while the authored mesh stays Blockbench/game friendly.
+      mesh.faces.push([lo0, lo1, hi1, hi0])
+      mesh.faceColors.push(color)
     }
   }
 }
 
 /**
- * Paint 3D soft doodle — solid filled pillow; only the outer shell is meshed
- * (no internal slice caps, which caused visible holes in the silhouette).
- * Rings scale radially so silhouette edges stay aligned in depth.
+ * Paint 3D soft doodle — a low/mid-poly inflated shell made from matched quad
+ * rings and two compact polygon caps. Avoids high-valence poles and long triangle
+ * fans, producing topology that remains practical to edit or export to games.
  */
 export function generateSoftInflateDome(
   polygon: Vec2[],
@@ -94,19 +96,17 @@ export function generateSoftInflateDome(
 
   const mesh = new HalfEdgeMesh()
   const slices: { ring: number[]; z: number }[] = []
+  // Keep a small cap footprint instead of collapsing every edge into one pole.
+  // This distributes curvature over quads and removes the starburst topology.
+  const inflation = Math.max(0, Math.min(1, options.inflation ?? 0.65))
+  const capScale = 0.34 + (0.08 - 0.34) * inflation
+  const profilePower = 1.45 + (0.52 - 1.45) * inflation
 
   for (let si = 0; si <= sliceCount; si++) {
     const t = si / sliceCount
     const theta = Math.PI * (1 - t)
     const z = (depth / 2) * Math.cos(theta)
-    const scale = Math.sin(theta)
-
-    if (scale < 0.001) {
-      const pole = mesh.positions.length
-      mesh.positions.push({ x: cx, y: cy, z })
-      slices.push({ ring: [pole], z })
-      continue
-    }
+    const scale = capScale + (1 - capScale) * Math.pow(Math.sin(theta), profilePower)
 
     const ring: number[] = []
     for (let i = 0; i < n; i++) {
@@ -131,6 +131,18 @@ export function generateSoftInflateDome(
     }
   }
 
+  // N-gon caps remain single editable faces in the scene model. Rendering/export
+  // triangulates them as needed without polluting the authored topology.
+  const bottom = slices[0]!.ring
+  const top = slices[slices.length - 1]!.ring
+  mesh.faces.push([...bottom].reverse())
+  mesh.faceColors.push(color)
+  mesh.faces.push([...top])
+  mesh.faceColors.push(color)
+
   mesh.buildHalfEdges()
-  return reorientFacesOutward(mesh, meshCentroid(mesh.positions))
+  // Ring construction already gives every adjacent face consistent winding.
+  // Only flip the complete closed shell if projection changed handedness; never
+  // flip individual faces against a centroid (invalid for concave blobs).
+  return ensurePositiveVolume(mesh)
 }

@@ -22,6 +22,7 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
     selectionMode,
     meshSelection,
     objects,
+    setSelectedTextureTintStrength,
   } = useAppStore(
     useShallow((s) => ({
       activeColor: s.activeColor,
@@ -31,6 +32,7 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
       selectionMode: s.selectionMode,
       meshSelection: s.meshSelection,
       objects: s.objects,
+      setSelectedTextureTintStrength: s.setSelectedTextureTintStrength,
     }))
   )
 
@@ -44,7 +46,11 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
     }
     if (selectedObjectId) {
       const obj = objects.find((o) => o.id === selectedObjectId)
-      if (obj) return obj.color
+      if (obj) {
+        const tint = obj.material?.mode === 'texture' ? obj.material.textureTint : undefined
+        if (tint) return (Math.round(tint[0] * 255) << 16) | (Math.round(tint[1] * 255) << 8) | Math.round(tint[2] * 255)
+        return obj.color
+      }
     }
     return activeColor
   }, [selectionMode, meshSelection, selectedObjectId, objects, activeColor])
@@ -53,6 +59,11 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
     selectionMode === 'face' && meshSelection != null && meshSelection.faces.length > 0
   const recoloring = selectionObjectIds.length > 0 || faceRecoloring
   const hex = colorToHex(displayColor)
+  const texturedSelection = useMemo(() => {
+    const ids = selectionObjectIds.length > 0 ? selectionObjectIds : selectedObjectId ? [selectedObjectId] : []
+    return objects.filter((obj) => ids.includes(obj.id) && obj.material?.mode === 'texture')
+  }, [objects, selectionObjectIds, selectedObjectId])
+  const tintStrength = texturedSelection[0]?.material?.textureTintStrength ?? 0.5
 
   const swatches = (
     <div className="palette-swatches">
@@ -117,8 +128,15 @@ export function PaletteBar({ variant = 'bar' }: PaletteBarProps) {
         </span>
       </button>
       <div id={contentId} className="palette-minimize-body" hidden={collapsed}>
-        {swatches}
+        <div className="palette-scroll-box themed-scroll">{swatches}</div>
         {customPicker}
+        {texturedSelection.length > 0 && (
+          <label className="palette-texture-tint">
+            <span>Texture color amount <output>{Math.round(tintStrength * 100)}%</output></span>
+            <input type="range" min="0" max="1" step="0.05" value={tintStrength} onChange={(e) => setSelectedTextureTintStrength(Number(e.target.value))} />
+            <small>0% keeps the image · 100% applies the chosen color</small>
+          </label>
+        )}
       </div>
     </div>
   )

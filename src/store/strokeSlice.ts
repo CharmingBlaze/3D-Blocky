@@ -27,6 +27,7 @@ import {
   type HairUvTransform,
 } from '../stroke/hairUvTransform'
 import type { HairTipStyle } from '../mesh/hairRibbon'
+import { DEFAULT_HAIR_TEXTURE_SETTINGS, type HairTextureSettings } from '../stroke/hairTextureSettings'
 
 export type StrokeMode =
   | 'outline'
@@ -75,6 +76,7 @@ export interface StrokeLayoutState {
   hairTextureId: string | null
   /** How procedural hair UVs map into the hair texture (applies to new strokes). */
   hairUvTransform: HairUvTransform
+  hairTextureSettings: HairTextureSettings
   /** Tip shape for new hair strokes: pointed (tapered) or square (blunt). */
   hairTipStyle: HairTipStyle
 }
@@ -106,6 +108,7 @@ export interface StrokeLayoutActions {
   clearHairTexture: () => void
   setHairUvTransform: (transform: HairUvTransform | Partial<HairUvTransform>) => void
   resetHairUvTransform: () => void
+  setHairTextureSettings: (settings: Partial<HairTextureSettings>) => void
   setHairTipStyle: (style: HairTipStyle) => void
   toggleAutoConnectPaths: () => void
   setSmoothDrawing: (on: boolean) => void
@@ -139,6 +142,7 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   editingSketchObjectId: null,
   hairTextureId: null,
   hairUvTransform: { ...DEFAULT_HAIR_UV_TRANSFORM },
+  hairTextureSettings: { ...DEFAULT_HAIR_TEXTURE_SETTINGS },
   hairTipStyle: 'pointed',
 }
 
@@ -424,6 +428,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         smoothDrawing,
         hairTextureId,
         hairUvTransform,
+        hairTextureSettings,
         hairTipStyle,
       } = store()
 
@@ -531,7 +536,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       }
 
       if (obj && isHairStrokeMode(strokeMode)) {
-        obj = applyActiveHairTexture(obj, hairTextureId)
+        obj = applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
         obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 
@@ -604,6 +609,11 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
 
     resetHairUvTransform: () =>
       set({ hairUvTransform: { ...DEFAULT_HAIR_UV_TRANSFORM } } as Partial<T>),
+
+    setHairTextureSettings: (settings) =>
+      set({
+        hairTextureSettings: { ...get().hairTextureSettings, ...settings },
+      } as Partial<T>),
 
     setHairTipStyle: (style) =>
       set({ hairTipStyle: style === 'square' ? 'square' : 'pointed' } as Partial<T>),

@@ -220,6 +220,7 @@ type VectorStore = VectorToolsLayoutState & {
   selectionObjectIds: string[]
   hairTextureId: string | null
   hairUvTransform: import('../stroke/hairUvTransform').HairUvTransform
+  hairTextureSettings: import('../stroke/hairTextureSettings').HairTextureSettings
   hairTipStyle: import('./strokeSlice').HairTipStyle
   pushHistory: (label?: string) => boolean
   objectTextures: Record<string, UvTextureInfo>
@@ -723,6 +724,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         extrudeAmount,
         hairTextureId,
         hairUvTransform,
+        hairTextureSettings,
         hairTipStyle,
       } = store()
 
@@ -744,7 +746,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       })
 
       if (obj && isHairStrokeMode(strokeMode)) {
-        obj = applyActiveHairTexture(obj, hairTextureId)
+        obj = applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
         obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 

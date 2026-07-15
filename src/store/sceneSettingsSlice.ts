@@ -63,6 +63,7 @@ export interface SceneSettingsLayoutActions {
   setBrushStrength: (strength: number) => void
   setBrushRadius: (radius: number) => void
   setActiveColor: (color: number) => void
+  setSelectedTextureTintStrength: (strength: number) => void
   setDrawDoubleSided: (on: boolean) => void
   setFacetExaggeration: (value: number) => void
   setShowDensityHeatmap: (show: boolean) => void
@@ -196,7 +197,37 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
       setPartial({ activeColor: color })
       if (paintIds.length === 0) return
 
-      const needsUpdate = paintIds.some((id) => {
+      const texturedIds = paintIds.filter((id) => {
+        const obj = objects.find((o) => o.id === id)
+        return obj && ensureObjectMaterial(obj).material!.mode === 'texture'
+      })
+      const solidIds = paintIds.filter((id) => !texturedIds.includes(id))
+
+      if (texturedIds.length > 0) {
+        setPartial((s) => {
+          const st = s as unknown as SettingsStore
+          return {
+            objects: st.objects.map((obj) => texturedIds.includes(obj.id)
+              ? {
+                  ...obj,
+                  color,
+                  material: {
+                    ...ensureObjectMaterial(obj).material!,
+                    textureTint: [...rgba] as Rgba4,
+                    textureTintStrength: ensureObjectMaterial(obj).material!.textureTintStrength ?? 0.5,
+                  },
+                }
+              : obj),
+          }
+        })
+      }
+
+      if (solidIds.length === 0) {
+        store().commitHistory('Tint texture')
+        return
+      }
+
+      const needsUpdate = solidIds.some((id) => {
         const obj = objects.find((o) => o.id === id)
         return obj && objectNeedsRecolor(obj, color, rgba)
       })
@@ -207,15 +238,31 @@ export function createSceneSettingsSlice<T extends SceneSettingsLayoutState>(
         return {
           objects: paintColorOnObjects(
             st.objects,
-            paintIds,
+            solidIds,
             'object',
             null,
             false,
             rgba
-          ).map((o) => (paintIds.includes(o.id) ? { ...o, color } : o)),
+          ).map((o) => (solidIds.includes(o.id) ? { ...o, color } : o)),
         }
       })
       store().commitHistory('Recolor')
+    },
+    setSelectedTextureTintStrength: (strength) => {
+      const state = store()
+      const ids = resolveTargetObjectIds(state.selectedObjectId, state.selectionObjectIds)
+      const value = Math.max(0, Math.min(1, strength))
+      let changed = false
+      const objects = state.objects.map((obj) => {
+        if (!ids.includes(obj.id)) return obj
+        const mat = ensureObjectMaterial(obj).material!
+        if (mat.mode !== 'texture' || mat.textureTintStrength === value) return obj
+        changed = true
+        return { ...obj, material: { ...mat, textureTintStrength: value } }
+      })
+      if (!changed) return
+      setPartial({ objects })
+      store().commitHistory('Texture tint amount')
     },
     setDrawDoubleSided: (on) => setPartial({ drawDoubleSided: on }),
     setFacetExaggeration: (value) => setPartial({ facetExaggeration: value }),

@@ -27,6 +27,7 @@ import {
 } from '../mesh/meshTopology'
 import { subscribeUvDraft } from '../uv/uvDraftRelay'
 import { patchMeshGeometryUvs } from '../uv/patchMeshGeometryUvs'
+import { compositeLayers } from '../pixel/compositeLayers'
 
 interface MeshRendererProps {
   object: SceneObject
@@ -200,6 +201,7 @@ function MeshMaterial({
   useTexture,
   textureAlpha = false,
   pixelTextureBlend = false,
+  textureTint = '#ffffff',
   xray = false,
 }: {
   config: (typeof VIEWPORT_DISPLAY_CONFIG)[ViewportDisplayMode]
@@ -214,6 +216,7 @@ function MeshMaterial({
   textureAlpha?: boolean
   pixelTextureBlend?: boolean
   xray?: boolean
+  textureTint?: string
 }) {
   const onBeforeCompile = pixelTextureBlend ? patchPixelTextureBlendShader : undefined
   const customProgramCacheKey = pixelTextureBlend
@@ -235,7 +238,7 @@ function MeshMaterial({
     depthWrite: xray ? false : pixelTextureBlend ? opacity >= 1 : opacity >= 1,
     depthTest: true,
     map: useTexture ? (map ?? undefined) : undefined,
-    color: useTexture && !pixelTextureBlend ? '#ffffff' : undefined,
+    color: useTexture && !pixelTextureBlend ? textureTint : undefined,
     onBeforeCompile,
     customProgramCacheKey,
   }
@@ -337,6 +340,62 @@ export const MeshRenderer = memo(function MeshRenderer({
   const urlTexture = useLoadedTexture(useTexture && !pixelDoc && textureUrl ? textureUrl : null)
   const dataTexture = usePixelDocumentTexture(pixelDoc ? texId : null)
   const texture = pixelDoc ? dataTexture : urlTexture
+  const sampledTexture = useMemo(() => {
+    if (!texture) return null
+    let clone: THREE.Texture
+    if (pixelDoc && (materialSettings.textureLumaAlpha || (materialSettings.textureBrightness ?? 1) !== 1 || (materialSettings.textureShadowDetail ?? 0) > 0 || materialSettings.textureGradient)) {
+      const source = compositeLayers(pixelDoc)
+      const data = new Uint8Array(source.length)
+      const brightness = Math.max(0.25, Math.min(3, materialSettings.textureBrightness ?? 1))
+      const detail = Math.max(0, Math.min(1, materialSettings.textureShadowDetail ?? 0))
+      const gamma = 1 - detail * 0.58
+      for (let i = 0; i < source.length; i += 4) {
+        let r = Math.min(255, Math.pow(source[i]! / 255, gamma) * 255 * brightness)
+        let g = Math.min(255, Math.pow(source[i + 1]! / 255, gamma) * 255 * brightness)
+        let b = Math.min(255, Math.pow(source[i + 2]! / 255, gamma) * 255 * brightness)
+        const gradient = materialSettings.textureGradient
+        if (gradient) {
+          const pixel = i / 4
+          const x = (pixel % pixelDoc.width) / Math.max(1, pixelDoc.width - 1) - 0.5
+          const y = Math.floor(pixel / pixelDoc.width) / Math.max(1, pixelDoc.height - 1) - 0.5
+          const rad = gradient.angle * Math.PI / 180
+          const t = Math.max(0, Math.min(1, 0.5 + x * Math.cos(rad) + y * Math.sin(rad)))
+          r *= gradient.start[0] + (gradient.end[0] - gradient.start[0]) * t
+          g *= gradient.start[1] + (gradient.end[1] - gradient.start[1]) * t
+          b *= gradient.start[2] + (gradient.end[2] - gradient.start[2]) * t
+        }
+        data[i] = r; data[i + 1] = g; data[i + 2] = b
+        const luma = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
+        data[i + 3] = materialSettings.textureLumaAlpha
+          ? Math.round(source[i + 3]! * Math.max(0, Math.min(1, (luma - 0.025) / 0.32)))
+          : source[i + 3]!
+      }
+      const processed = new THREE.DataTexture(data, pixelDoc.width, pixelDoc.height, THREE.RGBAFormat)
+      processed.colorSpace = THREE.SRGBColorSpace
+      processed.flipY = true
+      processed.magFilter = THREE.LinearFilter
+      processed.minFilter = THREE.LinearMipmapLinearFilter
+      processed.generateMipmaps = true
+      clone = processed
+    } else {
+      clone = texture.clone()
+    }
+    const wrap = materialSettings.textureWrap ?? 'clamp'
+    clone.wrapS = clone.wrapT = wrap === 'repeat'
+      ? THREE.RepeatWrapping
+      : wrap === 'mirror'
+        ? THREE.MirroredRepeatWrapping
+        : THREE.ClampToEdgeWrapping
+    clone.needsUpdate = true
+    return clone
+  }, [texture, pixelDoc, materialSettings.textureWrap, materialSettings.textureLumaAlpha, materialSettings.textureBrightness, materialSettings.textureShadowDetail, materialSettings.textureGradient])
+  useEffect(() => () => sampledTexture?.dispose(), [sampledTexture])
+  const textureTint = materialSettings.textureTint
+    ? `#${materialSettings.textureTint.slice(0, 3).map((n) => {
+        const strength = Math.max(0, Math.min(1, materialSettings.textureTintStrength ?? 1))
+        return Math.round((1 + (n - 1) * strength) * 255).toString(16).padStart(2, '0')
+      }).join('')}`
+    : '#ffffff'
 
   const cageGeometry = useMemo(() => {
     if (!subdPreviewActive) return null
@@ -453,7 +512,8 @@ export const MeshRenderer = memo(function MeshRenderer({
           emissiveIntensity={emissiveIntensity}
           opacity={displayMode === 'wireframe' ? 0 : xrayOpacity}
           side={xraySide}
-          map={texture}
+          map={sampledTexture}
+          textureTint={textureTint}
           useVertexColors={useVertexColors}
           useTexture={useTexture}
           textureAlpha={useTexture}

@@ -10,6 +10,7 @@ import { useTheme } from '../theme/useTheme'
 import { ExtrudePreviewMesh } from './ExtrudePreviewMesh'
 import type { Vec2 } from '../utils/math'
 import { worldUnitsForScreenPixels } from '../utils/screenScale'
+import { movingAverageSmoothStroke } from '../stroke/strokeCapture'
 
 interface StrokeCanvasProps {
   view: ViewType
@@ -41,11 +42,11 @@ function SketchPointMarker({
   return (
     <group ref={rootRef} position={position} renderOrder={24}>
       <mesh position={[0, 0, -0.01]}>
-        <planeGeometry args={[1.5, 1.5]} />
+        <circleGeometry args={[0.78, 20]} />
         <meshBasicMaterial color={outline} depthTest={false} depthWrite={false} toneMapped={false} />
       </mesh>
       <mesh>
-        <planeGeometry args={[1, 1]} />
+        <circleGeometry args={[0.52, 20]} />
         <meshBasicMaterial color={color} depthTest={false} depthWrite={false} toneMapped={false} />
       </mesh>
     </group>
@@ -64,6 +65,10 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     defaultDepth,
     autoConnectPaths,
     closeThreshold,
+    smoothDrawing,
+    strokeMode,
+    sketchExtrudeMode,
+    penExtrudeMode,
   } = useAppStore(
     useShallow((s) => ({
       currentStroke: s.currentStroke,
@@ -75,6 +80,10 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       defaultDepth: s.defaultDepth,
       autoConnectPaths: s.autoConnectPaths,
       closeThreshold: s.closeThreshold,
+      smoothDrawing: s.smoothDrawing,
+      strokeMode: s.strokeMode,
+      sketchExtrudeMode: s.sketchExtrudeMode,
+      penExtrudeMode: s.penExtrudeMode,
     }))
   )
 
@@ -99,13 +108,17 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     ) {
       pts.push(currentStrokePreview)
     }
-    return pts
-  }, [isDrawing, currentStrokeView, currentStrokePlane, currentStroke, currentStrokePreview])
+    return smoothDrawing && pts.length >= 3 ? movingAverageSmoothStroke(pts, 2) : pts
+  }, [isDrawing, currentStrokeView, currentStrokePlane, currentStroke, currentStrokePreview, smoothDrawing])
 
   const showPlaneGuides = isDrawing && currentStrokeView === view
-  // Keep the drawing view clean — only a thin path. Volume hull lives in peer views.
+  const explicitlyVolumetric =
+    sketchExtrudeMode || penExtrudeMode || strokeMode.startsWith('hair-')
+  // Ordinary Sketch stays a clean line. Only explicitly volumetric tools show a
+  // mesh preview, and the active drawing viewport remains unobstructed.
   const showVolumePreview =
     isDrawing &&
+    explicitlyVolumetric &&
     currentStrokeView != null &&
     !(currentStrokeView === 'perspective' && !currentStrokePlane) &&
     currentStrokeView !== view &&
@@ -142,21 +155,17 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       )}
 
       {showPlaneGuides && strokePath.length >= 2 && (
-        <Line
-          points={strokePath}
-          color={color}
-          lineWidth={1.25}
-          transparent
-          opacity={0.75}
-          depthTest={false}
-        />
+        <>
+          <Line points={strokePath} color="#10141a" lineWidth={4} transparent opacity={0.62} depthTest={false} />
+          <Line points={strokePath} color={color} lineWidth={2.15} transparent opacity={0.98} depthTest={false} />
+        </>
       )}
       {showPlaneGuides && firstPoint && (
         <SketchPointMarker
           position={[firstPoint.x, firstPoint.y, firstPoint.z]}
           color={nearClose ? accentGreen : color}
           outline="#f7fbff"
-          sizePx={nearClose ? 12 : 9}
+          sizePx={nearClose ? 13 : 10}
         />
       )}
       {showPlaneGuides && currentPoint && strokePath.length > 1 && (
@@ -164,7 +173,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
           position={[currentPoint.x, currentPoint.y, currentPoint.z]}
           color={currentStrokePreview ? color : '#f7fbff'}
           outline="#11151c"
-          sizePx={8}
+          sizePx={9}
         />
       )}
     </>

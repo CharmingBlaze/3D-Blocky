@@ -44,6 +44,8 @@ export interface SketchSource {
   isClosed: boolean
   kind: SketchDoodleKind
   extrudeDepth: number
+  /** Fullness of closed soft Blob shoulders, 0–1. */
+  inflation?: number
   /** Hair tip shape; only used for hair-* kinds. Defaults to pointed when missing. */
   tipStyle?: HairTipStyle
   /** Locked perspective draw plane so regenerates stay in world space. */
@@ -272,9 +274,17 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
   if (kind === 'outline') {
     const silhouetteDepth = resolveSilhouetteDepth(extrudeDepth)
     if (isClosed) {
-      const boundary = prepareOutlineBoundary(relative, polyBudget, true)
+      const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
+      const maxBoundary = Math.max(8, Math.min(28, Math.floor(polyBudget / (budgetRings + 1))))
+      const prepared = prepareOutlineBoundary(relative, polyBudget, true)
+      const boundary = prepared && prepared.length > maxBoundary ? capBoundaryPoints(prepared, maxBoundary) : prepared
       if (!boundary || boundary.length < 3) return null
-      return extrudeSilhouette(boundary, { depth: silhouetteDepth, color })
+      return generateSoftInflateDome(boundary, {
+        depth: Math.abs(silhouetteDepth),
+        rings: budgetRings,
+        inflation: 0,
+        color,
+      })
     }
     const path = prepareOutlineBoundary(relative, polyBudget, false)
     if (!path || path.length < 2) return null
@@ -298,11 +308,12 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     })
   }
 
-  const maxBoundary = Math.max(8, Math.min(18, Math.floor(polyBudget / 4)))
+  const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
+  const rings = budgetRings + 2
+  const maxBoundary = Math.max(8, Math.min(28, Math.floor(polyBudget / (budgetRings + 1))))
   const boundary = capBoundaryPoints(relative, maxBoundary)
-  const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (maxBoundary + 4))))
 
-  return generateSoftInflateDome(boundary, { depth, rings, color: 0 })
+  return generateSoftInflateDome(boundary, { depth, rings, inflation: source.inflation ?? 0.65, color: 0 })
 }
 
 export function createSketchSource(
@@ -329,13 +340,14 @@ export function createSketchSource(
     isClosed,
     kind,
     extrudeDepth,
+    inflation: kind === 'soft' ? 0.65 : undefined,
     tipStyle: extras?.tipStyle,
     planeFrame: extras?.planeFrame ?? null,
   }
 }
 
 export type EditableSketchSourcePatch = Partial<
-  Pick<SketchSource, 'brushDensity' | 'polyBudget' | 'extrudeDepth'>
+  Pick<SketchSource, 'brushDensity' | 'polyBudget' | 'extrudeDepth' | 'inflation'>
 >
 
 /** Rebuild a sketch doodle from editable source parameters, preserving identity and transforms. */
@@ -351,6 +363,7 @@ export function regenerateSketchObjectFromSource(
     brushDensity: Math.max(2, Math.min(48, changes.brushDensity ?? source.brushDensity)),
     polyBudget: Math.max(16, Math.min(512, changes.polyBudget ?? source.polyBudget)),
     extrudeDepth: changes.extrudeDepth ?? source.extrudeDepth,
+    inflation: Math.max(0, Math.min(1, changes.inflation ?? source.inflation ?? 0.65)),
   }
 
   const mesh = buildMeshFromSource(nextSource, nextSource.extrudeDepth, obj.color)

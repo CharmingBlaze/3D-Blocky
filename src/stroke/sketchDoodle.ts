@@ -320,15 +320,19 @@ function buildClosedSoftBlob(
   extrudeDepth: number,
   preserveDetail = false
 ): HalfEdgeMesh {
+  const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
+  const rings = budgetRings + 2
+  const vertexRingCount = budgetRings + 1
+  const budgetedBoundary = Math.floor(polyBudget / vertexRingCount)
   const maxBoundary = preserveDetail
-    ? relative.length
-    : Math.max(10, Math.min(relative.length, Math.floor(polyBudget / 4), 28))
+    ? Math.min(relative.length, Math.max(8, budgetedBoundary))
+    : Math.max(8, Math.min(relative.length, budgetedBoundary, 28))
   const boundary =
     relative.length <= maxBoundary ? relative : capBoundaryPoints(relative, maxBoundary)
-  const rings = Math.max(3, Math.min(5, Math.floor(polyBudget / (boundary.length + 4))))
   return generateSoftInflateDome(boundary, {
-    depth: Math.max(4, extrudeDepth),
+    depth: Math.max(4, Math.abs(extrudeDepth)),
     rings,
+    inflation: 0.65,
     color: 0,
   })
 }
@@ -371,9 +375,17 @@ function buildFilledOutline(
 ): HalfEdgeMesh | null {
   const depth = resolveSilhouetteDepth(extrudeDepth)
   if (closed) {
-    const boundary = prepareOutlineBoundary(relative, polyBudget, true)
+    const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
+    const maxBoundary = Math.max(8, Math.min(28, Math.floor(polyBudget / (budgetRings + 1))))
+    const prepared = prepareOutlineBoundary(relative, polyBudget, true)
+    const boundary = prepared && prepared.length > maxBoundary ? capBoundaryPoints(prepared, maxBoundary) : prepared
     if (!boundary || boundary.length < 3) return null
-    return extrudeSilhouette(boundary, { depth, color })
+    return generateSoftInflateDome(boundary, {
+      depth: Math.abs(depth),
+      rings: budgetRings,
+      inflation: 0,
+      color,
+    })
   }
   const path = prepareOutlineBoundary(relative, polyBudget, false)
   if (!path || path.length < 2) return null
@@ -446,6 +458,7 @@ function makeSketchSource(
     isClosed: prepared.isClosed,
     kind,
     extrudeDepth,
+    ...(kind === 'soft' ? { inflation: 0.65 } : {}),
     planeFrame: input.planeFrame ?? null,
     ...(hairKind ? { tipStyle } : {}),
   }

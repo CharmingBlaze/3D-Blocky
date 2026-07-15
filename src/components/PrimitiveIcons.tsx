@@ -7,11 +7,11 @@ function IconSvg({ children }: { children: ReactNode }) {
     <svg
       className="primitive-icon"
       viewBox="0 0 24 24"
-      width="18"
-      height="18"
+      width="20"
+      height="20"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.35"
+      strokeWidth="1.65"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -33,9 +33,9 @@ function BoxIcon() {
 function IcosphereIcon() {
   return (
     <IconSvg>
-      <circle cx="12" cy="12" r="8.2" />
-      <path d="M12 3.8 16.8 8.2 12 20.2 7.2 8.2Z" />
-      <path d="M3.8 12h16.4M7.2 8.2h9.6M8.4 15.6h7.2" />
+      <path d="M12 2.8 18.7 6.7 20.1 13.8 15.5 20H8.5l-4.6-6.2 1.4-7.1L12 2.8Z" />
+      <path d="m12 2.8-3.1 5 3.1 4.4 3.1-4.4-3.1-5Z" />
+      <path d="M5.3 6.7 8.9 7.8 3.9 13.8l8.1-1.6 8.1 1.6-5-6 3.6-1.1M8.5 20l3.5-7.8 3.5 7.8" />
     </IconSvg>
   )
 }
@@ -82,8 +82,8 @@ function CapsuleIcon() {
 function PyramidIcon() {
   return (
     <IconSvg>
-      <path d="M12 3.2 20.2 18.6 12 15.4 3.8 18.6 12 3.2Z" />
-      <path d="M12 15.4V3.2" />
+      <path d="M12 2.8 20.2 17.1 12 21 3.8 17.1 12 2.8Z" />
+      <path d="M3.8 17.1 12 14.1l8.2 3M12 2.8v11.3M12 14.1V21" />
     </IconSvg>
   )
 }
@@ -110,8 +110,9 @@ function RingIcon() {
 function StairsIcon() {
   return (
     <IconSvg>
-      <path d="M4.2 18.8H9V14h4.8V9.2H18.6V5.2H20" />
-      <path d="M4.2 18.8V20H20V5.2" opacity="0.45" />
+      <path d="M3.2 18.7h4.2v-4h4.3v-4h4.2v-4h4.2" />
+      <path d="m3.2 18.7 3 2.1h4.2v-4h4.3v-4h4.2v-4l1.2-2.1" opacity="0.72" />
+      <path d="m7.4 14.7 3 2.1m1.3-6.1 3 2.1m1.2-6.1 3 2.1" opacity="0.62" />
     </IconSvg>
   )
 }
@@ -127,9 +128,10 @@ function StarIcon() {
 function DomeIcon() {
   return (
     <IconSvg>
-      <path d="M4.2 15.2a7.8 7.8 0 0 1 15.6 0" />
-      <ellipse cx="12" cy="15.2" rx="7.8" ry="2.4" />
-      <path d="M12 7.4v7.8" opacity="0.55" />
+      <path d="M3.3 15.5a8.7 8.7 0 0 1 17.4 0" />
+      <ellipse cx="12" cy="15.5" rx="8.7" ry="2.7" />
+      <path d="M12 6.8c-2.3 2.1-3.4 5-3.2 8.7M12 6.8c2.3 2.1 3.4 5 3.2 8.7" />
+      <path d="M5.6 10.6c3.7 1.5 9.1 1.5 12.8 0" opacity="0.7" />
     </IconSvg>
   )
 }
@@ -137,9 +139,8 @@ function DomeIcon() {
 function HalfCircleIcon() {
   return (
     <IconSvg>
-      <path d="M4.2 14.8a7.8 7.8 0 0 1 15.6 0" />
-      <path d="M4.2 14.8h15.6" />
-      <path d="M12 7v7.8" opacity="0.5" />
+      <path d="M3.2 16.8a8.8 8.8 0 0 1 17.6 0H3.2Z" />
+      <path d="M12 8v8.8M5.4 11.2c3.9 1.4 9.3 1.4 13.2 0" opacity="0.72" />
     </IconSvg>
   )
 }

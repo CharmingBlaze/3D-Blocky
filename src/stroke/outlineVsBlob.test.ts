@@ -54,8 +54,23 @@ describe('outline vs blob stroke modes', () => {
     expect(blob?.name).toBe('Blob')
     expect(blob?.sketchSource?.kind).toBe('soft')
     expect(outline!.positions.length).not.toBe(blob!.positions.length)
-    // Clean square → 4 boundary × 2 faces.
-    expect(outline!.positions.length).toBe(8)
+    // Sharp Outline uses the lighter five-ring profile; Blob carries two extra rings.
+    expect(outline!.positions.length).toBe(20)
+    expect(blob!.positions.length).toBeGreaterThan(outline!.positions.length)
+    expect(outline!.faces.filter((face) => face.length === 4).length).toBeGreaterThan(0)
+  })
+
+  it('blob depth regeneration stays closed, outward, and quad-ringed', () => {
+    const original = strokeToMesh({ ...base, points: jaggedLoop, strokeMode: 'blob' })!
+    for (const depth of [4, 16, 36, -24]) {
+      const obj = regenerateSketchObjectFromSource(original, { extrudeDepth: depth })!
+      const mesh = HalfEdgeMesh.fromObject(obj)
+      expect(countNakedEdges(mesh)).toBe(0)
+      expect(meshSignedVolume(mesh)).toBeGreaterThan(0)
+      expect(mesh.faces.filter((face) => face.length === 4).length).toBeGreaterThan(0)
+      expect(mesh.faces.filter((face) => face.length === 3).length).toBe(0)
+      expect(mesh.faces.filter((face) => face.length > 4).length).toBe(2)
+    }
   })
 
   it('extrude builds a flat silhouette prism for both modes', () => {
@@ -181,7 +196,9 @@ describe('outline vs blob stroke modes', () => {
     expect(outline).not.toBeNull()
     const boundaryVerts = outline!.positions.length / 2
     expect(boundaryVerts).toBeGreaterThan(60)
-    expect(outline!.faces.some((f) => f.length > 60)).toBe(true)
+    expect(outline!.faces.filter((f) => f.length === 3).length).toBe(0)
+    expect(outline!.faces.filter((f) => f.length === 4).length).toBeGreaterThan(0)
+    expect(outline!.faces.filter((f) => f.length > 4).length).toBe(2)
 
     // Editable Sketch regenerate must not re-decimate the silhouette.
     const regen = regenerateSketchObjectFromSource(outline!, {
@@ -459,8 +476,8 @@ describe('outline vs blob stroke modes', () => {
     expect(zExtent(flipped.positions)).toBeCloseTo(28, 5)
     expect(deep.sketchSource?.extrudeDepth).toBe(28)
     expect(flipped.sketchSource?.extrudeDepth).toBe(-28)
-    expect(deep.positions[0]!.z).toBeCloseTo(14, 5)
-    expect(flipped.positions[0]!.z).toBeCloseTo(-14, 5)
+    // Sharp inflated Outline is symmetric like Blob; sign is retained for editing,
+    // while magnitude controls the closed shell thickness.
 
     const regen = regenerateSketchObjectFromSource(flipped, {
       brushDensity: 18,
