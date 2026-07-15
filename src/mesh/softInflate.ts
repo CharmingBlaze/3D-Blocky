@@ -131,14 +131,50 @@ export function generateSoftInflateDome(
     }
   }
 
-  // N-gon caps remain single editable faces in the scene model. Rendering/export
-  // triangulates them as needed without polluting the authored topology.
+  // A large smooth-shaded n-gon produces visible diagonal/star pinching because
+  // its boundary normals are interpolated across the renderer's triangulation.
+  // Insert one compact transition ring on each side so that interpolation is
+  // carried by predictable quads, then finish on a shared center vertex. This
+  // gives the cap a stable center normal without a renderer-dependent n-gon.
   const bottom = slices[0]!.ring
   const top = slices[slices.length - 1]!.ring
-  mesh.faces.push([...bottom].reverse())
-  mesh.faceColors.push(color)
-  mesh.faces.push([...top])
-  mesh.faceColors.push(color)
+  const innerScale = capScale * 0.22
+  const bottomInner: number[] = []
+  const topInner: number[] = []
+  for (let i = 0; i < n; i++) {
+    bottomInner.push(mesh.positions.length)
+    mesh.positions.push({
+      x: cx + (poly[i]!.x - cx) * innerScale,
+      y: cy + (poly[i]!.y - cy) * innerScale,
+      z: -depth / 2,
+    })
+    topInner.push(mesh.positions.length)
+    mesh.positions.push({
+      x: cx + (poly[i]!.x - cx) * innerScale,
+      y: cy + (poly[i]!.y - cy) * innerScale,
+      z: depth / 2,
+    })
+  }
+
+  for (let i = 0; i < n; i++) {
+    const next = (i + 1) % n
+    mesh.faces.push([bottom[i]!, bottomInner[i]!, bottomInner[next]!, bottom[next]!])
+    mesh.faceColors.push(color)
+    mesh.faces.push([top[i]!, top[next]!, topInner[next]!, topInner[i]!])
+    mesh.faceColors.push(color)
+  }
+
+  const bottomCenter = mesh.positions.length
+  mesh.positions.push({ x: cx, y: cy, z: -depth / 2 })
+  const topCenter = mesh.positions.length
+  mesh.positions.push({ x: cx, y: cy, z: depth / 2 })
+  for (let i = 0; i < n; i++) {
+    const next = (i + 1) % n
+    mesh.faces.push([bottomCenter, bottomInner[next]!, bottomInner[i]!])
+    mesh.faceColors.push(color)
+    mesh.faces.push([topCenter, topInner[i]!, topInner[next]!])
+    mesh.faceColors.push(color)
+  }
 
   mesh.buildHalfEdges()
   // Ring construction already gives every adjacent face consistent winding.
