@@ -55,7 +55,10 @@ html[data-theme='atari'],
 html[data-theme='msx'],
 html[data-theme='neo-geo'],
 html[data-theme='terminal'],
-html[data-theme='matrix'] {
+html[data-theme='matrix'],
+html[data-theme='phosphor-crt'],
+html[data-theme='amber-crt'],
+html[data-theme='code-cascade'] {
   font-size: 12px;
   letter-spacing: 0.02em;
   image-rendering: pixelated;
@@ -293,31 +296,78 @@ html[data-theme='win95'] .transform-toolbar {
   background: #c0c0c0;
 }
 
-/* Windows XP — Luna title bar */
-html[data-theme='winxp'] .side-panel-header {
-  background: linear-gradient(180deg, #0a5ad4 0%, #0054e3 40%, #003bb3 100%);
-  color: #fff;
-  border-radius: 6px 6px 0 0;
-  text-shadow: 1px 1px 0 rgb(0 0 0 / 25%);
-}
-
-html[data-theme='winxp'] .side-panel {
-  border: 2px solid #0054e3;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgb(0 40 120 / 25%);
+/* Windows XP — Soft Luna chrome (muted blues, warm paper, cohesive tool surfaces) */
+html[data-theme='winxp'] .side-panel,
+html[data-theme='winxp'] .transform-toolbar,
+html[data-theme='winxp'] .tool-ring-branch {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 2px 10px rgb(40 70 110 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 70%);
   backdrop-filter: none;
 }
 
-html[data-theme='winxp'] .toolbar-btn {
-  border: 1px solid #003c74;
-  background: linear-gradient(180deg, #fff 0%, #ece9d8 100%);
-  color: #000;
-  border-radius: 3px;
+html[data-theme='winxp'] .side-panel-header {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 78%, #9ec4f0) 0%,
+    var(--accent) 42%,
+    var(--accent-dim) 100%
+  );
+  color: #fff;
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  text-shadow: 0 1px 0 rgb(0 30 70 / 28%);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-dim) 80%, #1a3a60);
 }
 
-html[data-theme='winxp'] .toolbar-btn.active {
-  background: linear-gradient(180deg, #ffe08a 0%, #e8b820 100%);
-  border-color: #c08000;
+html[data-theme='winxp'] .toolbar-btn,
+html[data-theme='winxp'] .tool-ring-branch-item,
+html[data-theme='winxp'] .theme-select,
+html[data-theme='winxp'] .transform-toolbar-btn {
+  border: 1px solid color-mix(in srgb, var(--border) 85%, var(--accent));
+  background: linear-gradient(180deg, #ffffff 0%, var(--bg-panel) 100%);
+  color: var(--text);
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
+}
+
+html[data-theme='winxp'] .toolbar-btn:hover,
+html[data-theme='winxp'] .tool-ring-branch-item:hover,
+html[data-theme='winxp'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #ffffff 0%, var(--bg-hover) 100%);
+  border-color: var(--accent-dim);
+}
+
+html[data-theme='winxp'] .toolbar-btn.active,
+html[data-theme='winxp'] .tool-ring-branch-item.active,
+html[data-theme='winxp'] .transform-toolbar-btn.active {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-orange) 35%, #fff8e0) 0%,
+    color-mix(in srgb, var(--accent-orange) 70%, #e8c060) 100%
+  );
+  border-color: color-mix(in srgb, var(--accent-orange) 75%, #8a5010);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%);
+}
+
+html[data-theme='winxp'] .side-panel .side-checkbox input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+html[data-theme='winxp'] .side-panel .side-slider input[type='range']::-webkit-slider-thumb {
+  background: linear-gradient(180deg, #ffffff 0%, var(--bg-hover) 100%);
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgb(40 70 110 / 25%);
+}
+
+html[data-theme='winxp'] .side-panel .side-slider input[type='range']::-moz-range-thumb {
+  background: linear-gradient(180deg, #ffffff 0%, var(--bg-hover) 100%);
+  border: 1px solid var(--accent-dim);
+  border-radius: 3px;
 }
 
 /* Vista / 7 — Aero glass */
@@ -524,15 +574,15 @@ html[data-theme='terminal'] .toolbar-btn.active {
   text-shadow: none;
 }
 
-/* Matrix — green rain feel */
+/* Matrix / Digital Rain — teal cascade feel */
 html[data-theme='matrix'] .side-panel {
-  border: 1px solid #00ff41;
-  box-shadow: 0 0 16px rgb(0 255 65 / 15%);
+  border: 1px solid #20ff98;
+  box-shadow: 0 0 16px rgb(32 255 152 / 15%);
 }
 
 html[data-theme='matrix'] .toolbar-btn.active {
-  background: #00ff41;
-  color: #001100;
+  background: #20ff98;
+  color: #001810;
 }
 
 /* Neon cyberpunk */
@@ -589,7 +639,12 @@ html[data-theme='terminal'],
 html[data-theme='matrix'],
 html[data-theme='mono'],
 html[data-theme='win8'],
-html[data-theme='macclassic'] {
+html[data-theme='macclassic'],
+html[data-theme='phosphor-crt'],
+html[data-theme='amber-crt'],
+html[data-theme='neon-grid'],
+html[data-theme='vector-wire'],
+html[data-theme='tactical-orange'] {
   --scrollbar-size: 12px;
   --scrollbar-radius: 0px;
 }
@@ -678,13 +733,11 @@ html[data-theme='macclassic'] .themed-scroll::-webkit-scrollbar-thumb {
   background-clip: border-box;
 }
 
-/* XP Luna — soft blue */
+/* XP Soft Luna — warm track, chunky thumb (colors from theme tokens) */
 html[data-theme='winxp'] {
-  --scrollbar-size: 16px;
-  --scrollbar-radius: 3px;
-  --scrollbar-track: #ece9d8;
-  --scrollbar-thumb: #7ba2e7;
-  --scrollbar-thumb-hover: #5a8ad6;
+  --scrollbar-size: 14px;
+  --scrollbar-radius: 4px;
+  --scrollbar-track: var(--bg-panel);
 }
 
 /* Pixel / CRT — accent thumbs on panel track */
@@ -699,6 +752,29 @@ html[data-theme='matrix'] {
   --scrollbar-track: #000000;
   --scrollbar-thumb: #00ff41;
   --scrollbar-thumb-hover: #66ff88;
+}
+
+html[data-theme='matrix'] {
+  --scrollbar-thumb: #20ff98;
+  --scrollbar-thumb-hover: #70ffb0;
+}
+
+html[data-theme='phosphor-crt'] {
+  --scrollbar-track: #0c1008;
+  --scrollbar-thumb: #98c050;
+  --scrollbar-thumb-hover: #c0e070;
+}
+
+html[data-theme='amber-crt'] {
+  --scrollbar-track: #100a04;
+  --scrollbar-thumb: #ff9800;
+  --scrollbar-thumb-hover: #ffc060;
+}
+
+html[data-theme='code-cascade'] {
+  --scrollbar-track: #04100c;
+  --scrollbar-thumb: #30e8a8;
+  --scrollbar-thumb-hover: #70ffc0;
 }
 
 html[data-theme='terminal'] ::-webkit-scrollbar-thumb,
@@ -740,9 +816,9 @@ html[data-theme='blueprint'] .side-panel {
 }
 
 html[data-theme='noir'] .side-panel-header {
-  background: linear-gradient(90deg, #0a0a0a, #242018);
-  border-bottom: 1px solid #c8a060;
-  color: #e8e0d0;
+  background: linear-gradient(90deg, #080808, #222222);
+  border-bottom: 1px solid #d0d0d0;
+  color: #f0f0f0;
   font-style: italic;
 }
 
@@ -784,7 +860,7 @@ html[data-theme='candy'] .toolbar-btn {
 }
 
 html[data-theme='candy'] .toolbar-btn.active {
-  background: #ff4da6;
+  background: #ff20b0;
   color: #fff;
 }
 
@@ -843,6 +919,144 @@ html[data-theme='studio-clay'] .side-panel {
   border-radius: 10px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
 }
+
+/* ── Movie Screens chrome ─────────────────────────────────────────────── */
+
+html[data-theme='phosphor-crt'] {
+  text-shadow: 0 0 3px rgb(152 192 80 / 30%);
+}
+
+html[data-theme='phosphor-crt'] .side-panel,
+html[data-theme='phosphor-crt'] .transform-toolbar {
+  border: 1px solid #6a8840;
+  border-radius: 2px;
+  box-shadow: inset 0 0 28px rgb(152 192 80 / 6%);
+}
+
+html[data-theme='phosphor-crt'] .toolbar-btn.active {
+  background: #98c050;
+  color: #0c1008;
+}
+
+html[data-theme='amber-crt'] {
+  text-shadow: 0 0 4px rgb(255 152 0 / 30%);
+}
+
+html[data-theme='amber-crt'] .side-panel,
+html[data-theme='amber-crt'] .transform-toolbar {
+  border: 1px solid #c87820;
+  border-radius: 0;
+  box-shadow: 0 0 18px rgb(255 152 0 / 10%), inset 0 0 36px rgb(255 152 0 / 4%);
+}
+
+html[data-theme='amber-crt'] .toolbar-btn.active {
+  background: #ff9800;
+  color: #100a04;
+  text-shadow: none;
+}
+
+html[data-theme='neon-grid'] .side-panel {
+  border: 1px solid #2080ff;
+  box-shadow:
+    0 0 20px rgb(32 128 255 / 18%),
+    inset 0 0 0 1px rgb(32 128 255 / 12%);
+  background-image:
+    linear-gradient(rgb(32 128 255 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(32 128 255 / 7%) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+html[data-theme='neon-grid'] .toolbar-btn.active {
+  background: #2080ff;
+  color: #000010;
+  box-shadow: 0 0 14px rgb(32 128 255 / 45%);
+}
+
+html[data-theme='vector-wire'] .side-panel,
+html[data-theme='vector-wire'] .toolbar-btn {
+  border-radius: 0;
+  border-color: #ffffff;
+}
+
+html[data-theme='vector-wire'] .toolbar-btn.active {
+  background: #ffffff;
+  color: #000;
+}
+
+html[data-theme='cgi-chrome'] .side-panel {
+  border: 1px solid #9080c0;
+  box-shadow: 0 8px 24px rgb(112 128 208 / 14%);
+  background: linear-gradient(160deg, #f4f0fa 0%, #ece8f4 55%, #ddd4f0 100%);
+}
+
+html[data-theme='cgi-chrome'] .toolbar-btn.active {
+  background: linear-gradient(135deg, #7080d0, #d080b8);
+  color: #fff;
+}
+
+html[data-theme='vhs-hud'] .side-panel {
+  border: 1px solid #ff48a8;
+  box-shadow: 0 0 22px rgb(64 240 255 / 14%), 0 0 36px rgb(255 72 168 / 10%);
+}
+
+html[data-theme='vhs-hud'] .side-panel-header {
+  border-bottom: 1px dashed #40f0ff;
+}
+
+html[data-theme='vhs-hud'] .toolbar-btn.active {
+  background: linear-gradient(90deg, #40f0ff, #ff48a8);
+  color: #12141a;
+}
+
+html[data-theme='cyber-void'] .side-panel {
+  border: 1px solid #e040c0;
+  box-shadow: 0 0 28px rgb(255 80 208 / 18%);
+}
+
+html[data-theme='cyber-void'] .toolbar-btn.active {
+  background: #ff50d0;
+  color: #10041c;
+  box-shadow: 0 0 14px rgb(255 80 208 / 40%);
+}
+
+html[data-theme='code-cascade'] {
+  text-shadow: 0 0 4px rgb(48 232 168 / 28%);
+}
+
+html[data-theme='code-cascade'] .side-panel {
+  border: 1px solid #30c890;
+  box-shadow: 0 0 20px rgb(48 232 168 / 14%);
+}
+
+html[data-theme='code-cascade'] .toolbar-btn.active {
+  background: #30e8a8;
+  color: #04100c;
+  text-shadow: none;
+}
+
+html[data-theme='silver-hud'] .side-panel,
+html[data-theme='silver-hud'] .transform-toolbar {
+  border: 1px solid #a8b4c0;
+  background: linear-gradient(180deg, #343c48 0%, #2a3038 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%), 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='silver-hud'] .toolbar-btn.active {
+  background: #c0d0e0;
+  color: #1a1e24;
+}
+
+html[data-theme='tactical-orange'] .side-panel {
+  border: 1px solid #e06818;
+  box-shadow: inset 0 0 32px rgb(255 104 16 / 6%);
+}
+
+html[data-theme='tactical-orange'] .toolbar-btn.active {
+  background: #ff6810;
+  color: #0a0c08;
+  box-shadow: 0 0 12px rgb(255 104 16 / 40%);
+}
+
 
 
 

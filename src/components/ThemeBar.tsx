@@ -5,6 +5,7 @@ import { THEMES, getTheme, type ThemeGroup, type ThemeId } from '../theme/themes
 const THEME_GROUPS: ThemeGroup[] = [
   'Classic',
   'Studio',
+  'Movie Screens',
   'Game Systems',
   'Operating Systems',
 ]
