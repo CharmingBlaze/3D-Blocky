@@ -59,7 +59,7 @@ export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
     const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
       base,
       allFaces,
-      'blockbench',
+      'box',
       { angleLimitDeg: AUTO_SEAM_ANGLE_DEG, margin: 0.04, repackAll: true, markPacked: true }
     )
     return {
@@ -84,7 +84,7 @@ export function assignUvMappingForMode(obj: SceneObject, mode: UvMappingMode, pa
   const mapped = mode === 'box' ? assignBoxFaceUVs(obj) : assignPlanarUVs(obj)
   if (!packIslands || !mapped.uvs?.length || !mapped.faceUvIndices?.length) return mapped
   const allFaces = mapped.faces.map((_, i) => i)
-  const method = mode === 'box' || isDoodleLikeObject(mapped) ? 'blockbench' : 'auto'
+  const method = mode === 'box' || isDoodleLikeObject(mapped) ? 'box' : 'auto'
   const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
     mapped as SceneObjectWithUVs,
     allFaces,

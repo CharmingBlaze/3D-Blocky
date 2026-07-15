@@ -18,6 +18,7 @@ interface UvEditorToolbarProps {
   uvEditorSmartUvAngle: number
   uvEditorShowGrid: boolean
   uvEditorTilePreview: boolean
+  showUvPaintOverlay: boolean
   uvEditorViewAll: boolean
   uvEditorAutoFit: boolean
   uvEditorSticky: boolean
@@ -42,6 +43,7 @@ interface UvEditorToolbarProps {
   onSetSnap: (on: boolean) => void
   onSetSnapMode: (mode: UvSnapMode) => void
   onSetTilePreview: (on: boolean) => void
+  onSetShowUvPaintOverlay: (on: boolean) => void
   onSetGridDivisions: (n: number) => void
   onSetTextureTransform: (patch: {
     repeat?: [number, number]
@@ -115,6 +117,7 @@ export function UvEditorToolbar({
   uvEditorSmartUvAngle,
   uvEditorShowGrid,
   uvEditorTilePreview,
+  showUvPaintOverlay,
   uvEditorViewAll,
   uvEditorAutoFit,
   uvEditorSticky,
@@ -137,6 +140,7 @@ export function UvEditorToolbar({
   onSetSnap,
   onSetSnapMode,
   onSetTilePreview,
+  onSetShowUvPaintOverlay,
   onSetGridDivisions,
   onSetTextureTransform,
   onSelectConnected,
@@ -369,6 +373,12 @@ export function UvEditorToolbar({
             onChange={(v) => onSetSnapMode(v as UvSnapMode)}
           />
           <UvToggle label="Tile preview" checked={uvEditorTilePreview} onChange={onSetTilePreview} title="3×3 tiled texture preview" />
+          <UvToggle
+            label="Paint UV overlay"
+            checked={showUvPaintOverlay}
+            onChange={onSetShowUvPaintOverlay}
+            title="Show UV islands on the Pixel Editor canvas so you know where to paint"
+          />
           <label className="uv-field uv-field-block" title="Grid divisions">
             <span className="uv-field-label">Grid div</span>
             <input

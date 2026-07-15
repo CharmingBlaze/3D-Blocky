@@ -137,6 +137,35 @@ export function fitUVsToUnitSquare(uvs: Uv2[], indices: number[]): void {
   }
 }
 
+/**
+ * Fit UVs into a target square using uniform scale so view/screen proportions are preserved.
+ * Degenerate (near-zero) extents fall back to a stable 0-size placement at the origin.
+ */
+export function fitUVsAspectPreserving(
+  uvs: Uv2[],
+  indices: number[],
+  targetSize = 1,
+  padding = 0
+): void {
+  if (indices.length === 0) return
+  const b = uvBoundsFromIndices(uvs, indices)
+  const w = b.maxU - b.minU
+  const h = b.maxV - b.minV
+  const avail = Math.max(targetSize - padding * 2, 1e-8)
+  const span = Math.max(w, h, 1e-12)
+  const scale = avail / span
+  const outW = w * scale
+  const outH = h * scale
+  const offsetU = padding + (avail - outW) / 2
+  const offsetV = padding + (avail - outH) / 2
+  for (const i of indices) {
+    const uv = uvs[i]
+    if (!uv) continue
+    uv.u = offsetU + (uv.u - b.minU) * scale
+    uv.v = offsetV + (uv.v - b.minV) * scale
+  }
+}
+
 /** Spread each face island into a grid within 0–1 UV space (non-overlapping atlas layout). */
 export function packFaceUvIslands(uvs: Uv2[], faceUvIndices: number[][]): void {
   const faceCount = faceUvIndices.length

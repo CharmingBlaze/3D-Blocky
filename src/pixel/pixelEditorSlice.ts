@@ -60,6 +60,8 @@ export interface PixelEditorState {
   pixelEditorSymmetryH: boolean
   pixelEditorSymmetryV: boolean
   pixelEditorPaintOnModel: boolean
+  /** Show UV island outlines on the pixel canvas (realtime when UVs change). */
+  pixelEditorShowUvOverlay: boolean
   pixelEditorShapeFilled: boolean
   pixelEditorZoom: number
   pixelEditorPanX: number
@@ -90,6 +92,7 @@ export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorSymmetryH: false,
   pixelEditorSymmetryV: false,
   pixelEditorPaintOnModel: true,
+  pixelEditorShowUvOverlay: false,
   pixelEditorShapeFilled: false,
   pixelEditorZoom: 8,
   pixelEditorPanX: 0,

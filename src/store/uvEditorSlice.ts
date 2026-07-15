@@ -517,6 +517,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
           repackAll: true,
           markPacked: fullMesh,
           projectionAxes: viewAxes ? { right: viewAxes.right, up: viewAxes.up } : undefined,
+          projectionView: method === 'view' ? activeView : undefined,
         }
       )
       setPartial((s) => {

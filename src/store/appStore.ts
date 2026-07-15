@@ -220,6 +220,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   pixelEditorSymmetryH: boolean
   pixelEditorSymmetryV: boolean
   pixelEditorPaintOnModel: boolean
+  pixelEditorShowUvOverlay: boolean
   pixelEditorShapeFilled: boolean
   pixelEditorZoom: number
   pixelEditorPanX: number
@@ -282,6 +283,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   setPixelEditorSymmetryH: (on: boolean) => void
   setPixelEditorSymmetryV: (on: boolean) => void
   setPixelEditorPaintOnModel: (on: boolean) => void
+  setPixelEditorShowUvOverlay: (on: boolean) => void
   setPixelEditorShapeFilled: (on: boolean) => void
   setPixelEditorView: (zoom: number, panX: number, panY: number) => void
   setPixelEditorFillTolerance: (t: number) => void
@@ -998,6 +1000,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPixelEditorSymmetryH: (on) => set({ pixelEditorSymmetryH: on }),
   setPixelEditorSymmetryV: (on) => set({ pixelEditorSymmetryV: on }),
   setPixelEditorPaintOnModel: (on) => set({ pixelEditorPaintOnModel: on }),
+  setPixelEditorShowUvOverlay: (on) => set({ pixelEditorShowUvOverlay: on }),
   setPixelEditorShapeFilled: (on) => set({ pixelEditorShapeFilled: on }),
   setPixelEditorView: (zoom, panX, panY) =>
     set({ pixelEditorZoom: zoom, pixelEditorPanX: panX, pixelEditorPanY: panY }),

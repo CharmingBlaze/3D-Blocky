@@ -21,6 +21,13 @@ import { constrainPixelShape } from '../pixel/uvPaint'
 import { PIXEL_BRUSH_SHAPES, isPixelFreehandPaintTool, type PixelBrushShape } from '../pixel/pixelBrushTypes'
 import { drawMarchingAnts, pointInPixelSelection } from '../pixel/pixelMarchingAnts'
 import { pointerToDocumentPixel } from '../pixel/pixelCanvasCoordinates'
+import { subscribeUvDraft, type UvDraftSnapshot } from '../uv/uvDraftRelay'
+import {
+  clearUvPaintOverlayCaches,
+  paintUvAtlasOverlay,
+  resolveMeshForTextureDoc,
+} from '../uv/uvPaintOverlay'
+import type { Uv2 } from '../uv/uvTypes'
 
 /** Adobe-style tool groups for the floating toolbar. */
 const TOOL_GROUPS: { id: PixelTool; label: string; title: string }[][] = [
@@ -66,6 +73,7 @@ export function PixelEditorPanel() {
       symH: s.pixelEditorSymmetryH,
       symV: s.pixelEditorSymmetryV,
       paintOnModel: s.pixelEditorPaintOnModel,
+      showUvOverlay: s.pixelEditorShowUvOverlay,
       shapeFilled: s.pixelEditorShapeFilled,
       fillTolerance: s.pixelEditorFillTolerance,
       toolbarPos: s.pixelEditorToolbarPosition,
@@ -87,6 +95,7 @@ export function PixelEditorPanel() {
       setSymH: s.setPixelEditorSymmetryH,
       setSymV: s.setPixelEditorSymmetryV,
       setPaintOnModel: s.setPixelEditorPaintOnModel,
+      setShowUvOverlay: s.setPixelEditorShowUvOverlay,
       setShapeFilled: s.setPixelEditorShapeFilled,
       setFillTolerance: s.setPixelEditorFillTolerance,
       setToolbarPos: s.setPixelEditorToolbarPosition,
@@ -136,11 +145,29 @@ export function PixelEditorPanel() {
   const canPaintOnModel = Boolean(
     mat?.mode === 'texture' && store.docId && (mat.textureId ?? obj?.id) === store.docId
   )
+  const meshSelectionFaces = useAppStore((s) =>
+    s.meshSelection?.objectId && objectId && s.meshSelection.objectId === objectId
+      ? s.meshSelection.faces
+      : null
+  )
+  const uvEditorSelectedFaces = useAppStore((s) => s.uvEditorSelectedFaces)
+  /** Committed UV pool identity — store replaces the array on unwrap / island edits. */
+  const committedOverlayUvs = useAppStore((s) => {
+    if (!store.docId || !store.showUvOverlay) return null
+    return resolveMeshForTextureDoc(s.objects, store.docId, objectId)?.uvs ?? null
+  })
+  const committedOverlayFaceUvs = useAppStore((s) => {
+    if (!store.docId || !store.showUvOverlay) return null
+    return resolveMeshForTextureDoc(s.objects, store.docId, objectId)?.faceUvIndices ?? null
+  })
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasStackRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const uvDraftRef = useRef<UvDraftSnapshot | null>(null)
+  const uvOverlayObjectIdRef = useRef<string | null>(null)
+  const overlayDirtyRafRef = useRef(0)
   const [customW, setCustomW] = useState(64)
   const [customH, setCustomH] = useState(64)
   const [fileMessage, setFileMessage] = useState<string | null>(null)
@@ -269,6 +296,37 @@ export function PixelEditorPanel() {
     if (!ctx) return
     ctx.clearRect(0, 0, doc.width, doc.height)
 
+    if (store.showUvOverlay && store.docId) {
+      const { objects } = useAppStore.getState()
+      const mesh = resolveMeshForTextureDoc(objects, store.docId, objectId)
+      if (mesh) {
+        if (uvOverlayObjectIdRef.current && uvOverlayObjectIdRef.current !== mesh.id) {
+          clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
+        }
+        uvOverlayObjectIdRef.current = mesh.id
+
+        const draft = uvDraftRef.current
+        const uvs: readonly Uv2[] =
+          draft && draft.objectId === mesh.id ? draft.uvs : mesh.uvs
+
+        const selectedFaces =
+          uvEditorSelectedFaces.length > 0
+            ? uvEditorSelectedFaces
+            : meshSelectionFaces && meshSelectionFaces.length > 0
+              ? meshSelectionFaces
+              : []
+
+        paintUvAtlasOverlay({
+          ctx,
+          texW: doc.width,
+          texH: doc.height,
+          mesh,
+          uvs,
+          selectedFaces,
+        })
+      }
+    }
+
     if (store.selection && !marqueeSelect) {
       const { x0, y0, x1, y1 } = store.selection
       drawMarchingAnts(ctx, x0, y0, x1, y1, store.zoom, antsOffsetRef.current)
@@ -311,11 +369,64 @@ export function PixelEditorPanel() {
         }
       }
     }
-  }, [doc, shapePreview, store.selection, store.shapeFilled, store.tool, store.zoom, marqueeSelect])
+  }, [
+    doc,
+    shapePreview,
+    store.selection,
+    store.shapeFilled,
+    store.tool,
+    store.zoom,
+    store.showUvOverlay,
+    store.docId,
+    objectId,
+    uvEditorSelectedFaces,
+    meshSelectionFaces,
+    committedOverlayUvs,
+    committedOverlayFaceUvs,
+    marqueeSelect,
+  ])
 
   useEffect(() => {
     redrawOverlay()
   }, [redrawOverlay])
+
+  // Live UV drafts (island drag in UV editor) — RAF-coalesced redraw only when overlay is on.
+  useEffect(() => {
+    if (!store.open || !store.showUvOverlay) {
+      uvDraftRef.current = null
+      return
+    }
+    return subscribeUvDraft((snapshot) => {
+      uvDraftRef.current = snapshot
+      if (overlayDirtyRafRef.current) return
+      overlayDirtyRafRef.current = requestAnimationFrame(() => {
+        overlayDirtyRafRef.current = 0
+        redrawOverlay()
+      })
+    })
+  }, [store.open, store.showUvOverlay, redrawOverlay])
+
+  // Drop edge caches when overlay is toggled off, doc closes, or panel unmounts.
+  useEffect(() => {
+    if (!store.showUvOverlay || !store.open) {
+      if (uvOverlayObjectIdRef.current) {
+        clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
+        uvOverlayObjectIdRef.current = null
+      } else {
+        clearUvPaintOverlayCaches()
+      }
+    }
+    return () => {
+      if (overlayDirtyRafRef.current) {
+        cancelAnimationFrame(overlayDirtyRafRef.current)
+        overlayDirtyRafRef.current = 0
+      }
+      if (uvOverlayObjectIdRef.current) {
+        clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
+        uvOverlayObjectIdRef.current = null
+      }
+    }
+  }, [store.showUvOverlay, store.open, store.docId])
 
   // Animate marching ants while a selection (or live marquee) is visible.
   useEffect(() => {
@@ -1008,6 +1119,17 @@ export function PixelEditorPanel() {
             />
             <span>Paint on model</span>
           </label>
+          <label
+            className="px-sidebar-check"
+            title="Outline UV islands on this texture so you know where to paint"
+          >
+            <input
+              type="checkbox"
+              checked={store.showUvOverlay}
+              onChange={(e) => store.setShowUvOverlay(e.target.checked)}
+            />
+            <span>UV overlay</span>
+          </label>
           <label className="px-sidebar-check">
             <input type="checkbox" checked={store.shapeFilled} onChange={(e) => store.setShapeFilled(e.target.checked)} />
             <span>Filled shapes</span>
@@ -1079,6 +1201,7 @@ export function PixelEditorPanel() {
         <div className="px-stage-readouts" aria-label="Canvas status">
           {store.selection && <span className="px-stage-badge">Selection active</span>}
           {store.paintOnModel && canPaintOnModel && <span className="px-stage-badge active">3D paint</span>}
+          {store.showUvOverlay && <span className="px-stage-badge active">UV overlay</span>}
           <span className="px-stage-zoom">{Math.round(store.zoom * 100)}%</span>
         </div>
       </header>

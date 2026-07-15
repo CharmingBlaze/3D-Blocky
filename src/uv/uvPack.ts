@@ -1,4 +1,13 @@
-import { fitUVsToUnitSquare, translateUVs, uvBoundsFromIndices, uvBoundsCenter, scaleUVsFromCenter, type UvBounds } from './uvEditing'
+import {
+  fitUVsToUnitSquare,
+  translateUVs,
+  uvBoundsFromIndices,
+  uvBoundsCenter,
+  scaleUVsFromCenter,
+  type UvBounds,
+  type UvNormalBucket,
+  BLOCKBENCH_SLOTS,
+} from './uvEditing'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2 } from './uvTypes'
 
@@ -41,6 +50,14 @@ function islandBounds(uvs: Uv2[], uvIndices: number[]): { width: number; height:
     width: Math.max(b.maxU - b.minU, 1e-8),
     height: Math.max(b.maxV - b.minV, 1e-8),
   }
+}
+
+function collectIndices(faceUvIndices: number[][], faceList: number[]): number[] {
+  const set = new Set<number>()
+  for (const fi of faceList) {
+    for (const ui of faceUvIndices[fi] ?? []) set.add(ui)
+  }
+  return [...set]
 }
 
 /**
@@ -134,13 +151,269 @@ export function packFaceIslandsShelf(
   packUvIslandsShelf(uvs, slots, atlasSize, margin)
 }
 
-function collectIndices(faceUvIndices: number[][], faceList: number[]): number[] {
-  const set = new Set<number>()
-  for (const fi of faceList) {
-    for (const ui of faceUvIndices[fi] ?? []) set.add(ui)
+/**
+ * Region-strip packing: one horizontal band of islands (equal height, width ∝ aspect).
+ * Visibly different from shelf wrap — even a single island sits as a bottom strip, not a full-atlas square.
+ */
+export function packFaceIslandsRegionStrip(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  islands: number[][],
+  margin = 0.02,
+  atlasSize = 1
+): void {
+  if (islands.length === 0) return
+  if (islands.length > 1) {
+    splitUvIslandsForPacking(uvs, faceUvIndices, islands)
   }
-  return [...set]
+
+  const prepared = islands.map((faceList) => {
+    const uvIndices = collectIndices(faceUvIndices, faceList)
+    fitUVsToUnitSquare(uvs, uvIndices)
+    const { width, height } = islandBounds(uvs, uvIndices)
+    const aspect = width / height
+    return { uvIndices, aspect }
+  })
+
+  const bandH = Math.min(atlasSize * 0.42, atlasSize - margin * 2)
+  const innerW = atlasSize - margin * 2
+  const gap = margin
+  const totalAspect = prepared.reduce((s, p) => s + p.aspect, 0) || 1
+  const usableW = innerW - gap * Math.max(0, prepared.length - 1)
+
+  let x = margin
+  const y = margin
+  for (const part of prepared) {
+    const cellW = (usableW * part.aspect) / totalAspect
+    const b = uvBoundsFromIndices(uvs, part.uvIndices)
+    const w = b.maxU - b.minU || 1
+    const h = b.maxV - b.minV || 1
+    const scale = Math.min(cellW / w, bandH / h)
+    for (const ui of part.uvIndices) {
+      const uv = uvs[ui]
+      if (!uv) continue
+      uv.u = x + (uv.u - b.minU) * scale
+      uv.v = y + (uv.v - b.minV) * scale
+    }
+    x += cellW + gap
+  }
 }
+
+/**
+ * Uniform grid pack.
+ * - `columns: 'sqrt'` (default): ceil(sqrt(n)) — used by Planar per Face (aspect-fit).
+ * - `columns: 'row'`: single horizontal strip — used by Lightmap (stretch-fill).
+ * Stretch fills each cell; aspect-fit letterboxes inside the cell.
+ */
+export function packFaceIslandsUniformGrid(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  islands: number[][],
+  margin = 0.02,
+  options?: { stretch?: boolean; atlasSize?: number; columns?: 'sqrt' | 'row' }
+): void {
+  if (islands.length === 0) return
+  const atlasSize = options?.atlasSize ?? 1
+  const stretch = options?.stretch ?? false
+  const columnMode = options?.columns ?? 'sqrt'
+
+  if (islands.length === 1 && !stretch && columnMode === 'sqrt') {
+    packFaceIslandsShelf(uvs, faceUvIndices, islands, margin, atlasSize)
+    return
+  }
+
+  splitUvIslandsForPacking(uvs, faceUvIndices, islands)
+
+  const cols =
+    columnMode === 'row'
+      ? Math.max(1, islands.length)
+      : Math.max(1, Math.ceil(Math.sqrt(islands.length)))
+  const rows = Math.max(1, Math.ceil(islands.length / cols))
+  const cellW = atlasSize / cols
+  const cellH = atlasSize / rows
+  // Lightmap uses tighter padding so stretch cells read as packed bake charts.
+  const padScale = stretch ? margin * 0.5 : margin
+  const padU = cellW * padScale
+  const padV = cellH * padScale
+  const innerW = Math.max(cellW - padU * 2, 1e-8)
+  const innerH = Math.max(cellH - padV * 2, 1e-8)
+
+  for (let i = 0; i < islands.length; i++) {
+    const uvIndices = collectIndices(faceUvIndices, islands[i]!)
+    if (uvIndices.length === 0) continue
+    fitUVsToUnitSquare(uvs, uvIndices)
+    const b = uvBoundsFromIndices(uvs, uvIndices)
+    const w = b.maxU - b.minU || 1
+    const h = b.maxV - b.minV || 1
+    const col = i % cols
+    const row = Math.floor(i / cols)
+    const baseU = col * cellW + padU
+    const baseV = atlasSize - (row + 1) * cellH + padV
+    const scaleU = innerW / w
+    const scaleV = innerH / h
+    const scale = stretch ? 1 : Math.min(scaleU, scaleV)
+    const usedScaleU = stretch ? scaleU : scale
+    const usedScaleV = stretch ? scaleV : scale
+    for (const ui of uvIndices) {
+      const uv = uvs[ui]
+      if (!uv) continue
+      uv.u = baseU + (uv.u - b.minU) * usedScaleU
+      uv.v = baseV + (uv.v - b.minV) * usedScaleV
+    }
+  }
+}
+
+/** Minecraft-inspired cube-net cells in local net units (width=2(x+z), height=z+y). */
+export type BoxNetSize = { x: number; y: number; z: number }
+
+export function boxNetCellRect(
+  bucket: UvNormalBucket,
+  size: BoxNetSize
+): { x: number; y: number; w: number; h: number } {
+  const { x, y, z } = size
+  switch (bucket) {
+    case '+y':
+      return { x: z, y: 0, w: x, h: z }
+    case '-y':
+      return { x: z + x, y: 0, w: x, h: z }
+    case '+x':
+      return { x: 0, y: z, w: z, h: y }
+    case '-x':
+      return { x: z + x, y: z, w: z, h: y }
+    case '-z':
+      return { x: z, y: z, w: x, h: y }
+    case '+z':
+      return { x: z + x + z, y: z, w: x, h: y }
+  }
+}
+
+/**
+ * Place normal-bucket islands into a cube-net layout (AABB-sized).
+ * Works for any low-poly mesh — organic faces land in the nearest direction cell.
+ */
+export function packFaceIslandsBoxNet(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  bucketIslands: { bucket: UvNormalBucket; faces: number[] }[],
+  size: BoxNetSize,
+  margin = 0.03,
+  atlasSize = 1
+): void {
+  if (bucketIslands.length === 0) return
+  splitUvIslandsForPacking(
+    uvs,
+    faceUvIndices,
+    bucketIslands.map((b) => b.faces)
+  )
+
+  const sx = Math.max(size.x, 1e-6)
+  const sy = Math.max(size.y, 1e-6)
+  const sz = Math.max(size.z, 1e-6)
+  const netW = 2 * (sx + sz)
+  const netH = sz + sy
+  const pad = margin
+  const scaleNet = Math.min((atlasSize - pad * 2) / netW, (atlasSize - pad * 2) / netH)
+  const originU = pad + ((atlasSize - pad * 2) - netW * scaleNet) * 0.5
+  const originV = pad + ((atlasSize - pad * 2) - netH * scaleNet) * 0.5
+
+  for (const { bucket, faces } of bucketIslands) {
+    if (faces.length === 0) continue
+    const uvIndices = collectIndices(faceUvIndices, faces)
+    if (uvIndices.length === 0) continue
+    const cell = boxNetCellRect(bucket, { x: sx, y: sy, z: sz })
+    const cellU = originU + cell.x * scaleNet
+    const cellV = originV + (netH - cell.y - cell.h) * scaleNet
+    const cellW = Math.max(cell.w * scaleNet, 1e-8)
+    const cellH = Math.max(cell.h * scaleNet, 1e-8)
+    const inset = Math.min(cellW, cellH) * 0.06
+
+    fitUVsToUnitSquare(uvs, uvIndices)
+    const b = uvBoundsFromIndices(uvs, uvIndices)
+    const w = b.maxU - b.minU || 1
+    const h = b.maxV - b.minV || 1
+    const innerW = Math.max(cellW - inset * 2, 1e-8)
+    const innerH = Math.max(cellH - inset * 2, 1e-8)
+    const scale = Math.min(innerW / w, innerH / h)
+    for (const ui of uvIndices) {
+      const uv = uvs[ui]
+      if (!uv) continue
+      uv.u = cellU + inset + (uv.u - b.minU) * scale
+      uv.v = cellV + inset + (uv.v - b.minV) * scale
+    }
+  }
+}
+
+/**
+ * Direction atlas: each face alone inside its normal's 4×3 cross slot (subgrid).
+ * Paint-friendly — every face gets its own texel island.
+ */
+export function packFacesDirectionAtlas(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  faceBuckets: { fi: number; bucket: UvNormalBucket }[],
+  margin = 0.04,
+  atlasCols = 4,
+  atlasRows = 3
+): void {
+  if (faceBuckets.length === 0) return
+  splitUvIslandsForPacking(
+    uvs,
+    faceUvIndices,
+    faceBuckets.map(({ fi }) => [fi])
+  )
+
+  const byBucket = new Map<UvNormalBucket, number[]>()
+  for (const { fi, bucket } of faceBuckets) {
+    const list = byBucket.get(bucket) ?? []
+    list.push(fi)
+    byBucket.set(bucket, list)
+  }
+
+  const cellW = 1 / atlasCols
+  const cellH = 1 / atlasRows
+
+  for (const [bucket, faces] of byBucket) {
+    const slot = BLOCKBENCH_SLOTS[bucket]
+    const baseU = slot.col * cellW + cellW * margin
+    const baseV = 1 - (slot.row + 1) * cellH + cellH * margin
+    const innerW = cellW * (1 - margin * 2)
+    const innerH = cellH * (1 - margin * 2)
+    const subCols = Math.max(1, Math.ceil(Math.sqrt(faces.length)))
+    const subRows = Math.ceil(faces.length / subCols)
+    const subW = innerW / subCols
+    const subH = innerH / subRows
+
+    faces.forEach((fi, idx) => {
+      const uvIndices = collectIndices(faceUvIndices, [fi])
+      if (uvIndices.length === 0) return
+      fitUVsToUnitSquare(uvs, uvIndices)
+      const b = uvBoundsFromIndices(uvs, uvIndices)
+      const w = b.maxU - b.minU || 1
+      const h = b.maxV - b.minV || 1
+      const col = idx % subCols
+      const row = Math.floor(idx / subCols)
+      const padU = subW * 0.08
+      const padV = subH * 0.08
+      const scale = Math.min((subW - padU * 2) / w, (subH - padV * 2) / h)
+      const ox = baseU + col * subW + padU
+      const oy = baseV + (subRows - 1 - row) * subH + padV
+      for (const ui of uvIndices) {
+        const uv = uvs[ui]
+        if (!uv) continue
+        uv.u = ox + (uv.u - b.minU) * scale
+        uv.v = oy + (uv.v - b.minV) * scale
+      }
+    })
+  }
+}
+
+export type UvPackStyle =
+  | 'shelf'
+  | 'regionStrip'
+  | 'grid'
+  | 'gridStretch'
+  | 'boxNet'
+  | 'directionAtlas'
 
 function boundsOverlap(a: UvBounds, b: UvBounds, padding: number): boolean {
   return !(
@@ -158,13 +431,57 @@ export function packPartialUnwrapIslands(
   faceCount: number,
   selectedFaces: number[],
   islands: number[][],
-  margin = 0.02
+  margin = 0.02,
+  options?: {
+    skipRefit?: boolean
+    packStyle?: UvPackStyle
+    boxNet?: {
+      size: BoxNetSize
+      buckets: { bucket: UvNormalBucket; faces: number[] }[]
+    }
+    directionFaces?: { fi: number; bucket: UvNormalBucket }[]
+  }
 ): void {
   if (islands.length === 0 || selectedFaces.length === 0) return
 
-  splitUvIslandsForPacking(uvs, faceUvIndices, islands)
-  packFaceIslandsShelf(uvs, faceUvIndices, islands, margin)
+  const opts = options ?? {}
+  const style = opts.packStyle ?? 'shelf'
+  if (!opts.skipRefit) {
+    if (style === 'boxNet' && opts.boxNet) {
+      packFaceIslandsBoxNet(
+        uvs,
+        faceUvIndices,
+        opts.boxNet.buckets,
+        opts.boxNet.size,
+        margin
+      )
+    } else if (style === 'directionAtlas' && opts.directionFaces) {
+      packFacesDirectionAtlas(uvs, faceUvIndices, opts.directionFaces, margin)
+    } else if (style === 'regionStrip') {
+      packFaceIslandsRegionStrip(uvs, faceUvIndices, islands, margin)
+    } else if (style === 'grid' || style === 'gridStretch') {
+      packFaceIslandsUniformGrid(uvs, faceUvIndices, islands, margin, {
+        stretch: style === 'gridStretch',
+        columns: style === 'gridStretch' ? 'row' : 'sqrt',
+      })
+    } else {
+      packFaceIslandsShelf(uvs, faceUvIndices, islands, margin)
+    }
+  } else {
+    splitUvIslandsForPacking(uvs, faceUvIndices, islands)
+  }
 
+  relocatePartialIsland(uvs, faceUvIndices, faceCount, selectedFaces, margin)
+}
+
+/** Translate (and optionally shrink) a pre-fitted selection into free atlas space. */
+export function relocatePartialIsland(
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  faceCount: number,
+  selectedFaces: number[],
+  margin = 0.02
+): void {
   const selectedUi = collectIndices(faceUvIndices, selectedFaces)
   if (selectedUi.length === 0) return
 
@@ -211,7 +528,7 @@ export function packPartialUnwrapIslands(
   translateUVs(uvs, selectedUi, margin - selBounds.minU, margin - selBounds.minV)
 }
 
-/** Place up to six axis-direction islands into Blockbench cross slots. */
+/** @deprecated Prefer packFacesDirectionAtlas — kept for older call sites. */
 export function packCubeBucketsBlockbench(
   uvs: Uv2[],
   faceUvIndices: number[][],
