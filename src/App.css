@@ -1084,6 +1084,458 @@
   opacity: 0.85;
 }
 
+/* Compact Adobe-style inspector: square geometry, dense controls, full-width sections. */
+.side-panel .side-panel-header {
+  gap: 4px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-dark));
+}
+
+.side-panel .side-file-menu {
+  gap: 3px;
+}
+
+.side-panel .side-panel-scroll {
+  padding: 0;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track, var(--bg-panel));
+}
+
+.side-panel .side-panel-scroll::-webkit-scrollbar,
+.side-panel .palette-scroll-box::-webkit-scrollbar,
+.side-panel .side-button-dropdown-menu::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.side-panel .side-panel-scroll::-webkit-scrollbar-track,
+.side-panel .palette-scroll-box::-webkit-scrollbar-track,
+.side-panel .side-button-dropdown-menu::-webkit-scrollbar-track {
+  border-radius: 0;
+  background: var(--scrollbar-track, var(--bg-dark));
+}
+
+.side-panel .side-panel-scroll::-webkit-scrollbar-thumb,
+.side-panel .palette-scroll-box::-webkit-scrollbar-thumb,
+.side-panel .side-button-dropdown-menu::-webkit-scrollbar-thumb {
+  border: 1px solid var(--scrollbar-track, var(--bg-dark));
+  border-radius: 0;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.side-panel .side-section {
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-panel .side-section-title {
+  margin: 0;
+}
+
+.side-panel .side-section-toggle {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: color-mix(in srgb, var(--bg-hover) 65%, var(--bg-panel));
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.side-panel .side-section-toggle:hover,
+.side-panel .side-section-toggle:focus-visible {
+  border-left-color: var(--accent);
+  background: var(--bg-hover);
+  box-shadow: none;
+  color: var(--text);
+}
+
+.side-panel .side-section-toggle[aria-expanded='true'] {
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
+.side-panel .side-section-chevron {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.side-panel .side-section-toggle:hover .side-section-chevron,
+.side-panel .side-section-toggle:focus-visible .side-section-chevron {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+}
+
+.side-panel .side-section-body {
+  gap: 4px;
+  padding: 6px 8px 8px;
+}
+
+.side-panel .side-section-cols-2 {
+  gap: 4px;
+}
+
+.side-panel .side-btn-group,
+.side-panel .side-shape-menus {
+  gap: 3px;
+}
+
+.side-panel .side-create-label {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 13px;
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--text-muted) 88%, var(--text));
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.side-panel .side-create-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.side-panel .side-section-body > .side-create-label:first-child {
+  margin-top: 0;
+}
+
+.side-panel .side-shape-menus .side-btn-dropdown {
+  min-height: 25px;
+  padding-left: 6px;
+  padding-right: 5px;
+}
+
+.side-panel .side-section-body > .side-btn-group.cols-3 .side-btn {
+  min-height: 25px;
+}
+
+.side-panel .side-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.side-panel .side-editor-grid > :first-child {
+  grid-column: 1 / -1;
+}
+
+.side-panel .side-btn,
+.side-panel .side-history-btn,
+.side-panel .side-btn-group .side-btn,
+.side-panel .side-section-cols-2 .side-btn {
+  min-height: 23px;
+  padding: 3px 5px;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.side-panel .side-btn.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.side-panel .side-btn-danger:not(:disabled) {
+  border-color: color-mix(in srgb, #d96b6b 35%, var(--border));
+  color: color-mix(in srgb, #ef8b8b 78%, var(--text));
+}
+
+.side-panel .side-btn-danger:hover:not(:disabled) {
+  border-color: #d96b6b;
+  background: color-mix(in srgb, #d96b6b 12%, var(--bg-dark));
+}
+
+.side-panel .side-button-dropdown,
+.side-panel .side-btn-dropdown,
+.side-panel .side-button-dropdown-menu,
+.side-panel .side-button-dropdown-item,
+.side-panel select,
+.side-panel input,
+.side-panel textarea,
+.side-panel .tool-badge,
+.side-panel .side-chip,
+.side-panel .lock-indicator,
+.side-panel .palette-scroll-box,
+.side-panel .palette-texture-tint,
+.side-panel .palette-swatch,
+.side-panel .palette-custom,
+.side-panel .palette-custom-preview,
+.side-panel .palette-minimize-swatch,
+.side-panel .theme-trigger-swatch,
+.side-panel .theme-preview-stage,
+.side-panel .theme-preview-dot,
+.side-panel .theme-preview-chip {
+  border-radius: 0;
+}
+
+.side-panel .side-button-dropdown-item {
+  min-height: 24px;
+  padding: 4px 7px;
+  font-size: 10px;
+}
+
+.side-panel .side-checkbox-row {
+  gap: 2px 6px;
+}
+
+.side-panel .side-checkbox {
+  gap: 5px;
+  min-height: 19px;
+  padding: 1px 0;
+  font-size: 9px;
+}
+
+.side-panel .side-checkbox input[type='checkbox'] {
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+}
+
+.side-panel .side-slider {
+  gap: 3px;
+  padding: 2px 0;
+}
+
+.side-panel .side-slider-header {
+  font-size: 9px;
+}
+
+.side-panel .side-slider-value {
+  font-size: 9px;
+}
+
+.side-panel .side-slider input[type='range'],
+.side-panel .side-slider input[type='range']::-webkit-slider-runnable-track {
+  height: 7px;
+  border-radius: 0;
+}
+
+.side-panel .side-slider input[type='range']::-webkit-slider-thumb {
+  width: 10px;
+  height: 13px;
+  margin-top: -4px;
+  border-radius: 0;
+}
+
+.side-panel .side-slider input[type='range']::-moz-range-track,
+.side-panel .side-slider input[type='range']::-moz-range-thumb {
+  border-radius: 0;
+}
+
+.side-panel .side-color-hint {
+  margin: 1px 0 3px;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.side-panel .palette-bar-side,
+.side-panel .palette-minimize-body {
+  gap: 4px;
+}
+
+.side-panel .palette-minimize-toggle {
+  min-height: 22px;
+  padding: 2px 0;
+}
+
+.side-panel .palette-scroll-box {
+  max-height: 116px;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track, var(--bg-dark));
+}
+
+.side-panel .palette-bar-side .palette-swatches {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.side-panel .palette-bar-side .palette-swatch:hover,
+.side-panel .palette-bar-side .palette-swatch.active {
+  transform: none;
+}
+
+.side-panel .palette-texture-tint {
+  gap: 3px;
+  padding: 5px;
+}
+
+.side-panel .side-theme-picker {
+  gap: 4px;
+}
+
+/* Keep the inspector calm and legible across every theme. Theme color is an
+   interaction accent, not a structural background color. */
+.side-panel {
+  --inspector-line: color-mix(in srgb, var(--text) 16%, var(--bg-panel));
+  --inspector-soft-line: color-mix(in srgb, var(--text) 10%, var(--bg-panel));
+  --inspector-header: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
+  --inspector-control: color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+  --inspector-control-hover: color-mix(in srgb, var(--text) 8%, var(--bg-panel));
+  border-left-color: var(--inspector-line);
+  font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
+.side-panel .side-panel-header {
+  border-bottom-color: var(--inspector-line);
+  background: var(--bg-panel);
+}
+
+.side-panel .side-section {
+  border-bottom-color: var(--inspector-line);
+}
+
+.side-panel .side-section-toggle {
+  min-height: 27px;
+  border-left: 0;
+  border-top: 1px solid color-mix(in srgb, #fff 5%, transparent);
+  background: var(--inspector-header);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+}
+
+.side-panel .side-section-toggle:hover,
+.side-panel .side-section-toggle:focus-visible,
+.side-panel .side-section-toggle[aria-expanded='true'] {
+  border-left: 0;
+  background: var(--inspector-header);
+  color: var(--text);
+}
+
+.side-panel .side-section-toggle:hover,
+.side-panel .side-section-toggle:focus-visible {
+  background: var(--inspector-control-hover);
+}
+
+.side-panel .side-section-chevron,
+.side-panel .side-section-toggle:hover .side-section-chevron,
+.side-panel .side-section-toggle:focus-visible .side-section-chevron {
+  color: var(--text-muted);
+}
+
+.side-panel .side-section-body {
+  background: var(--bg-panel);
+}
+
+.side-panel .side-create-label {
+  min-height: 15px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+}
+
+.side-panel .side-create-label::after {
+  background: var(--inspector-soft-line);
+}
+
+.side-panel .side-btn,
+.side-panel .side-history-btn,
+.side-panel .side-btn-group .side-btn,
+.side-panel .side-section-cols-2 .side-btn,
+.side-panel .side-btn-dropdown {
+  border-color: var(--inspector-line);
+  background: var(--inspector-control);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.side-panel .side-btn:hover:not(:disabled),
+.side-panel .side-history-btn:hover:not(:disabled),
+.side-panel .side-btn-dropdown:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--bg-panel));
+  background: var(--inspector-control-hover);
+  color: var(--text);
+}
+
+.side-panel .side-btn.active,
+.side-panel .side-btn-dropdown.active {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--inspector-line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+}
+
+.side-panel .side-checkbox,
+.side-panel .side-slider-header,
+.side-panel .side-color-hint,
+.side-panel .palette-minimize-toggle {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.side-panel .side-slider-value {
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
+  font-size: 10px;
+}
+
+.side-panel .side-slider input[type='range'],
+.side-panel .side-slider input[type='range']::-webkit-slider-runnable-track,
+.side-panel .side-slider input[type='range']::-moz-range-track {
+  border-color: var(--inspector-line);
+  background: var(--inspector-control-hover);
+}
+
+.side-panel .palette-scroll-box,
+.side-panel .palette-texture-tint,
+.side-panel .side-button-dropdown-menu {
+  border-color: var(--inspector-line);
+  background: var(--bg-panel);
+}
+
+.side-panel .palette-scroll-box {
+  padding: 3px;
+}
+
+.side-panel .palette-bar-side .palette-swatch {
+  border-color: var(--inspector-soft-line);
+}
+
+.side-panel .palette-bar-side .palette-swatch.active {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--bg-panel);
+}
+
+.side-panel .palette-bar-side .palette-custom {
+  border-color: var(--inspector-line);
+}
+
+.side-panel .side-panel-scroll::-webkit-scrollbar-track,
+.side-panel .palette-scroll-box::-webkit-scrollbar-track,
+.side-panel .side-button-dropdown-menu::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+}
+
+.side-panel .side-panel-scroll::-webkit-scrollbar-thumb,
+.side-panel .palette-scroll-box::-webkit-scrollbar-thumb,
+.side-panel .side-button-dropdown-menu::-webkit-scrollbar-thumb {
+  border-color: var(--bg-panel);
+  background: color-mix(in srgb, var(--text) 32%, var(--bg-panel));
+}
+
 .palette-custom {
   position: relative;
   width: 22px;

@@ -101,7 +101,7 @@ function SideSection({
   children,
   columns = 1,
   order = 0,
-  collapsible = false,
+  collapsible = true,
   defaultCollapsed = false,
 }: {
   title: string
@@ -733,7 +733,8 @@ export function SidePanel() {
         </div>
 
         <div className="side-panel-scroll themed-scroll">
-          <SideSection title="Quick start" order={24} columns={2}>
+          <SideSection title="Workspace" order={60} columns={2}>
+            <div className="side-create-label">Toolbars</div>
             <button
               className="side-btn side-btn-wide"
               onClick={() => setShowToolRing(true)}
@@ -745,7 +746,8 @@ export function SidePanel() {
             <PrimitivesToolbarToggle />
           </SideSection>
 
-          <SideSection title="View" columns={2} order={70}>
+          <SideSection title="View" columns={2} order={40}>
+            <div className="side-create-label">Viewport aids</div>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${showGrid ? 'active' : ''}`}
@@ -761,6 +763,7 @@ export function SidePanel() {
                 Heatmap
               </button>
             </SideBtnGroup>
+            <div className="side-create-label">Navigation</div>
             <button
               type="button"
               className="side-btn side-btn-wide"
@@ -772,42 +775,47 @@ export function SidePanel() {
             </button>
           </SideSection>
 
-          <SideSection title="Color" order={15}>
+          <SideSection title="Appearance" order={15}>
+            <div className="side-create-label">Color</div>
             <PaletteBar variant="side" />
-            <SidePanelPixelEditorMenu
-              open={pixelEditorOpen}
-              minimized={pixelEditorPanel.minimized}
-              canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
-              onOpen={() => openPixelEditor()}
-              onClose={togglePixelEditor}
-              onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
-              onNewDocument={(width, height) => openPixelEditor({ width, height })}
-              onShowCanvas={togglePixelEditor}
-            />
-            <button
-              className={`side-btn side-btn-wide ${uvEditorOpen ? 'active' : ''}`}
-              onClick={toggleUvEditor}
-              disabled={selectionCount === 0 && !selectedObjectId}
-              title={
-                uvEditorOpen && uvEditorPanel.minimized
-                  ? 'Restore UV Editor'
-                  : 'UV Editor — edit texture coordinates for selected object'
-              }
-            >
-              UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
-            </button>
-            <button
-              className={`side-btn side-btn-wide ${materialEditorOpen ? 'active' : ''}`}
-              onClick={toggleMaterialEditor}
-              disabled={selectionCount === 0 && !selectedObjectId}
-              title={
-                materialEditorOpen && materialEditorPanel.minimized
-                  ? 'Restore Material Editor'
-                  : 'Material Editor — colors, palettes, gradients'
-              }
-            >
-              Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
-            </button>
+            <div className="side-create-label">Editors</div>
+            <div className="side-editor-grid">
+              <SidePanelPixelEditorMenu
+                open={pixelEditorOpen}
+                minimized={pixelEditorPanel.minimized}
+                canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
+                onOpen={() => openPixelEditor()}
+                onClose={togglePixelEditor}
+                onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
+                onNewDocument={(width, height) => openPixelEditor({ width, height })}
+                onShowCanvas={togglePixelEditor}
+              />
+              <button
+                className={`side-btn ${uvEditorOpen ? 'active' : ''}`}
+                onClick={toggleUvEditor}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title={
+                  uvEditorOpen && uvEditorPanel.minimized
+                    ? 'Restore UV Editor'
+                    : 'UV Editor — edit texture coordinates for selected object'
+                }
+              >
+                UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
+              </button>
+              <button
+                className={`side-btn ${materialEditorOpen ? 'active' : ''}`}
+                onClick={toggleMaterialEditor}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title={
+                  materialEditorOpen && materialEditorPanel.minimized
+                    ? 'Restore Material Editor'
+                    : 'Material Editor — colors, palettes, gradients'
+                }
+              >
+                Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
+              </button>
+            </div>
+            <div className="side-create-label">Viewport display</div>
             <SideButtonDropdown
               label="View"
               value={viewportDisplayMode}
@@ -828,6 +836,7 @@ export function SidePanel() {
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
+            <div className="side-create-label">Mesh faces</div>
             <SideBtnGroup cols={3}>
               {POLY_DRAW_MODES.map((m) => (
                 <button
@@ -841,6 +850,7 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
+            <div className="side-create-label">Drawing options</div>
             <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
                 <input
@@ -886,6 +896,7 @@ export function SidePanel() {
                 <span>Double-sided</span>
               </label>
             </div>
+            <div className="side-create-label">Shape tools</div>
             <div className="side-shape-menus">
               <SidePanelPrimitivesMenu
                 activePrimitiveKind={activePrimitiveKind}
@@ -915,6 +926,7 @@ export function SidePanel() {
                 </p>
               </>
             )}
+            <div className="side-create-label">Drawing input</div>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${drawInputMode === 'regular' ? 'active' : ''}`}
@@ -937,8 +949,22 @@ export function SidePanel() {
                 anchors/handles · Enter or double-click commits to 3D · Esc cancels
               </p>
             )}
+            <div className="side-create-label">Stroke shape</div>
             <SideBtnGroup cols={4}>
-              {STROKE_MODES.map((m) => (
+              {STROKE_MODES.slice(0, 4).map((m) => (
+                <button
+                  key={m.id}
+                  className={`side-btn ${strokeMode === m.id && !activeExtrudeOn && !activeLatheOn ? 'active' : ''}`}
+                  onClick={() => setStrokeMode(m.id)}
+                  title={m.hint}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </SideBtnGroup>
+            <div className="side-create-label">Hair</div>
+            <SideBtnGroup cols={3}>
+              {STROKE_MODES.slice(4).map((m) => (
                 <button
                   key={m.id}
                   className={`side-btn ${strokeMode === m.id && !activeExtrudeOn && !activeLatheOn ? 'active' : ''}`}
@@ -984,6 +1010,7 @@ export function SidePanel() {
                 </p>
               </div>
             )}
+            <div className="side-create-label">3D operation</div>
             <SideBtnGroup cols={2}>
               <button
                 type="button"
@@ -1031,9 +1058,10 @@ export function SidePanel() {
           </SideSection>
 
           {isSketchOrPen && (
-            <SideSection title="Stroke" order={11} collapsible>
+            <SideSection title="Active tool · Stroke" order={11}>
               {selectedSketchSource && selectedObj && (
                 <>
+                  <div className="side-create-label">Source</div>
                   <div className="side-chips">
                     <span className="lock-indicator">Editable Sketch</span>
                   </div>
@@ -1058,6 +1086,7 @@ export function SidePanel() {
                   </SideBtnGroup>
                 </>
               )}
+              <div className="side-create-label">Shape</div>
               <SideSlider
                 label="Extrude depth"
                 value={selectedSketchSource?.extrudeDepth ?? extrudeAmount}
@@ -1136,10 +1165,12 @@ export function SidePanel() {
           )}
 
           {selectedPrimitiveSource && selectedPrimitiveSize && (
-            <SideSection title="Primitive" order={12} collapsible>
+            <SideSection title="Active tool · Primitive" order={12}>
+              <div className="side-create-label">Source</div>
               <div className="side-chips">
                 <span className="lock-indicator">Editable {selectedPrimitiveSource.type}</span>
               </div>
+              <div className="side-create-label">Dimensions</div>
               <SideSlider
                 label="Width"
                 value={selectedPrimitiveSize.x}
@@ -1170,6 +1201,7 @@ export function SidePanel() {
                 onChange={(value) => updateSelectedPrimitiveSource({ size: { z: value } })}
                 onCommit={commitPrimitiveSourceEdit}
               />
+              <div className="side-create-label">Geometry</div>
               <SideSlider
                 label="Detail"
                 value={selectedPrimitiveSource.polyBudget}
@@ -1204,6 +1236,7 @@ export function SidePanel() {
                   />
                 </>
               )}
+              <div className="side-create-label">Output</div>
               <button
                 type="button"
                 className="side-btn"
@@ -1219,10 +1252,12 @@ export function SidePanel() {
           )}
 
           {activeTool === 'vector-shape' && (
-            <SideSection title="Vector" order={12}>
+            <SideSection title="Active tool · Vector" order={12}>
+              <div className="side-create-label">Placement</div>
               <p className="side-color-hint muted">Drag in an ortho view to place.</p>
               {activeShapeKind === 'roundedBox' && (
                 <>
+                  <div className="side-create-label">Geometry</div>
                   <SideSlider
                     label="Roundness"
                     value={roundedBoxRoundness}
@@ -1250,7 +1285,8 @@ export function SidePanel() {
           )}
 
           {isSculptTool && (
-            <SideSection title="Sculpt" order={13}>
+            <SideSection title="Active tool · Sculpt" order={13}>
+              <div className="side-create-label">Brush</div>
               <SideSlider
                 label="Brush strength"
                 value={brushStrength}
@@ -1267,6 +1303,7 @@ export function SidePanel() {
           )}
 
           <SideSection title="Selection" columns={2} order={20}>
+            <div className="side-create-label">Mode</div>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${selectionMode === 'object' ? 'active' : ''}`}
@@ -1297,6 +1334,7 @@ export function SidePanel() {
                 Face
               </button>
             </SideBtnGroup>
+            <div className="side-create-label">Actions</div>
             <SideBtnGroup cols={2}>
               <button
                 type="button"
@@ -1317,6 +1355,7 @@ export function SidePanel() {
                 Deselect all
               </button>
             </SideBtnGroup>
+            <div className="side-create-label">Visibility</div>
             <button
               className={`side-btn ${viewportXRay ? 'active' : ''}`}
               onClick={() => setViewportXRay(!viewportXRay)}
@@ -1337,6 +1376,7 @@ export function SidePanel() {
           </SideSection>
 
           <SideSection title="Transform" columns={2} order={21}>
+            <div className="side-create-label">Tools</div>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${activeTool === 'move' ? 'active' : ''}`}
@@ -1381,6 +1421,7 @@ export function SidePanel() {
                 Double-click to apply · Esc to cancel.
               </p>
             )}
+            <div className="side-create-label">View plane</div>
             <SideBtnGroup cols={3}>
               <button
                 type="button"
@@ -1412,7 +1453,8 @@ export function SidePanel() {
             </SideBtnGroup>
           </SideSection>
 
-          <SideSection title="Symmetry" order={23} collapsible defaultCollapsed>
+          <SideSection title="Symmetry" order={23}>
+            <div className="side-create-label">Mirror</div>
             <label className="side-checkbox" title="Mirror new geometry and sculpt strokes (Blockbench-style)">
               <input
                 type="checkbox"
@@ -1449,7 +1491,8 @@ export function SidePanel() {
             </p>
           </SideSection>
 
-          <SideSection title="Mesh editing" columns={2} order={22} collapsible defaultCollapsed>
+          <SideSection title="Geometry" columns={2} order={22}>
+            <div className="side-create-label">Topology</div>
             <SideBtnGroup cols={2}>
               <button
                 className="side-btn"
@@ -1521,6 +1564,7 @@ export function SidePanel() {
             </SideBtnGroup>
             {activeTool === 'knife' && (
               <>
+                <div className="side-create-label">Knife</div>
                 <p className="side-color-hint muted">
                   Click to place points · Shift snaps edge steps and face centers · Ctrl snaps
                   to the face grid · Enter applies · Backspace removes a point
@@ -1548,6 +1592,7 @@ export function SidePanel() {
             )}
             {selectionCount > 0 && !selectedObj?.topologyLocked && (
               <>
+                <div className="side-create-label">Subdivision</div>
                 <SideSlider
                   label="SubD viewport"
                   value={selectedSubDLevel}
@@ -1578,6 +1623,8 @@ export function SidePanel() {
               </>
             )}
             {loopCutDraft && (
+              <>
+                <div className="side-create-label">Loop cut</div>
               <SideBtnGroup cols={2}>
                 <button className="side-btn side-btn-primary" onClick={loopCutCommit}>
                   Confirm Cut
@@ -1586,10 +1633,12 @@ export function SidePanel() {
                   Cancel
                 </button>
               </SideBtnGroup>
+              </>
             )}
           </SideSection>
 
-          <SideSection title="References & images" order={40} collapsible defaultCollapsed>
+          <SideSection title="References & images" order={50}>
+            <div className="side-create-label">Placement</div>
             <p className="side-color-hint muted">
               Pick one mode, then drag an image into any viewport.
             </p>
@@ -1631,6 +1680,7 @@ export function SidePanel() {
             </label>
             {selectedReference && (
               <>
+                <div className="side-create-label">Selected reference</div>
                 <SideSlider
                   label="Reference opacity"
                   value={selectedReference.opacity}
@@ -1654,6 +1704,7 @@ export function SidePanel() {
             )}
             {selectedBillboard && (
               <>
+                <div className="side-create-label">Selected billboard</div>
                 <SideSlider
                   label="Billboard opacity"
                   value={selectedBillboard.opacity}
@@ -1682,7 +1733,8 @@ export function SidePanel() {
             )}
           </SideSection>
 
-          <SideSection title="Object actions" columns={2} order={30} collapsible defaultCollapsed>
+          <SideSection title="Object" columns={2} order={30}>
+            <div className="side-create-label">Shading & topology</div>
             <SideBtnGroup cols={2}>
               <button className="side-btn" onClick={toggleTopologyLock} title="Lock topology (L)">
                 Lock
@@ -1706,14 +1758,9 @@ export function SidePanel() {
               <button className="side-btn" onClick={simplifySelected}>
                 Reduce
               </button>
-              <button
-                className="side-btn"
-                onClick={deleteSelection}
-                disabled={!hasDeletableSelection}
-                title="Delete selection (Del)"
-              >
-                Delete
-              </button>
+            </SideBtnGroup>
+            <div className="side-create-label">Clipboard & actions</div>
+            <SideBtnGroup cols={2}>
               <button
                 className="side-btn"
                 onClick={copySelection}
@@ -1730,10 +1777,19 @@ export function SidePanel() {
               >
                 Paste
               </button>
+              <button
+                className="side-btn side-btn-danger"
+                onClick={deleteSelection}
+                disabled={!hasDeletableSelection}
+                title="Delete selection (Del)"
+              >
+                Delete
+              </button>
             </SideBtnGroup>
           </SideSection>
 
-          <SideSection title="Theme" order={60} collapsible defaultCollapsed>
+          <SideSection title="Interface" order={70}>
+            <div className="side-create-label">Theme</div>
             <ThemePicker />
           </SideSection>
         </div>
