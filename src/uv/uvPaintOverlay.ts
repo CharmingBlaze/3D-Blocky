@@ -45,6 +45,11 @@ export interface UvPaintOverlayInput {
   groupBoundaryEdges?: Map<number, [number, number][]>
   /** Optional cached boundary for the selected face set. */
   selectedBoundaryEdges?: [number, number][]
+  /**
+   * When false (default), skip translucent island fills — outlines only.
+   * Selection still dims outside islands (needs a cutout fill).
+   */
+  drawFills?: boolean
 }
 
 interface OverlayEdgeCache {
@@ -84,6 +89,16 @@ export function clearUvPaintOverlayCaches(objectId?: string): void {
 
 export function meshHasPaintableUvs(obj: SceneObject | null | undefined): obj is SceneObjectWithUVs {
   return Boolean(obj?.uvs?.length && obj.faceUvIndices?.length === obj.faces.length)
+}
+
+/** Read-only Pixel Editor overlay source: exactly the selected object's authored UVs. */
+export function resolveSelectedUvOverlayMesh(
+  objects: readonly SceneObject[],
+  selectedObjectId: string | null
+): SceneObjectWithUVs | null {
+  if (!selectedObjectId) return null
+  const selected = objects.find((obj) => obj.id === selectedObjectId)
+  return meshHasPaintableUvs(selected) ? selected : null
 }
 
 /** Prefer the selected object when it uses this texture doc; else first textured match. */
@@ -169,6 +184,7 @@ export function paintUvAtlasOverlay(input: UvPaintOverlayInput): void {
     ...DEFAULT_UV_PAINT_OVERLAY_STYLES,
     ...input.styles,
   }
+  const drawFills = input.drawFills === true
 
   const faceGroupMap = input.faceGroupMap ?? getFaceGroupMap(mesh)
   const selectedSet =
@@ -195,15 +211,17 @@ export function paintUvAtlasOverlay(input: UvPaintOverlayInput): void {
         hasSelection && group.faceIndices.some((fi) => selectedSet!.has(fi))
       if (hasSelection && isSelected) continue
       const dimmed = hasSelection
-      drawRegionFill(
-        ctx,
-        mesh,
-        uvs,
-        group.faceIndices,
-        dimmed ? styles.dimFill : styles.idleFill,
-        texW,
-        texH
-      )
+      if (drawFills) {
+        drawRegionFill(
+          ctx,
+          mesh,
+          uvs,
+          group.faceIndices,
+          dimmed ? styles.dimFill : styles.idleFill,
+          texW,
+          texH
+        )
+      }
       drawRegionBoundary(
         ctx,
         mesh,
@@ -218,7 +236,9 @@ export function paintUvAtlasOverlay(input: UvPaintOverlayInput): void {
     }
   } else {
     const allFaces = mesh.faces.map((_, i) => i)
-    drawRegionFill(ctx, mesh, uvs, allFaces, styles.idleFill, texW, texH)
+    if (drawFills) {
+      drawRegionFill(ctx, mesh, uvs, allFaces, styles.idleFill, texW, texH)
+    }
     drawRegionBoundary(
       ctx,
       mesh,
@@ -235,7 +255,9 @@ export function paintUvAtlasOverlay(input: UvPaintOverlayInput): void {
     const selectedEdges =
       input.selectedBoundaryEdges ??
       ensureSelectedEdges(mesh.id, mesh, selectedFaces)
-    drawRegionFill(ctx, mesh, uvs, selectedFaces, styles.selectedFill, texW, texH)
+    if (drawFills) {
+      drawRegionFill(ctx, mesh, uvs, selectedFaces, styles.selectedFill, texW, texH)
+    }
     drawRegionBoundary(
       ctx,
       mesh,

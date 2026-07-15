@@ -3,7 +3,6 @@ import type { CustomPalette, Rgba4 } from '../material/materialTypes'
 import { hexToRgba4 } from '../material/materialTypes'
 import { compositeLayers } from './compositeLayers'
 import {
-  clonePixelDocument,
   clonePixelLayer,
   createEmptyLayer,
   createPixelDocument,
@@ -17,25 +16,118 @@ import {
   drawEllipseOnLayer,
   drawLineOnLayer,
   drawRectOnLayer,
-  drawStrokeWithSymmetry,
   floodFillLayer,
   getPixel,
-  paintWithSymmetry,
   rgbaToBytes,
 } from './pixelTools'
-import type { SoftBrushParams } from './softBrush'
+import { clearPixelCompositeCache } from './pixelCompositeCache'
 import {
-  beginSoftBrushStroke,
-  continueSoftBrushStroke,
-  paintSoftBrushDab,
-  resetSoftBrushStroke,
-} from './softBrush'
-import { uploadPixelDocumentTexture } from '../rendering/textureCache'
-import {
-  clearPixelCompositeCache,
-  setPixelCompositeCache,
-  acquirePixelCompositeBuffer,
-} from './pixelCompositeCache'
+  scheduleDocPreview,
+  syncDocPreviewGpu,
+} from './pixelPreview'
+import { applyDocumentPaint } from './pixelPaint'
+
+// Re-export preview + paint APIs (single import surface for the app).
+export {
+  syncDocPreview as syncPixelDocumentComposite,
+  syncDocPreviewGpu as syncPixelDocumentGpu,
+  scheduleDocPreview as schedulePixelDocumentGpuSync,
+  flushDocPreviewGpu as flushPixelDocumentGpuSync,
+  resyncAllDocPreviews as resyncAllPixelDocuments,
+} from './pixelPreview'
+export { applyDocumentPaint, resetSoftBrushStroke } from './pixelPaint'
+
+/** @deprecated Use applyDocumentPaint */
+export const paintAtPixelLive = (
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  x: number,
+  y: number,
+  color: Rgba4,
+  brushSize: number,
+  tool: 'pencil' | 'eraser',
+  symH: boolean,
+  symV: boolean,
+  options?: { round?: boolean; syncGpu?: boolean }
+) =>
+  applyDocumentPaint(docs, docId, {
+    points: [{ x, y }],
+    color,
+    tool,
+    brushSize,
+    brushShape: 'round',
+    brushHardness: 1,
+    brushOpacity: 1,
+    brushFlow: 1,
+    pixelPerfect: false,
+    symH,
+    symV,
+    restart: true,
+    syncGpu: options?.syncGpu,
+    round: options?.round,
+  })
+
+/** @deprecated Use applyDocumentPaint */
+export const paintStrokeOnDocumentLive = (
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  points: { x: number; y: number }[],
+  color: Rgba4,
+  brushSize: number,
+  tool: 'pencil' | 'eraser',
+  pixelPerfect: boolean,
+  symH: boolean,
+  symV: boolean,
+  options?: { round?: boolean; syncGpu?: boolean }
+) =>
+  applyDocumentPaint(docs, docId, {
+    points,
+    color,
+    tool,
+    brushSize,
+    brushShape: 'round',
+    brushHardness: 1,
+    brushOpacity: 1,
+    brushFlow: 1,
+    pixelPerfect,
+    symH,
+    symV,
+    syncGpu: options?.syncGpu,
+    round: options?.round,
+  })
+
+/** @deprecated Use applyDocumentPaint */
+export const paintSoftBrushStrokeOnDocumentLive = (
+  docs: Record<string, PixelDocument>,
+  docId: string,
+  points: { x: number; y: number }[],
+  color: Rgba4,
+  params: {
+    size: number
+    hardness: number
+    opacity: number
+    flow: number
+    shape: PixelBrushShape
+  },
+  symH: boolean,
+  symV: boolean,
+  options?: { erase?: boolean; restart?: boolean; syncGpu?: boolean }
+) =>
+  applyDocumentPaint(docs, docId, {
+    points,
+    color,
+    tool: 'paintBrush',
+    brushSize: params.size,
+    brushShape: params.shape,
+    brushHardness: params.hardness,
+    brushOpacity: params.opacity,
+    brushFlow: params.flow,
+    pixelPerfect: false,
+    symH,
+    symV,
+    restart: options?.restart ?? points.length === 1,
+    syncGpu: options?.syncGpu,
+  })
 
 export interface PixelEditorState {
   pixelEditorOpen: boolean
@@ -75,7 +167,10 @@ export interface PixelEditorState {
   pixelEditorPaletteId: string
   pixelEditorCustomPalettes: CustomPalette[]
   pixelDocuments: Record<string, PixelDocument>
+  /** Global bump for legacy subscribers; prefer `pixelDocRevisions[docId]`. */
   pixelTextureRevision: number
+  /** Per-document content revision — MeshRenderer / UV / layers subscribe by texId. */
+  pixelDocRevisions: Record<string, number>
 }
 
 export const pixelEditorInitialState: PixelEditorState = {
@@ -105,64 +200,18 @@ export const pixelEditorInitialState: PixelEditorState = {
   pixelEditorCustomPalettes: [],
   pixelDocuments: {},
   pixelTextureRevision: 0,
+  pixelDocRevisions: {},
 }
 
-export function syncPixelDocumentGpu(
-  docs: Record<string, PixelDocument>,
-  docId: string
-): void {
-  const doc = docs[docId]
-  if (!doc) return
-  const buffer = acquirePixelCompositeBuffer(docId, doc.width, doc.height)
-  const composite = compositeLayers(doc, buffer)
-  setPixelCompositeCache(docId, composite, doc.width, doc.height)
-  uploadPixelDocumentTexture(docId, composite, doc.width, doc.height)
+/** Bump only the painted document so unrelated MeshRenderers stay cold. */
+export function bumpPixelDocRevision(
+  revisions: Record<string, number>,
+  docId: string | null | undefined
+): Record<string, number> {
+  if (!docId) return revisions
+  return { ...revisions, [docId]: (revisions[docId] ?? 0) + 1 }
 }
 
-/** Coalesce rapid stroke updates into one composite+GPU upload per animation frame. */
-let pendingSyncDocs: Record<string, PixelDocument> | null = null
-const pendingSyncIds = new Set<string>()
-let pendingSyncRaf = 0
-
-function flushPendingPixelGpuSync(): void {
-  if (pendingSyncRaf) {
-    cancelAnimationFrame(pendingSyncRaf)
-    pendingSyncRaf = 0
-  }
-  const docs = pendingSyncDocs
-  const ids = [...pendingSyncIds]
-  pendingSyncDocs = null
-  pendingSyncIds.clear()
-  if (!docs) return
-  for (const id of ids) syncPixelDocumentGpu(docs, id)
-}
-
-export function schedulePixelDocumentGpuSync(
-  docs: Record<string, PixelDocument>,
-  docId: string
-): void {
-  pendingSyncDocs = docs
-  pendingSyncIds.add(docId)
-  if (pendingSyncRaf) return
-  pendingSyncRaf = requestAnimationFrame(() => {
-    pendingSyncRaf = 0
-    flushPendingPixelGpuSync()
-  })
-}
-
-export function flushPixelDocumentGpuSync(): void {
-  flushPendingPixelGpuSync()
-}
-
-export function resyncAllPixelDocuments(docs: Record<string, PixelDocument>): void {
-  flushPixelDocumentGpuSync()
-  for (const id of Object.keys(docs)) syncPixelDocumentGpu(docs, id)
-}
-
-/**
- * Shallow-clone doc structure for immutable updates. Pixel buffers stay shared until
- * an updater replaces a layer's `pixels` (avoids cloning every layer on each stroke).
- */
 function draftPixelDocument(doc: PixelDocument): PixelDocument {
   return {
     ...doc,
@@ -179,22 +228,26 @@ export function updatePixelDocument(
   const doc = docs[docId]
   if (!doc) return docs
   const next = { ...docs, [docId]: updater(draftPixelDocument(doc)) }
-  if (options?.sync === 'raf') schedulePixelDocumentGpuSync(next, docId)
-  else syncPixelDocumentGpu(next, docId)
+  if (options?.sync === 'raf') scheduleDocPreview(next, docId)
+  else syncDocPreviewGpu(next, docId)
   return next
 }
 
-/**
- * Clone the open document once so in-place stroke painting cannot mutate undo history.
- * Returns the same `docs` reference when already detached / missing.
- */
 export function detachPixelDocumentForEditing(
   docs: Record<string, PixelDocument>,
   docId: string
 ): Record<string, PixelDocument> {
   const doc = docs[docId]
   if (!doc) return docs
-  return { ...docs, [docId]: clonePixelDocument(doc) }
+  return {
+    ...docs,
+    [docId]: {
+      ...doc,
+      layers: doc.layers.map((l) =>
+        l.id === doc.activeLayerId ? clonePixelLayer(l) : { ...l }
+      ),
+    },
+  }
 }
 
 /**
@@ -217,343 +270,9 @@ export function publishPixelDocumentIdentity(
   }
 }
 
-function paintLiveOnActiveLayer(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  paint: (pixels: Uint8ClampedArray, doc: PixelDocument) => void
-): boolean {
-  const doc = docs[docId]
-  if (!doc) return false
-  const layer = getActiveLayer(doc)
-  if (!layer) return false
-  paint(layer.pixels, doc)
-  schedulePixelDocumentGpuSync(docs, docId)
-  return true
-}
-
-/** In-place pencil/eraser stamp — no document clone, no Zustand publish. */
-export function paintAtPixelLive(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  x: number,
-  y: number,
-  color: Rgba4,
-  brushSize: number,
-  tool: 'pencil' | 'eraser',
-  symH: boolean,
-  symV: boolean,
-  options?: { round?: boolean }
-): void {
-  const round = options?.round ?? true
-  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
-    const bytes =
-      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-    paintWithSymmetry(
-      pixels,
-      doc.width,
-      doc.height,
-      Math.floor(x),
-      Math.floor(y),
-      brushSize,
-      bytes,
-      symH,
-      symV,
-      round
-    )
-  })
-}
-
-/** In-place hard stroke segment — no document clone, no Zustand publish. */
-export function paintStrokeOnDocumentLive(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  points: { x: number; y: number }[],
-  color: Rgba4,
-  brushSize: number,
-  tool: 'pencil' | 'eraser',
-  pixelPerfect: boolean,
-  symH: boolean,
-  symV: boolean,
-  options?: { round?: boolean }
-): void {
-  if (points.length === 0) return
-  const round = options?.round ?? true
-  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
-    const bytes =
-      tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-    drawStrokeWithSymmetry(
-      pixels,
-      doc.width,
-      doc.height,
-      points.map((p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })),
-      brushSize,
-      bytes,
-      pixelPerfect,
-      symH,
-      symV,
-      round
-    )
-  })
-}
-
-/** In-place soft brush — no document clone, no Zustand publish. */
-export function paintSoftBrushStrokeOnDocumentLive(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  points: { x: number; y: number }[],
-  color: Rgba4,
-  params: SoftBrushParams,
-  symH: boolean,
-  symV: boolean,
-  options?: { erase?: boolean; restart?: boolean }
-): void {
-  if (points.length === 0) return
-  const erase = options?.erase ?? false
-  if (options?.restart) resetSoftBrushStroke()
-  const brushColor = rgbaToBytes(color) as [number, number, number, number]
-
-  paintLiveOnActiveLayer(docs, docId, (pixels, doc) => {
-    const stampMirrors =
-      symH || symV
-        ? (px: number, py: number) => {
-            for (const c of mirrorSoftBrushCoords(px, py, doc.width, doc.height, symH, symV)) {
-              if (Math.abs(c.x - px) < 1e-6 && Math.abs(c.y - py) < 1e-6) continue
-              paintSoftBrushDab(pixels, doc.width, doc.height, c.x, c.y, brushColor, params, erase)
-            }
-          }
-        : undefined
-
-    const first = points[0]!
-    if (points.length === 1 || options?.restart) {
-      beginSoftBrushStroke(
-        pixels,
-        doc.width,
-        doc.height,
-        first.x,
-        first.y,
-        brushColor,
-        params,
-        erase,
-        stampMirrors
-      )
-      for (let i = 1; i < points.length; i++) {
-        const p = points[i]!
-        continueSoftBrushStroke(
-          pixels,
-          doc.width,
-          doc.height,
-          p.x,
-          p.y,
-          brushColor,
-          params,
-          erase,
-          stampMirrors
-        )
-      }
-    } else {
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i]!
-        continueSoftBrushStroke(
-          pixels,
-          doc.width,
-          doc.height,
-          p.x,
-          p.y,
-          brushColor,
-          params,
-          erase,
-          stampMirrors
-        )
-      }
-    }
-  })
-}
-
 export function releasePixelDocumentResources(docId: string): void {
   clearPixelCompositeCache(docId)
 }
-
-export function paintAtPixel(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  x: number,
-  y: number,
-  color: Rgba4,
-  brushSize: number,
-  tool: 'pencil' | 'eraser',
-  symH: boolean,
-  symV: boolean,
-  options?: { sync?: 'immediate' | 'raf'; round?: boolean }
-): Record<string, PixelDocument> {
-  const round = options?.round ?? true
-  return updatePixelDocument(
-    docs,
-    docId,
-    (doc) => {
-      const layer = getActiveLayer(doc)
-      if (!layer) return doc
-      const px = Math.floor(x)
-      const py = Math.floor(y)
-      const bytes =
-        tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-      const pixels = clonePixelLayer(layer).pixels
-      paintWithSymmetry(pixels, doc.width, doc.height, px, py, brushSize, bytes, symH, symV, round)
-      return {
-        ...doc,
-        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
-      }
-    },
-    options
-  )
-}
-
-export function paintStrokeOnDocument(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  points: { x: number; y: number }[],
-  color: Rgba4,
-  brushSize: number,
-  tool: 'pencil' | 'eraser',
-  pixelPerfect: boolean,
-  symH: boolean,
-  symV: boolean,
-  options?: { sync?: 'immediate' | 'raf'; round?: boolean }
-): Record<string, PixelDocument> {
-  if (points.length === 0) return docs
-  const round = options?.round ?? true
-  return updatePixelDocument(
-    docs,
-    docId,
-    (doc) => {
-      const layer = getActiveLayer(doc)
-      if (!layer) return doc
-      const bytes =
-        tool === 'eraser' ? ([0, 0, 0, 0] as [number, number, number, number]) : rgbaToBytes(color)
-      const pixels = clonePixelLayer(layer).pixels
-      drawStrokeWithSymmetry(
-        pixels,
-        doc.width,
-        doc.height,
-        points.map((p) => ({ x: Math.floor(p.x), y: Math.floor(p.y) })),
-        brushSize,
-        bytes,
-        pixelPerfect,
-        symH,
-        symV,
-        round
-      )
-      return {
-        ...doc,
-        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
-      }
-    },
-    options
-  )
-}
-
-function mirrorSoftBrushCoords(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  symH: boolean,
-  symV: boolean
-): { x: number; y: number }[] {
-  const coords = [{ x, y }]
-  if (symH) coords.push({ x: width - 1 - x, y })
-  if (symV) coords.push({ x, y: height - 1 - y })
-  if (symH && symV) coords.push({ x: width - 1 - x, y: height - 1 - y })
-  return coords
-}
-
-/** Adobe-style soft Paint Brush stroke (hardness / opacity / flow / spacing). */
-export function paintSoftBrushStrokeOnDocument(
-  docs: Record<string, PixelDocument>,
-  docId: string,
-  points: { x: number; y: number }[],
-  color: Rgba4,
-  params: SoftBrushParams,
-  symH: boolean,
-  symV: boolean,
-  options?: { sync?: 'immediate' | 'raf'; erase?: boolean; restart?: boolean }
-): Record<string, PixelDocument> {
-  if (points.length === 0) return docs
-  const erase = options?.erase ?? false
-  if (options?.restart) resetSoftBrushStroke()
-  const brushColor = rgbaToBytes(color) as [number, number, number, number]
-
-  return updatePixelDocument(
-    docs,
-    docId,
-    (doc) => {
-      const layer = getActiveLayer(doc)
-      if (!layer) return doc
-      const pixels = clonePixelLayer(layer).pixels
-      const stampMirrors =
-        symH || symV
-          ? (px: number, py: number) => {
-              for (const c of mirrorSoftBrushCoords(px, py, doc.width, doc.height, symH, symV)) {
-                if (Math.abs(c.x - px) < 1e-6 && Math.abs(c.y - py) < 1e-6) continue
-                paintSoftBrushDab(pixels, doc.width, doc.height, c.x, c.y, brushColor, params, erase)
-              }
-            }
-          : undefined
-
-      const first = points[0]!
-      if (points.length === 1 || options?.restart) {
-        beginSoftBrushStroke(
-          pixels,
-          doc.width,
-          doc.height,
-          first.x,
-          first.y,
-          brushColor,
-          params,
-          erase,
-          stampMirrors
-        )
-        for (let i = 1; i < points.length; i++) {
-          const p = points[i]!
-          continueSoftBrushStroke(
-            pixels,
-            doc.width,
-            doc.height,
-            p.x,
-            p.y,
-            brushColor,
-            params,
-            erase,
-            stampMirrors
-          )
-        }
-      } else {
-        for (let i = 0; i < points.length; i++) {
-          const p = points[i]!
-          continueSoftBrushStroke(
-            pixels,
-            doc.width,
-            doc.height,
-            p.x,
-            p.y,
-            brushColor,
-            params,
-            erase,
-            stampMirrors
-          )
-        }
-      }
-
-      return {
-        ...doc,
-        layers: doc.layers.map((l) => (l.id === layer.id ? { ...l, pixels } : l)),
-      }
-    },
-    options
-  )
-}
-
-export { resetSoftBrushStroke }
-
 export function applyShapeToDocument(
   docs: Record<string, PixelDocument>,
   docId: string,
@@ -800,7 +519,7 @@ export function registerPixelDocument(
   doc: PixelDocument
 ): Record<string, PixelDocument> {
   const next = { ...docs, [doc.id]: doc }
-  syncPixelDocumentGpu(next, doc.id)
+  syncDocPreviewGpu(next, doc.id)
   return next
 }
 

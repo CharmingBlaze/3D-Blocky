@@ -172,11 +172,14 @@ function ObjectNodeInner({
   const draggingRef = useRef(false)
   const slotIndex = useViewportSlotIndex()
   const isDrawing = useAppStore((s) => s.isDrawing)
+  const pixelPaintFocus = useAppStore(
+    (s) => isSelected && s.pixelEditorOpen
+  )
 
   const tr = ensureTransform(object)
   const pivot = getObjectPivot(object)
   const showObjectGizmo =
-    isGizmoTarget && isSelected && selectionMode === 'object'
+    isGizmoTarget && isSelected && selectionMode === 'object' && !pixelPaintFocus
 
   useEffect(() => {
     const g = rootRef.current
@@ -201,18 +204,23 @@ function ObjectNodeInner({
             object={object}
             isSelected={isSelected}
             isPrimary={isPrimary}
-            objectSelectionOutline={isSelected && selectionMode === 'object' && !isDrawing}
+            objectSelectionOutline={
+              pixelPaintFocus || (isSelected && selectionMode === 'object' && !isDrawing)
+            }
+            paintFocus={pixelPaintFocus}
             facetExaggeration={facetExaggeration}
             showDensityHeatmap={showDensityHeatmap}
             displayMode={viewportDisplayMode}
             viewportXRay={viewportXRay}
           />
-          <ObjectMeshEditOverlay
-            object={object}
-            selectionMode={selectionMode}
-            isSelected={isSelected}
-            showNormals={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].showNormals}
-          />
+          {!pixelPaintFocus && (
+            <ObjectMeshEditOverlay
+              object={object}
+              selectionMode={selectionMode}
+              isSelected={isSelected}
+              showNormals={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].showNormals}
+            />
+          )}
         </group>
       </group>
 

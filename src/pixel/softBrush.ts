@@ -26,10 +26,26 @@ type StrokeState = {
   carry: number
 }
 
+type StampMask = {
+  /** Half-extent in pixels from dab center (bbox is 2*extent+1). */
+  extent: number
+  /** Row-major coverage, length (2*extent+1)^2. */
+  coverage: Float32Array
+}
+
 let strokeState: StrokeState | null = null
+
+/** Reused stamp masks keyed by size/hardness/shape/subpixel quadrant. */
+const stampMaskCache = new Map<string, StampMask>()
+const STAMP_CACHE_MAX = 64
 
 export function resetSoftBrushStroke(): void {
   strokeState = null
+}
+
+/** Test helper — drop cached stamp masks. */
+export function clearSoftBrushStampCache(): void {
+  stampMaskCache.clear()
 }
 
 function clamp01(n: number): number {
@@ -64,9 +80,12 @@ export function softBrushCoverage(
     if (t <= hard) return 1
     return 1 - smoothstep(hard, 1, t)
   }
-  const t = Math.hypot(dx, dy) / radius
-  if (t >= 1) return 0
-  if (t <= hard) return 1
+  const distSq = dx * dx + dy * dy
+  const radiusSq = radius * radius
+  if (distSq >= radiusSq) return 0
+  const hardR = radius * hard
+  if (distSq <= hardR * hardR) return 1
+  const t = Math.sqrt(distSq) / radius
   return 1 - smoothstep(hard, 1, t)
 }
 
@@ -113,6 +132,62 @@ function eraseWithCoverage(
   }
 }
 
+function stampCacheKey(
+  diameter: number,
+  hardness: number,
+  shape: 'round' | 'square',
+  fracX: number,
+  fracY: number
+): string {
+  // Quantize size/hardness and dab subpixel so stamps reuse across a stroke.
+  const sizeQ = Math.round(diameter * 4)
+  const hardQ = Math.round(clamp01(hardness) * 50)
+  const fx = Math.round(fracX * 4)
+  const fy = Math.round(fracY * 4)
+  return `${sizeQ}:${hardQ}:${shape}:${fx}:${fy}`
+}
+
+function getStampMask(
+  diameter: number,
+  hardness: number,
+  shape: 'round' | 'square',
+  fracX: number,
+  fracY: number
+): StampMask {
+  const qFracX = Math.round(fracX * 4) / 4
+  const qFracY = Math.round(fracY * 4) / 4
+  const key = stampCacheKey(diameter, hardness, shape, qFracX, qFracY)
+  const cached = stampMaskCache.get(key)
+  if (cached) return cached
+
+  const radius = diameter / 2
+  const extent = Math.max(1, Math.ceil(radius + 1))
+  const side = extent * 2 + 1
+  const coverage = new Float32Array(side * side)
+  // Stamp assumes dab center at (qFracX, qFracY) within its pixel; samples at pixel centers.
+  for (let oy = -extent; oy <= extent; oy++) {
+    for (let ox = -extent; ox <= extent; ox++) {
+      const dx = ox + 0.5 - qFracX
+      const dy = oy + 0.5 - qFracY
+      coverage[(oy + extent) * side + (ox + extent)] = softBrushCoverage(
+        dx,
+        dy,
+        radius,
+        hardness,
+        shape
+      )
+    }
+  }
+
+  const mask: StampMask = { extent, coverage }
+  if (stampMaskCache.size >= STAMP_CACHE_MAX) {
+    const first = stampMaskCache.keys().next().value
+    if (first !== undefined) stampMaskCache.delete(first)
+  }
+  stampMaskCache.set(key, mask)
+  return mask
+}
+
 /** Stamp one soft dab at a floating-point center. */
 export function paintSoftBrushDab(
   pixels: Uint8ClampedArray,
@@ -125,32 +200,33 @@ export function paintSoftBrushDab(
   erase = false
 ): void {
   const diameter = Math.max(1, params.size)
-  const radius = diameter / 2
-  const hardness = clamp01(params.hardness)
   const opacity = clamp01(params.opacity)
   const flow = clamp01(params.flow)
   const strength = opacity * flow
   if (strength <= 0) return
 
-  const minX = Math.max(0, Math.floor(cx - radius - 1))
-  const maxX = Math.min(width - 1, Math.ceil(cx + radius + 1))
-  const minY = Math.max(0, Math.floor(cy - radius - 1))
-  const maxY = Math.min(height - 1, Math.ceil(cy + radius + 1))
+  const baseX = Math.floor(cx)
+  const baseY = Math.floor(cy)
+  const fracX = cx - baseX
+  const fracY = cy - baseY
+  const mask = getStampMask(diameter, params.hardness, params.shape, fracX, fracY)
+  const { extent, coverage } = mask
+  const side = extent * 2 + 1
+
+  const minX = Math.max(0, baseX - extent)
+  const maxX = Math.min(width - 1, baseX + extent)
+  const minY = Math.max(0, baseY - extent)
+  const maxY = Math.min(height - 1, baseY + extent)
 
   for (let y = minY; y <= maxY; y++) {
+    const my = y - baseY + extent
+    const row = my * side
     for (let x = minX; x <= maxX; x++) {
-      // Sample at pixel center for smoother AA.
-      const coverage = softBrushCoverage(
-        x + 0.5 - cx,
-        y + 0.5 - cy,
-        radius,
-        hardness,
-        params.shape
-      )
-      if (coverage <= 0) continue
+      const cov = coverage[row + (x - baseX + extent)]!
+      if (cov <= 0) continue
       const i = (y * width + x) * 4
       if (erase) {
-        eraseWithCoverage(pixels, i, coverage * strength)
+        eraseWithCoverage(pixels, i, cov * strength)
       } else {
         blendSourceOver(
           pixels,
@@ -158,7 +234,7 @@ export function paintSoftBrushDab(
           color[0],
           color[1],
           color[2],
-          color[3] * coverage * strength
+          color[3] * cov * strength
         )
       }
     }

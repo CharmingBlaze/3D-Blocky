@@ -2,8 +2,8 @@ import * as THREE from 'three'
 
 /**
  * Blend texture RGB over vertex/face color by texel alpha — opaque surface, WYSIWYG paint preview.
- * Note: Three.js r173+ removed `#include <map_fragment>`; prefer standard map + no vertex colors on
- * textured meshes (see MeshRenderer) instead of this patch.
+ * Transparent pixels reveal the object's existing color instead of deleting the visible surface.
+ * Three.js r173 still exposes `#include <map_fragment>` in built-in mesh shaders.
  */
 export function patchPixelTextureBlendShader(shader: THREE.WebGLProgramParametersWithUniforms): void {
   if (!shader.fragmentShader.includes('#include <map_fragment>')) return
@@ -22,6 +22,7 @@ export function patchPixelTextureBlendShader(shader: THREE.WebGLProgramParameter
 	#endif
 
 	diffuseColor.rgb = mix( diffuseColor.rgb, sampledDiffuseColor.rgb, sampledDiffuseColor.a );
+	diffuseColor.a = mix( diffuseColor.a, 1.0, sampledDiffuseColor.a );
 
 #endif
 `

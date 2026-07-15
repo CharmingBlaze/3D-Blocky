@@ -325,6 +325,7 @@ export function sceneObjectsContentEqual(a: SceneObject, b: SceneObject): boolea
     a.facetExaggeration !== b.facetExaggeration ||
     a.uvMappingMode !== b.uvMappingMode ||
     a.uvAutoPacked !== b.uvAutoPacked ||
+    a.uvLayoutVersion !== b.uvLayoutVersion ||
     a.subdEnabled !== b.subdEnabled ||
     a.subdLevels !== b.subdLevels
   ) {

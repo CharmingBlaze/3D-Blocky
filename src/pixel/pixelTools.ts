@@ -52,7 +52,12 @@ export function getPixel(
   return [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
+const brushOffsetCache = new Map<string, { dx: number; dy: number }[]>()
+
 function brushOffsets(size: number, round: boolean): { dx: number; dy: number }[] {
+  const key = `${Math.max(1, Math.floor(size))}:${round ? 1 : 0}`
+  const cached = brushOffsetCache.get(key)
+  if (cached) return cached
   const r = Math.max(0, Math.floor(size / 2))
   const out: { dx: number; dy: number }[] = []
   for (let dy = -r; dy <= r; dy++) {
@@ -61,6 +66,7 @@ function brushOffsets(size: number, round: boolean): { dx: number; dy: number }[
       out.push({ dx, dy })
     }
   }
+  brushOffsetCache.set(key, out)
   return out
 }
 
@@ -74,8 +80,16 @@ export function paintBrush(
   color: [number, number, number, number],
   round = true
 ): void {
+  const [cr, cg, cb, ca] = color
   for (const { dx, dy } of brushOffsets(size, round)) {
-    setPixel(pixels, width, height, cx + dx, cy + dy, color)
+    const x = cx + dx
+    const y = cy + dy
+    if (!inBounds(x, y, width, height)) continue
+    const i = idx(x, y, width)
+    pixels[i] = cr
+    pixels[i + 1] = cg
+    pixels[i + 2] = cb
+    pixels[i + 3] = ca
   }
 }
 
@@ -149,12 +163,16 @@ export function drawStrokeOnLayer(
   const filtered = pixelPerfect ? pixelPerfectFilter(points) : points
   if (filtered.length === 0) return
   if (filtered.length === 1) {
-    paintBrush(pixels, width, height, filtered[0].x, filtered[0].y, size, color, round)
+    paintBrush(pixels, width, height, filtered[0]!.x, filtered[0]!.y, size, color, round)
     return
   }
+  // Large hard brushes: stamp with spacing so we do not redo O(size²) work every texel.
+  const stampStep = size <= 1 ? 1 : Math.max(1, Math.floor(size * 0.35))
   for (let i = 1; i < filtered.length; i++) {
-    const seg = bresenhamLine(filtered[i - 1].x, filtered[i - 1].y, filtered[i].x, filtered[i].y)
-    for (const p of seg) {
+    const seg = bresenhamLine(filtered[i - 1]!.x, filtered[i - 1]!.y, filtered[i]!.x, filtered[i]!.y)
+    for (let si = 0; si < seg.length; si++) {
+      if (si !== 0 && si !== seg.length - 1 && si % stampStep !== 0) continue
+      const p = seg[si]!
       paintBrush(pixels, width, height, p.x, p.y, size, color, round)
     }
   }
@@ -362,12 +380,17 @@ export function drawStrokeWithSymmetry(
     return
   }
   const filtered = pixelPerfect ? pixelPerfectFilter(points) : points
-  for (const p of filtered) {
-    paintWithSymmetry(pixels, width, height, p.x, p.y, size, color, symH, symV, round)
+  if (filtered.length === 0) return
+  if (filtered.length === 1) {
+    paintWithSymmetry(pixels, width, height, filtered[0]!.x, filtered[0]!.y, size, color, symH, symV, round)
+    return
   }
+  const stampStep = size <= 1 ? 1 : Math.max(1, Math.floor(size * 0.35))
   for (let i = 1; i < filtered.length; i++) {
-    const seg = bresenhamLine(filtered[i - 1].x, filtered[i - 1].y, filtered[i].x, filtered[i].y)
-    for (const p of seg) {
+    const seg = bresenhamLine(filtered[i - 1]!.x, filtered[i - 1]!.y, filtered[i]!.x, filtered[i]!.y)
+    for (let si = 0; si < seg.length; si++) {
+      if (si !== 0 && si !== seg.length - 1 && si % stampStep !== 0) continue
+      const p = seg[si]!
       paintWithSymmetry(pixels, width, height, p.x, p.y, size, color, symH, symV, round)
     }
   }

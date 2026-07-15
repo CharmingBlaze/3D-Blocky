@@ -65,6 +65,7 @@ type ProjectStore = {
   selectionObjectIds: string[]
   meshSelection: MeshComponentSelection | null
   pixelTextureRevision: number
+  pixelDocRevisions: Record<string, number>
   hairTextureId: string | null
   hairUvTransform: HairUvTransform
   hairTextureSettings: HairTextureSettings
@@ -172,7 +173,14 @@ export function createProjectIoSlice<T extends object>(
       deps.reconcileBlobUrls()
       setPartial((s) => {
         const st = s as unknown as ProjectStore
-        return { pixelTextureRevision: st.pixelTextureRevision + 1 }
+        const pixelDocRevisions: Record<string, number> = { ...st.pixelDocRevisions }
+        for (const id of Object.keys(st.pixelDocuments)) {
+          pixelDocRevisions[id] = (pixelDocRevisions[id] ?? 0) + 1
+        }
+        return {
+          pixelTextureRevision: st.pixelTextureRevision + 1,
+          pixelDocRevisions,
+        }
       })
     },
 

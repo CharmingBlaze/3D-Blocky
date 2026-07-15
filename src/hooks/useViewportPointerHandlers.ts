@@ -32,7 +32,9 @@ import {
   estimateTexelScreenSize,
   interpolateScreenPaintSamples,
   pickMeshSurfaceUv,
+  pickObjectSurfaceUv,
   uvToPixelCoords,
+  type MeshPickHint,
 } from '../pixel/uvPaint'
 import { resolveEffectiveMaterial } from '../material/materials'
 import {
@@ -121,11 +123,8 @@ export function useViewportPointerHandlers({
     objectId: string
     lastX: number
     lastY: number
+    hint: MeshPickHint | null
   } | null>(null)
-  const pixelPaintPendingRef = useRef<{ docId: string; points: { x: number; y: number }[] } | null>(
-    null
-  )
-  const pixelPaintFlushRafRef = useRef<number | null>(null)
   const pixelShapeRef = useRef<{
     docId: string
     objectId: string
@@ -790,16 +789,23 @@ export function useViewportPointerHandlers({
         rect &&
         camera
       ) {
-        let hit = pickMeshSurfaceUv(e.clientX, e.clientY, rect, camera, objects, selectedObjectId)
-        if (!hit && selectedObjectId) {
-          hit = pickMeshSurfaceUv(e.clientX, e.clientY, rect, camera, objects, null)
-        }
+        const selectedPaintObject = selectedObjectId
+          ? objects.find((object) => object.id === selectedObjectId)
+          : null
+        let hit = selectedPaintObject
+          ? pickObjectSurfaceUv(e.clientX, e.clientY, rect, camera, selectedPaintObject)
+          : pickMeshSurfaceUv(e.clientX, e.clientY, rect, camera, objects, null)
         if (hit) {
           const hitObj = objects.find((o) => o.id === hit.objectId)
           const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
           const docId = mat?.textureId ?? hitObj?.id
           const doc = docId ? store.pixelDocuments[docId] : undefined
-          if (mat?.mode === 'texture' && docId && doc && store.pixelEditorDocId && docId === store.pixelEditorDocId) {
+          if (mat?.mode === 'texture' && docId && doc) {
+            // Clicking a different textured selected object makes its texture the
+            // active document instead of silently ignoring the stroke.
+            if (store.pixelEditorDocId !== docId) {
+              store.openPixelEditor({ linkObjectId: hit.objectId, paintOnModel: true })
+            }
             e.currentTarget.setPointerCapture(e.pointerId)
             e.preventDefault()
             e.stopPropagation()
@@ -836,6 +842,11 @@ export function useViewportPointerHandlers({
               objectId: hit.objectId,
               lastX: e.clientX,
               lastY: e.clientY,
+              hint: {
+                objectId: hit.objectId,
+                faceIndex: hit.faceIndex,
+                triIndex: hit.triIndex,
+              },
             }
             return
           }
@@ -1378,7 +1389,7 @@ export function useViewportPointerHandlers({
         return
       }
 
-      if (pixelPaintRef.current && (e.buttons & 1) === 1) {
+      if (pixelPaintRef.current) {
         const rect = containerRef.current?.getBoundingClientRect()
         const camera = cameraRef.current
         const paint = pixelPaintRef.current
@@ -1390,10 +1401,20 @@ export function useViewportPointerHandlers({
             const pixelTool = store.pixelEditorTool
             if (pixelTool !== 'pencil' && pixelTool !== 'paintBrush' && pixelTool !== 'eraser') return
 
-            const anchor = pickMeshSurfaceUv(paint.lastX, paint.lastY, rect, camera, objects, paint.objectId)
-            const step = anchor
+            const brushSize = Math.max(1, store.pixelEditorBrushSize)
+            const anchor = pickObjectSurfaceUv(
+              paint.lastX,
+              paint.lastY,
+              rect,
+              camera,
+              obj,
+              paint.hint
+            )
+            const texelStep = anchor
               ? estimateTexelScreenSize(anchor, obj, camera, rect, doc.width, doc.height)
               : 4
+            // Step by at least ~brush spacing so we do not raycast every screen pixel.
+            const step = Math.max(texelStep, brushSize * 0.35, 2)
             const samples = interpolateScreenPaintSamples(
               paint.lastX,
               paint.lastY,
@@ -1402,39 +1423,46 @@ export function useViewportPointerHandlers({
               step
             )
             const points: { x: number; y: number }[] = []
-            for (const s of samples) {
-              const h = pickMeshSurfaceUv(s.x, s.y, rect, camera, objects, paint.objectId)
-              if (!h) continue
-              const hitObj = objects.find((o) => o.id === h.objectId)
-              const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
-              const docId = mat?.textureId ?? hitObj?.id
-              if (docId !== paint.docId) continue
+            let hint = paint.hint
+            if (anchor) {
+              points.push(uvToPixelCoords(anchor.uv, doc.width, doc.height))
+              hint = {
+                objectId: anchor.objectId,
+                faceIndex: anchor.faceIndex,
+                triIndex: anchor.triIndex,
+              }
+            }
+            // Skip sample 0 — already covered by the warm-started anchor pick.
+            for (let si = anchor ? 1 : 0; si < samples.length; si++) {
+              const s = samples[si]!
+              const h = pickObjectSurfaceUv(s.x, s.y, rect, camera, obj, hint)
+              if (!h || h.objectId !== paint.objectId) continue
               points.push(uvToPixelCoords(h.uv, doc.width, doc.height))
+              hint = {
+                objectId: h.objectId,
+                faceIndex: h.faceIndex,
+                triIndex: h.triIndex,
+              }
             }
             if (points.length > 0) {
-              const pending = pixelPaintPendingRef.current
-              if (pending && pending.docId === paint.docId) {
-                // Keep stroke continuous: drop duplicate of last queued point if it matches.
-                const last = pending.points[pending.points.length - 1]
-                const startIdx =
-                  last && last.x === points[0]!.x && last.y === points[0]!.y ? 1 : 0
-                for (let i = startIdx; i < points.length; i++) pending.points.push(points[i]!)
+              // Commit texels immediately so both the Pixel Editor canvas and the
+              // shared texture buffer change during this pointer event. GPU work
+              // remains safely coalesced by pixelPreview.
+              if (points.length >= 2) {
+                store.paintDocumentStroke(paint.docId, points, { syncGpu: true })
               } else {
-                pixelPaintPendingRef.current = { docId: paint.docId, points: [...points] }
-              }
-              if (pixelPaintFlushRafRef.current == null) {
-                pixelPaintFlushRafRef.current = requestAnimationFrame(() => {
-                  pixelPaintFlushRafRef.current = null
-                  const batch = pixelPaintPendingRef.current
-                  pixelPaintPendingRef.current = null
-                  if (!batch || batch.points.length === 0) return
-                  const s = useAppStore.getState()
-                  if (batch.points.length >= 2) s.paintOnModelStroke(batch.docId, batch.points)
-                  else s.paintOnModelPixel(batch.docId, batch.points[0]!.x, batch.points[0]!.y)
+                store.paintDocumentStroke(paint.docId, points, {
+                  syncGpu: true,
+                  restart: true,
                 })
               }
             }
-            pixelPaintRef.current = { ...paint, lastX: e.clientX, lastY: e.clientY }
+            pixelPaintRef.current = {
+              ...paint,
+              lastX: e.clientX,
+              lastY: e.clientY,
+              hint,
+            }
           }
         }
         return
@@ -1766,16 +1794,6 @@ export function useViewportPointerHandlers({
         return
       }
       if (pixelPaintRef.current) {
-        if (pixelPaintFlushRafRef.current != null) {
-          cancelAnimationFrame(pixelPaintFlushRafRef.current)
-          pixelPaintFlushRafRef.current = null
-        }
-        const batch = pixelPaintPendingRef.current
-        pixelPaintPendingRef.current = null
-        if (batch && batch.points.length > 0) {
-          if (batch.points.length >= 2) store.paintOnModelStroke(batch.docId, batch.points)
-          else store.paintOnModelPixel(batch.docId, batch.points[0]!.x, batch.points[0]!.y)
-        }
         store.commitPixelEdit()
         pixelPaintRef.current = null
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -2013,6 +2031,14 @@ export function useViewportPointerHandlers({
 
   const handlePointerLeave = useCallback(
     (e: React.PointerEvent) => {
+      // A captured paint gesture continues to receive pointer events outside the
+      // pane. Do not turn a normal boundary crossing into an early stroke end.
+      if (
+        (pixelPaintRef.current || pixelShapeRef.current) &&
+        e.currentTarget.hasPointerCapture(e.pointerId)
+      ) {
+        return
+      }
       if (perspectiveHeightDragRef.current) {
         perspectiveHeightDragRef.current = null
         endPointerInteraction()

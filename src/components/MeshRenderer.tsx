@@ -1,6 +1,5 @@
 import { useMemo, useRef, useEffect, memo } from 'react'
 import { useThree } from '@react-three/fiber'
-import { Outlines } from '@react-three/drei'
 import * as THREE from 'three'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { computeVertexDensity } from '../sculpt/sculptTools'
@@ -13,7 +12,13 @@ import { useAppStore } from '../store/appStore'
 import { VIEWPORT_XRAY_OPACITY } from '../store/viewportSlice'
 import { ensureObjectUVs } from '../uv/uvObject'
 import { resolveSubdivisionPreview } from '../mesh/subdivisionSurface'
-import { useLoadedTexture, usePixelDocumentTexture, pixelDocumentTextureHasAlpha, subscribePixelDocumentTexture } from '../rendering/textureCache'
+import {
+  useLoadedTexture,
+  usePixelDocumentTexture,
+  getPixelDocumentTexture,
+  pixelDocumentTextureHasAlpha,
+  subscribePixelDocumentTexture,
+} from '../rendering/textureCache'
 import {
   patchPixelTextureBlendShader,
   PIXEL_TEXTURE_BLEND_CACHE_KEY,
@@ -34,6 +39,8 @@ interface MeshRendererProps {
   isSelected: boolean
   isPrimary?: boolean
   objectSelectionOutline?: boolean
+  /** Pixel-paint focus: translucent surface, topology, and paint preview. */
+  paintFocus?: boolean
   facetExaggeration: number
   showDensityHeatmap: boolean
   displayMode: ViewportDisplayMode
@@ -106,6 +113,43 @@ export function buildViewportEdgeOutlineGeometry(object: SceneObject): THREE.Buf
   }
   scheduleViewportEdgeOutlineCacheClear()
   return template.clone()
+}
+
+/** Constant-cost 12-edge selection cage fitted to the object's local bounds. */
+export function buildObjectSelectionBoundsGeometry(object: SceneObject): THREE.BufferGeometry {
+  const box = new THREE.Box3()
+  for (const p of object.positions) box.expandByPoint(new THREE.Vector3(p.x, p.y, p.z))
+  if (box.isEmpty()) return new THREE.BufferGeometry()
+
+  const size = box.getSize(new THREE.Vector3())
+  const maxDimension = Math.max(size.x, size.y, size.z, 1)
+  const pad = maxDimension * 0.008
+  box.expandByScalar(pad)
+
+  const { min, max } = box
+  const corners: [number, number, number][] = [
+    [min.x, min.y, min.z], [max.x, min.y, min.z],
+    [max.x, max.y, min.z], [min.x, max.y, min.z],
+    [min.x, min.y, max.z], [max.x, min.y, max.z],
+    [max.x, max.y, max.z], [min.x, max.y, max.z],
+  ]
+  const edges: [number, number][] = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7],
+  ]
+  const positions = new Float32Array(edges.length * 6)
+  let offset = 0
+  for (const [a, b] of edges) {
+    const pa = corners[a]!
+    const pb = corners[b]!
+    positions.set(pa, offset)
+    positions.set(pb, offset + 3)
+    offset += 6
+  }
+  const result = new THREE.BufferGeometry()
+  result.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  return result
 }
 
 function buildViewportMeshGeometryUncached(
@@ -187,6 +231,14 @@ export function buildViewportMeshGeometry(
   }
   scheduleViewportGeometryCacheClear()
   return template.clone()
+}
+
+/** Pixel documents need both UVs and face colors: alpha paints over that color base. */
+export function shouldOmitViewportVertexColors(
+  useTexture: boolean,
+  usePixelTexture: boolean
+): boolean {
+  return useTexture && !usePixelTexture
 }
 
 function MeshMaterial({
@@ -288,6 +340,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   isSelected: _isSelected,
   isPrimary = false,
   objectSelectionOutline = false,
+  paintFocus = false,
   facetExaggeration,
   showDensityHeatmap,
   displayMode,
@@ -336,7 +389,14 @@ export const MeshRenderer = memo(function MeshRenderer({
     config.supportsTexture &&
     Boolean(hasPixelDoc || textureUrl)
   const usePixelTexture = Boolean(hasPixelDoc && useTexture)
-  const meshSide = materialSettings.doubleSided ? THREE.DoubleSide : THREE.FrontSide
+  const usePixelTextureOverlay = Boolean(
+    usePixelTexture && materialSettings.textureCanvasMode !== 'replace'
+  )
+  // Paint focus is a viewport-only aid: every quad camera must be able to see
+  // and paint the selected surface, even when that view faces its back side.
+  // This does not modify the saved material's double-sided setting.
+  const meshSide =
+    paintFocus || materialSettings.doubleSided ? THREE.DoubleSide : THREE.FrontSide
   const meshOpacity = materialSettings.opacity
   const xrayOpacity = viewportXRay
     ? Math.min(meshOpacity, meshOpacity * VIEWPORT_XRAY_OPACITY)
@@ -368,14 +428,32 @@ export const MeshRenderer = memo(function MeshRenderer({
         (materialSettings.textureShadowDetail ?? 0) > 0 ||
         materialSettings.textureGradient)
   )
-  // Rebuild material map clone on stroke commit (not every dab). Live dabs use
-  // subscribePixelDocumentTexture → needsUpdate; commit revision forces a clean reload.
-  const pixelTextureRevision = useAppStore((s) =>
-    hasPixelDoc ? s.pixelTextureRevision : 0
+  // Rebuild processed material maps only when THIS document commits.
+  // Unprocessed maps share DataTexture image data — live dabs use subscribePixelDocumentTexture.
+  const pixelDocRevision = useAppStore((s) =>
+    hasPixelDoc && texId ? (s.pixelDocRevisions[texId] ?? 0) : 0
   )
 
   const sampledTexture = useMemo(() => {
     if (!texture) return null
+    const wrap = materialSettings.textureWrap ?? 'clamp'
+    const repeat = materialSettings.textureRepeat ?? [1, 1]
+    const offset = materialSettings.textureOffset ?? [0, 0]
+    const rotationDeg = materialSettings.textureRotation ?? 0
+    const hasCustomUv =
+      wrap !== 'clamp' ||
+      Math.abs(repeat[0] - 1) > 1e-6 ||
+      Math.abs(repeat[1] - 1) > 1e-6 ||
+      Math.abs(offset[0]) > 1e-6 ||
+      Math.abs(offset[1]) > 1e-6 ||
+      Math.abs(rotationDeg) > 1e-6
+
+    // Live pixel docs with default UV transform: use the shared DataTexture directly so
+    // paint uploads do not force a second full GPU upload via texture.clone().
+    if (!needsPixelProcessing && hasPixelDoc && !hasCustomUv) {
+      return texture
+    }
+
     let clone: THREE.Texture
     if (needsPixelProcessing && pixelDocSize && texId) {
       const cached = getPixelCompositeCache(texId)
@@ -439,25 +517,24 @@ export const MeshRenderer = memo(function MeshRenderer({
         clone.generateMipmaps = false
       }
     }
-    const wrap = materialSettings.textureWrap ?? 'clamp'
     clone.wrapS = clone.wrapT =
       wrap === 'repeat'
         ? THREE.RepeatWrapping
         : wrap === 'mirror'
           ? THREE.MirroredRepeatWrapping
           : THREE.ClampToEdgeWrapping
-    const repeat = materialSettings.textureRepeat ?? [1, 1]
-    const offset = materialSettings.textureOffset ?? [0, 0]
     clone.repeat.set(Math.max(0.01, repeat[0]), Math.max(0.01, repeat[1]))
     clone.offset.set(offset[0], offset[1])
     clone.center.set(0.5, 0.5)
-    clone.rotation = ((materialSettings.textureRotation ?? 0) * Math.PI) / 180
+    clone.rotation = (rotationDeg * Math.PI) / 180
     clone.needsUpdate = true
     return clone
   }, [
     texture,
     needsPixelProcessing,
-    pixelTextureRevision,
+    hasPixelDoc,
+    // Only processed maps need a rebuild on commit; unprocessed share live GPU texels.
+    needsPixelProcessing ? pixelDocRevision : 0,
     pixelDocSize?.width,
     pixelDocSize?.height,
     texId,
@@ -473,9 +550,17 @@ export const MeshRenderer = memo(function MeshRenderer({
 
   const sampledTextureRef = useRef(sampledTexture)
   sampledTextureRef.current = sampledTexture
-  useEffect(() => () => sampledTexture?.dispose(), [sampledTexture])
+  useEffect(() => {
+    return () => {
+      if (!sampledTexture) return
+      // Shared pixel-doc cache textures must not be disposed by mesh unmount.
+      if (texId && sampledTexture === getPixelDocumentTexture(texId)) return
+      sampledTexture.dispose()
+    }
+  }, [sampledTexture, texId])
 
-  // Live paint: shared DataTexture image data updates in place — mark the material map dirty.
+  // Live paint: shared DataTexture is already uploaded by textureCache.
+  // Clones that share image.data still need needsUpdate so their GPU copy refreshes.
   useEffect(() => {
     if (!texId || !usePixelTexture) return
     return subscribePixelDocumentTexture(texId, () => {
@@ -483,6 +568,11 @@ export const MeshRenderer = memo(function MeshRenderer({
       if (!map) return
       if (needsPixelProcessing) {
         // Processed maps own a separate buffer — rebuild on next commit/revision.
+        return
+      }
+      const shared = getPixelDocumentTexture(texId)
+      if (map === shared) {
+        invalidate()
         return
       }
       map.needsUpdate = true
@@ -510,7 +600,7 @@ export const MeshRenderer = memo(function MeshRenderer({
       flatShading,
       facetExaggeration,
       showDensityHeatmap,
-      useTexture
+      shouldOmitViewportVertexColors(useTexture, usePixelTextureOverlay)
     )
     return geo
   }, [
@@ -529,6 +619,7 @@ export const MeshRenderer = memo(function MeshRenderer({
     showDensityHeatmap,
     useTexture,
     usePixelTexture,
+    usePixelTextureOverlay,
   ])
 
   useEffect(() => () => geometry.dispose(), [geometry])
@@ -585,17 +676,29 @@ export const MeshRenderer = memo(function MeshRenderer({
   // Model-view outlines use topology edges for both flat and smooth shading.
   // (drei <Edges> fails to draw reliably on smooth/welded meshes.)
   const topologyEdgeGeometry = useMemo(() => {
-    if (!config.showEdgeOutline) return null
+    if (!config.showEdgeOutline && !paintFocus) return null
     return buildViewportEdgeOutlineGeometry(renderObject)
   }, [
     config.showEdgeOutline,
+    paintFocus,
     renderObject.positions,
     renderObject.faces,
   ])
 
   useEffect(() => () => topologyEdgeGeometry?.dispose(), [topologyEdgeGeometry])
 
-  const useVertexColors = !useTexture
+  // Object selection is a constant-cost bounds cage. It stays readable on dense
+  // topology and never covers the surface being modeled or painted.
+  const selectionOutlineGeometry = useMemo(() => {
+    if (!objectSelectionOutline) return null
+    return buildObjectSelectionBoundsGeometry(object)
+  }, [objectSelectionOutline, object.positions])
+
+  useEffect(() => () => selectionOutlineGeometry?.dispose(), [selectionOutlineGeometry])
+
+  // Overlay documents paint over the object's existing color/material. A
+  // deliberately cleared replacement document uses its own alpha instead.
+  const useVertexColors = !useTexture || usePixelTextureOverlay
 
   return (
     <group>
@@ -606,7 +709,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         renderOrder={0}
       >
         <MeshMaterial
-          key={`${flatShading ? 'flat' : 'smooth'}-${useTexture ? `${texId ?? textureUrl ?? 'tex'}-${textureHasAlpha ? 'alpha' : 'opaque'}` : 'no-tex'}`}
+          key={`${flatShading ? 'flat' : 'smooth'}-${useTexture ? `${texId ?? textureUrl ?? 'tex'}-${textureHasAlpha ? 'alpha' : 'opaque'}-${usePixelTextureOverlay ? 'overlay' : 'replace'}` : 'no-tex'}`}
           config={config}
           emissive={emissive}
           emissiveIntensity={emissiveIntensity}
@@ -617,16 +720,16 @@ export const MeshRenderer = memo(function MeshRenderer({
           useVertexColors={useVertexColors}
           useTexture={useTexture}
           textureAlpha={textureHasAlpha}
-          pixelTextureBlend={false}
+          pixelTextureBlend={usePixelTextureOverlay}
           xray={viewportXRay}
         />
-        {config.showEdgeOutline && topologyEdgeGeometry && (
+        {(config.showEdgeOutline || paintFocus) && topologyEdgeGeometry && (
           <lineSegments geometry={topologyEdgeGeometry} renderOrder={2}>
             <lineBasicMaterial
-              color={edgeColor}
+              color={paintFocus ? meshOutline : edgeColor}
               transparent
-              opacity={viewportXRay ? 0.95 : 0.88}
-              depthTest={!viewportXRay}
+              opacity={paintFocus ? 0.78 : viewportXRay ? 0.95 : 0.88}
+              depthTest={paintFocus ? false : !viewportXRay}
               depthWrite={false}
               polygonOffset
               polygonOffsetFactor={-1}
@@ -634,23 +737,22 @@ export const MeshRenderer = memo(function MeshRenderer({
             />
           </lineSegments>
         )}
-        {objectSelectionOutline && (
-          <Outlines
-            color={isPrimary ? objectSelectOutline : objectSelectOutlineSecondary}
-            thickness={2}
-            screenspace
-            transparent
-            opacity={isPrimary ? 0.95 : 0.85}
-            toneMapped={false}
-            polygonOffset
-            polygonOffsetFactor={-1}
-            angle={Math.PI}
-            renderOrder={5}
-          />
-        )}
       </mesh>
 
-      {subdPreviewActive && cageGeometry && (
+      {objectSelectionOutline && selectionOutlineGeometry && (
+        <lineSegments geometry={selectionOutlineGeometry} renderOrder={8}>
+          <lineBasicMaterial
+            color={isPrimary ? objectSelectOutline : objectSelectOutlineSecondary}
+            transparent
+            opacity={isPrimary ? 1 : 0.86}
+            depthTest
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </lineSegments>
+      )}
+
+      {subdPreviewActive && !paintFocus && cageGeometry && (
         <mesh geometry={cageGeometry} renderOrder={3}>
           <meshBasicMaterial
             wireframe
@@ -663,7 +765,7 @@ export const MeshRenderer = memo(function MeshRenderer({
         </mesh>
       )}
 
-      {config.wireOverlay && (
+      {config.wireOverlay && !paintFocus && (
         <mesh geometry={geometry} renderOrder={1}>
           <meshBasicMaterial
             wireframe
@@ -687,6 +789,7 @@ export const MeshRenderer = memo(function MeshRenderer({
   prev.isSelected === next.isSelected &&
   prev.isPrimary === next.isPrimary &&
   prev.objectSelectionOutline === next.objectSelectionOutline &&
+  prev.paintFocus === next.paintFocus &&
   prev.facetExaggeration === next.facetExaggeration &&
   prev.showDensityHeatmap === next.showDensityHeatmap &&
   prev.displayMode === next.displayMode &&

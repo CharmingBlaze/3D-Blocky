@@ -3,6 +3,7 @@ import {
   buildViewportEdgeOutlineGeometry,
   buildViewportMeshGeometry,
   clearViewportGeometryBuildCache,
+  shouldOmitViewportVertexColors,
 } from '../components/MeshRenderer'
 import { HalfEdgeMesh } from '../mesh/HalfEdgeMesh'
 import {
@@ -50,6 +51,12 @@ afterEach(() => {
 })
 
 describe('viewport geometry build-wave cache', () => {
+  it('keeps face colors under Pixel Editor textures', () => {
+    expect(shouldOmitViewportVertexColors(true, true)).toBe(false)
+    expect(shouldOmitViewportVertexColors(true, false)).toBe(true)
+    expect(shouldOmitViewportVertexColors(false, false)).toBe(false)
+  })
+
   it('returns independently owned geometry and attribute arrays', () => {
     const a = buildViewportMeshGeometry(box, true, 0, false)
     const b = buildViewportMeshGeometry(box, true, 0, false)

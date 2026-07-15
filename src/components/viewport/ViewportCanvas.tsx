@@ -5,6 +5,7 @@ import type { ViewType } from '../../store/appStore'
 import { applyOrthoCamera } from './ViewportCamera'
 import { useViewportRuntime } from './ViewportRuntimeContext'
 import { ViewportScene } from './ViewportScene'
+import { registerWebGLRenderer } from '../../rendering/textureCache'
 import type { SceneObject } from '../../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../../mesh/meshSelection'
 import type { ActiveTool, SelectionMode } from '../../store/appStore'
@@ -33,7 +34,6 @@ export function ViewportCanvas({
   meshSelection,
   selectionObjectIds,
   activeTool,
-  pixelTextureRevision,
   cadPreviewSignal,
   primitiveBoxDraft,
   multiObjectGizmoActive,
@@ -64,7 +64,6 @@ export function ViewportCanvas({
   meshSelection: MeshComponentSelection | null
   selectionObjectIds: string[]
   activeTool: ActiveTool
-  pixelTextureRevision: unknown
   cadPreviewSignal: unknown
   primitiveBoxDraft: unknown
   multiObjectGizmoActive: boolean
@@ -104,6 +103,7 @@ export function ViewportCanvas({
       }}
       onCreated={({ camera, gl }) => {
         gl.outputColorSpace = 'srgb'
+        registerWebGLRenderer(gl)
         cameraRef.current = camera
         applyOrthoCamera(view as ViewType, camera)
       }}
@@ -132,7 +132,6 @@ export function ViewportCanvas({
         meshSelection={meshSelection}
         selectionObjectIds={selectionObjectIds}
         activeTool={activeTool}
-        pixelTextureRevision={pixelTextureRevision}
         cadPreviewSignal={cadPreviewSignal}
         primitiveBoxDraft={primitiveBoxDraft}
         multiObjectGizmoActive={multiObjectGizmoActive}

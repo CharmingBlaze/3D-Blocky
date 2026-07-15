@@ -9,7 +9,7 @@ import {
 } from '../images/imageDropTypes'
 import { loadImageFile } from '../images/loadImageFile'
 import { createEditableImagePlaneObject } from '../images/createTexturedPlane'
-import { importImageAsNewDocument } from '../pixel/pixelEditorSlice'
+import { bumpPixelDocRevision, importImageAsNewDocument } from '../pixel/pixelEditorSlice'
 import { setObjectMaterialMode } from '../material/materialEditorSlice'
 import type { PixelDocument } from '../pixel/pixelTypes'
 import type { ViewType } from '../scene/viewTypes'
@@ -71,6 +71,7 @@ type ImageDropStore = ImageDropLayoutState & {
   pixelDocuments: Record<string, PixelDocument>
   pixelEditorDocId: string | null
   pixelTextureRevision: number
+  pixelDocRevisions: Record<string, number>
   selectedObjectId: string | null
   selectionObjectIds: string[]
   meshSelection: MeshComponentSelection | null
@@ -150,6 +151,7 @@ export function createImageDropSlice<T extends ImageDropLayoutState>(
               },
             },
             pixelTextureRevision: st.pixelTextureRevision + 1,
+            pixelDocRevisions: bumpPixelDocRevision(st.pixelDocRevisions, docId),
             selectedReferenceImageId: null,
             selectedBillboardImageId: null,
           }

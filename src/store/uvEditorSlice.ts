@@ -18,7 +18,7 @@ import { collectUvIndicesForFaces } from '../uv/uvObject'
 import type { Uv2 } from '../uv/uvTypes'
 import { cloneUv2 } from '../uv/uvTypes'
 import { setObjectMaterialMode } from '../material/materialEditorSlice'
-import { importImageAsNewDocument } from '../pixel/pixelEditorSlice'
+import { bumpPixelDocRevision, importImageAsNewDocument } from '../pixel/pixelEditorSlice'
 import { releaseTextureUrl } from '../rendering/textureCache'
 import { resolveEffectiveMaterial } from '../material/materials'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
@@ -143,6 +143,7 @@ type UvStore = UvEditorLayoutState & {
   pixelDocuments: Record<string, import('../pixel/pixelTypes').PixelDocument>
   pixelEditorDocId: string | null
   pixelTextureRevision: number
+  pixelDocRevisions: Record<string, number>
   updateObject: (id: string, updates: Partial<SceneObject>) => void
   commitHistory: (label?: string) => boolean
   activeView: ViewType
@@ -320,6 +321,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
               },
             },
             pixelTextureRevision: st.pixelTextureRevision + 1,
+            pixelDocRevisions: bumpPixelDocRevision(st.pixelDocRevisions, docId),
           }
         })
         deps.reconcileBlobUrls()
@@ -353,6 +355,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         return {
           pixelEditorDocId: docId,
           pixelTextureRevision: st.pixelTextureRevision + 1,
+          pixelDocRevisions: bumpPixelDocRevision(st.pixelDocRevisions, docId),
           ...(meta
             ? {}
             : {

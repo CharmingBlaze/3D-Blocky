@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
 import { createPixelDocument } from './pixelDocument'
 import {
+  bumpPixelDocRevision,
   detachPixelDocumentForEditing,
   flushPixelDocumentGpuSync,
   paintStrokeOnDocumentLive,
@@ -54,15 +55,20 @@ describe('live pixel paint', () => {
     expect(pixelsBefore[i + 3]).toBeGreaterThan(0)
   })
 
-  it('schedules a composite that matches compositing the live document', () => {
+  it('composites immediately for canvas feedback and uploads on flush', () => {
     const doc = createPixelDocument(4, 4, 'doc')
     const docs = detachPixelDocumentForEditing({ doc }, 'doc')
     paintAtPixelLive(docs, 'doc', 1, 1, [0, 1, 0, 1], 1, 'pencil', false, false)
-    flushPixelDocumentGpuSync()
 
+    // Canvas path: composite cache is ready before RAF upload.
+    const cachedBeforeFlush = getPixelCompositeCache('doc')
+    expect(cachedBeforeFlush).toBeTruthy()
+    const expected = compositeLayers(docs.doc!)
+    expect(Array.from(cachedBeforeFlush!.pixels)).toEqual(Array.from(expected))
+
+    flushPixelDocumentGpuSync()
     const cached = getPixelCompositeCache('doc')
     expect(cached).toBeTruthy()
-    const expected = compositeLayers(docs.doc!)
     expect(Array.from(cached!.pixels)).toEqual(Array.from(expected))
   })
 
@@ -88,5 +94,40 @@ describe('live pixel paint', () => {
     expect(published.doc!.layers[0]).not.toBe(before.layers[0])
     expect(published.doc!.layers[0]!.pixels).toBe(pixels)
     expect(published.doc!.layers[0]!.pixels[0]).toBeGreaterThan(0)
+  })
+
+  it('detachPixelDocumentForEditing clones only the active layer buffer', () => {
+    const doc = createPixelDocument(4, 4, 'doc')
+    const bottom = createPixelDocument(4, 4, 'tmp').layers[0]!
+    bottom.id = 'bottom'
+    bottom.name = 'Bottom'
+    doc.layers = [bottom, doc.layers[0]!]
+    doc.activeLayerId = doc.layers[1]!.id
+    const bottomPixels = bottom.pixels
+    const activePixels = doc.layers[1]!.pixels
+
+    const docs = detachPixelDocumentForEditing({ doc }, 'doc')
+    expect(docs.doc!.layers[0]!.pixels).toBe(bottomPixels)
+    expect(docs.doc!.layers[1]!.pixels).not.toBe(activePixels)
+    expect(docs.doc!.layers[1]!.pixels).toEqual(activePixels)
+  })
+
+  it('defers GPU upload when syncGpu is false until flush', () => {
+    const doc = createPixelDocument(4, 4, 'doc')
+    const docs = detachPixelDocumentForEditing({ doc }, 'doc')
+    paintAtPixelLive(docs, 'doc', 1, 1, [1, 0, 0, 1], 1, 'pencil', false, false, {
+      syncGpu: false,
+    })
+    // Composite ready immediately; GPU flush is deferred.
+    expect(getPixelCompositeCache('doc')).toBeTruthy()
+    flushPixelDocumentGpuSync()
+    expect(getPixelCompositeCache('doc')).toBeTruthy()
+  })
+
+  it('bumpPixelDocRevision only touches the painted doc id', () => {
+    const next = bumpPixelDocRevision({ a: 1 }, 'b')
+    expect(next).toEqual({ a: 1, b: 1 })
+    expect(bumpPixelDocRevision(next, 'b')).toEqual({ a: 1, b: 2 })
+    expect(bumpPixelDocRevision(next, null)).toBe(next)
   })
 })

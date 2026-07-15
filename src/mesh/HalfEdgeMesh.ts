@@ -68,6 +68,8 @@ export interface SceneObject {
   uvMappingMode?: 'box' | 'perFace'
   /** True after automatic seam detection + island packing has been applied. */
   uvAutoPacked?: boolean
+  /** Version of the app-generated default atlas; manual UV edits preserve it. */
+  uvLayoutVersion?: number
   topologyLocked: boolean
   polyBudget: number
   polyBudgetMode: 'strict' | 'adaptive'
@@ -167,6 +169,7 @@ export class HalfEdgeMesh {
       color: meta.color ?? 0x6ecbf5,
       uvMappingMode: meta.uvMappingMode,
       uvAutoPacked: meta.uvAutoPacked,
+      uvLayoutVersion: meta.uvLayoutVersion,
       pivot: meta.pivot ? { ...meta.pivot } : undefined,
       transform: meta.transform
         ? {

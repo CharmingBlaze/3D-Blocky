@@ -4,6 +4,7 @@ import {
   meshHasPaintableUvs,
   paintUvAtlasOverlay,
   resolveMeshForTextureDoc,
+  resolveSelectedUvOverlayMesh,
 } from './uvPaintOverlay'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 
@@ -72,6 +73,15 @@ describe('uvPaintOverlay', () => {
     expect(pick?.id).toBe('b')
   })
 
+  it('resolves exactly the selected object without changing or filtering its UV layout', () => {
+    const selected = makeBox('selected', 'different-texture')
+    const originalUvs = selected.uvs!.map((uv) => ({ ...uv }))
+    const pick = resolveSelectedUvOverlayMesh([makeBox('other', 'active-doc'), selected], 'selected')
+
+    expect(pick).toBe(selected)
+    expect(selected.uvs).toEqual(originalUvs)
+  })
+
   it('meshHasPaintableUvs requires matching faceUvIndices', () => {
     const ok = makeBox('ok')
     expect(meshHasPaintableUvs(ok)).toBe(true)
@@ -92,9 +102,25 @@ describe('uvPaintOverlay', () => {
       mesh: mesh as never,
       uvs: mesh.uvs!,
       selectedFaces: [],
+      drawFills: true,
     })
     expect(calls).toContain('fill')
     expect(calls).toContain('stroke')
+  })
+
+  it('paintUvAtlasOverlay defaults to outlines only (no island fills)', () => {
+    const mesh = makeBox('m') as never
+    const { ctx, calls } = makeCtx(32, 32)
+    paintUvAtlasOverlay({
+      ctx,
+      texW: 32,
+      texH: 32,
+      mesh,
+      uvs: (mesh as { uvs: { u: number; v: number }[] }).uvs,
+      selectedFaces: [],
+    })
+    expect(calls).toContain('stroke')
+    expect(calls).not.toContain('fill')
   })
 
   it('paintUvAtlasOverlay dims outside when faces are selected', () => {

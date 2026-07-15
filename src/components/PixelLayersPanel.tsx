@@ -61,6 +61,7 @@ function LayerThumb({
   revision: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const offscreenRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -79,13 +80,19 @@ function LayerThumb({
         ctx.fillRect(x, y, cell, cell)
       }
     }
-    const img = ctx.createImageData(width, height)
-    img.data.set(layer.pixels)
-    const off = document.createElement('canvas')
-    off.width = width
-    off.height = height
+    let off = offscreenRef.current
+    if (!off) {
+      off = document.createElement('canvas')
+      offscreenRef.current = off
+    }
+    if (off.width !== width || off.height !== height) {
+      off.width = width
+      off.height = height
+    }
     const offCtx = off.getContext('2d')
     if (!offCtx) return
+    const img = offCtx.createImageData(width, height)
+    img.data.set(layer.pixels)
     offCtx.putImageData(img, 0, 0)
     const scale = Math.min(size / width, size / height)
     const dw = Math.max(1, Math.floor(width * scale))
@@ -105,8 +112,6 @@ export function PixelLayersPanel() {
   const store = useAppStore(
     useShallow((s) => ({
       docId: s.pixelEditorDocId,
-      docs: s.pixelDocuments,
-      revision: s.pixelTextureRevision,
       addLayer: s.addPixelEditorLayer,
       deleteLayer: s.deletePixelEditorLayer,
       duplicateLayer: s.duplicatePixelEditorLayer,
@@ -118,8 +123,11 @@ export function PixelLayersPanel() {
       commitEdit: s.commitPixelEdit,
     }))
   )
-
-  const doc = store.docId ? store.docs[store.docId] : null
+  // Subscribe only to the open document + its revision (not the whole docs map).
+  const doc = useAppStore((s) => (store.docId ? s.pixelDocuments[store.docId] : null))
+  const revision = useAppStore((s) =>
+    store.docId ? (s.pixelDocRevisions[store.docId] ?? 0) : 0
+  )
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
@@ -320,7 +328,7 @@ export function PixelLayersPanel() {
                 layer={layer}
                 width={doc.width}
                 height={doc.height}
-                revision={store.revision + storageIdx}
+                revision={revision + storageIdx}
               />
 
               <div className="px-layer-main">

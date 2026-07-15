@@ -106,6 +106,19 @@ describe('sceneHistory', () => {
     expect(second.objects[0]).not.toBe(first.objects[0])
   })
 
+  it('keeps captured pixel buffers isolated while the live stroke mutates in place', () => {
+    const doc = createPixelDocument(8, 8, 'live-stroke')
+    const base = emptySnapshot()
+    base.pixelDocuments = { [doc.id]: doc }
+    const captured = captureSceneSnapshot(base)
+
+    doc.layers[0].pixels[0] = 255
+    doc.layers[0].pixels[3] = 255
+
+    expect(captured.pixelDocuments[doc.id].layers[0].pixels[0]).toBe(0)
+    expect(captured.pixelDocuments[doc.id].layers[0].pixels[3]).toBe(0)
+  })
+
   it('detects pixel-only edits as unequal snapshots', () => {
     const doc = createPixelDocument(2, 2, 'tex-a')
     const base = emptySnapshot()

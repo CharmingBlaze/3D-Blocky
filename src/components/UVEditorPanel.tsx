@@ -10,6 +10,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { FloatingPanel } from './FloatingPanel'
 import { useAppStore } from '../store/appStore'
 import { compositeLayers } from '../pixel/compositeLayers'
+import { getPixelCompositeCache } from '../pixel/pixelCompositeCache'
 import { pickOpenFile } from '../io/fileDialogs'
 import { IMAGE_IMPORT_FILTERS } from '../io/download'
 import { ensureObjectUVs, resolveUvMappingMode, detachFacesUvTopology, type SceneObjectWithUVs } from '../uv/uvObject'
@@ -27,7 +28,6 @@ import {
   pixelToUv,
   uvBoundsFromIndices,
   uvBoundsCenter,
-  blockbenchSlotLabelCenters,
   BLOCKBENCH_ATLAS_COLS,
   BLOCKBENCH_ATLAS_ROWS,
   rotateUvSnapshot,
@@ -402,7 +402,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   const texId = activeTextureId
   const texture = useAppStore((s) => (texId ? s.objectTextures[texId] : undefined))
   const pixelDoc = useAppStore((s) => (texId ? s.pixelDocuments[texId] : undefined))
-  const pixelTextureRevision = useAppStore((s) => s.pixelTextureRevision)
+  const pixelDocRevision = useAppStore((s) => (texId ? (s.pixelDocRevisions[texId] ?? 0) : 0))
   const texW = pixelDoc?.width ?? texture?.width ?? 256
   const texH = pixelDoc?.height ?? texture?.height ?? 256
   const zoom = uvEditorZoom
@@ -430,9 +430,11 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   const [pointFields, setPointFields] = useState({ x: 0, y: 0 })
   const textureImgRef = useRef<HTMLImageElement | null>(null)
   const pixelSourceCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const pixelSourceImageDataRef = useRef<ImageData | null>(null)
   const lastIslandRotRef = useRef(0)
   const lastClickRef = useRef({ t: 0, x: 0, y: 0 })
   const lastAutoFitFacesRef = useRef<number[]>([])
+  const lastFittedObjectRef = useRef<string | null>(null)
 
   const ensured = useMemo(() => (obj ? ensureObjectUVs(obj) : null), [obj])
 
@@ -1265,14 +1267,6 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       }
       ctx.stroke()
 
-      ctx.fillStyle = 'rgba(255,255,255,0.28)'
-      ctx.font = `${Math.max(9, 11 / viewZoom)}px system-ui, sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      for (const slot of blockbenchSlotLabelCenters()) {
-        const px = uvToPixel({ u: slot.u, v: slot.v }, texW, texH)
-        ctx.fillText(slot.label, px.x, px.y)
-      }
     }
 
     if (uvEditorShowGrid) {
@@ -1916,19 +1910,28 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   }, [objectId, ensured, setObjectUvPoints, updateObject, cancelPreviewRelay])
 
   useEffect(() => {
-    if (pixelDoc) {
+    if (pixelDoc && texId) {
       const canvas = pixelSourceCanvasRef.current ?? document.createElement('canvas')
       pixelSourceCanvasRef.current = canvas
-      canvas.width = pixelDoc.width
-      canvas.height = pixelDoc.height
+      if (canvas.width !== pixelDoc.width || canvas.height !== pixelDoc.height) {
+        canvas.width = pixelDoc.width
+        canvas.height = pixelDoc.height
+      }
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      const composite = compositeLayers(pixelDoc)
-      ctx.putImageData(
-        new ImageData(new Uint8ClampedArray(composite), pixelDoc.width, pixelDoc.height),
-        0,
-        0
-      )
+      const cached = getPixelCompositeCache(texId)
+      const pixels =
+        cached && cached.width === pixelDoc.width && cached.height === pixelDoc.height
+          ? cached.pixels
+          : compositeLayers(pixelDoc)
+      // Reuse ImageData buffer — avoid allocating a full copy on every stroke commit.
+      let imageData = pixelSourceImageDataRef.current
+      if (!imageData || imageData.width !== pixelDoc.width || imageData.height !== pixelDoc.height) {
+        imageData = new ImageData(pixelDoc.width, pixelDoc.height)
+        pixelSourceImageDataRef.current = imageData
+      }
+      imageData.data.set(pixels)
+      ctx.putImageData(imageData, 0, 0)
       textureImgRef.current = null
       scheduleRedraw()
       return
@@ -1951,7 +1954,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [pixelDoc, pixelTextureRevision, texture?.url, scheduleRedraw])
+  }, [pixelDoc, pixelDocRevision, texId, texture?.url, scheduleRedraw])
 
   useEffect(() => {
     return () => {
@@ -1972,6 +1975,20 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       setUvEditorSelectedPoints([])
     }
   }, [uvEditorOpen, objectId, ensured, obj, meshSelection?.objectId, meshSelection?.faces, uvEditorSticky, setUvEditorSelectedFaces, setUvEditorSelectedPoints])
+
+  // A newly opened/switched object starts with the complete normalized atlas
+  // visible. Camera state is otherwise preserved while editing, so UV changes
+  // never trigger an unwanted zoom jump or an expensive canvas resize.
+  useEffect(() => {
+    if (!uvEditorOpen || !objectId || !ensured) {
+      if (!uvEditorOpen) lastFittedObjectRef.current = null
+      return
+    }
+    if (lastFittedObjectRef.current === objectId) return
+    lastFittedObjectRef.current = objectId
+    const id = window.requestAnimationFrame(fitCanvasToCamera)
+    return () => window.cancelAnimationFrame(id)
+  }, [uvEditorOpen, objectId, ensured, fitCanvasToCamera])
 
   useEffect(() => {
     if (!uvEditorOpen || !uvEditorAutoFit || uvEditorMode !== 'faces' || !obj) {

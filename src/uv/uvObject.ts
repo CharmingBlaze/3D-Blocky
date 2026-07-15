@@ -10,6 +10,7 @@ import { needsUvRepack, needsDoodleUvRepack } from './uvAuto'
 
 export type UvMappingMode = 'box' | 'perFace'
 export type SceneObjectWithUVs = SceneObject & { uvs: Uv2[]; faceUvIndices: number[][] }
+export const DEFAULT_UV_LAYOUT_VERSION = 1
 
 /** Sketch/pen extruded meshes — use directional Blockbench atlas instead of smart UV. */
 export function isDoodleLikeObject(obj: SceneObject): boolean {
@@ -49,29 +50,53 @@ export function autoUnwrapObject(obj: SceneObject): SceneObjectWithUVs {
   }
 }
 
+/**
+ * Predictable initial UVs for app-authored geometry.
+ *
+ * Six direction buckets produce a compact box-style atlas for primitives,
+ * CAD meshes, sketches, and vector shapes. Advanced Auto/Smart unwrap remains
+ * available as an explicit editor operation, but is no longer the surprising
+ * first layout a user sees.
+ */
+export function defaultBoxUnwrapObject(obj: SceneObject): SceneObjectWithUVs {
+  const base = ensureUvTopology(obj)
+  const allFaces = base.faces.map((_, i) => i)
+  const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
+    base,
+    allFaces,
+    'box',
+    { angleLimitDeg: AUTO_SEAM_ANGLE_DEG, margin: 0.035, repackAll: true, markPacked: true }
+  )
+  return {
+    ...base,
+    uvs,
+    faceUvIndices,
+    // Per-face editing means islands can still be detached and transformed;
+    // the initial projection itself is the familiar six-direction box atlas.
+    uvMappingMode: 'perFace',
+    uvAutoPacked: uvAutoPacked ?? true,
+    uvLayoutVersion: DEFAULT_UV_LAYOUT_VERSION,
+  }
+}
+
 export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
+  // Migrate untouched legacy CAD primitives once. The marker prevents later
+  // manual UV moves (including intentional out-of-atlas tiling) being reset.
+  if (
+    obj.primitiveSource &&
+    obj.material?.mode !== 'texture' &&
+    obj.uvLayoutVersion !== DEFAULT_UV_LAYOUT_VERSION
+  ) {
+    return defaultBoxUnwrapObject(obj)
+  }
   if (obj.uvAutoPacked && obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length) {
     return obj as SceneObjectWithUVs
   }
   if (needsDoodleUvRepack(obj)) {
-    const base = ensureUvTopology(obj)
-    const allFaces = base.faces.map((_, i) => i)
-    const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
-      base,
-      allFaces,
-      'box',
-      { angleLimitDeg: AUTO_SEAM_ANGLE_DEG, margin: 0.04, repackAll: true, markPacked: true }
-    )
-    return {
-      ...base,
-      uvs,
-      faceUvIndices,
-      uvMappingMode: 'perFace',
-      uvAutoPacked: uvAutoPacked ?? true,
-    }
+    return defaultBoxUnwrapObject(obj)
   }
   if (!obj.uvs?.length || obj.faceUvIndices?.length !== obj.faces.length || needsUvRepack(obj)) {
-    return autoUnwrapObject(obj)
+    return defaultBoxUnwrapObject(obj)
   }
   return obj as SceneObjectWithUVs
 }
@@ -230,6 +255,45 @@ export function detachFacesUvTopology(
       uvOwners.set(ui, nextOwners)
       uvOwners.set(newUi, [fi])
     }
+  }
+
+  return { ...base, uvs, faceUvIndices }
+}
+
+/**
+ * Give every selected face corner a fresh UV index.
+ *
+ * Unwrap methods must not inherit welding created by a previous method. For
+ * example, switching from Smart UV to Planar per Face should split the faces
+ * again before projecting them. Unselected faces keep their UV indices and
+ * coordinates exactly as authored.
+ */
+export function separateFacesUvTopology(
+  obj: SceneObject,
+  faceIndices: number[]
+): SceneObjectWithUVs {
+  // Use the structural initializer directly. Calling ensureObjectUVs here can
+  // recurse back into auto-unwrapping while an initial unwrap is in progress.
+  const base = ensureUvTopology(obj)
+  if (faceIndices.length === 0) return base
+
+  const uvs = base.uvs.map(cloneUv2)
+  const faceUvIndices = base.faceUvIndices.map((face) => [...face])
+  const selected = new Set(faceIndices)
+
+  for (const fi of selected) {
+    const face = base.faces[fi]
+    const oldIndices = base.faceUvIndices[fi]
+    if (!face || !oldIndices) continue
+    const next: number[] = []
+    for (let corner = 0; corner < face.length; corner++) {
+      const oldUi = oldIndices[corner]
+      next.push(uvs.length)
+      uvs.push(
+        cloneUv2(oldUi === undefined ? { u: 0, v: 0 } : base.uvs[oldUi] ?? { u: 0, v: 0 })
+      )
+    }
+    faceUvIndices[fi] = next
   }
 
   return { ...base, uvs, faceUvIndices }

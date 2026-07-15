@@ -39,7 +39,6 @@ export function ViewportScene({
   meshSelection,
   selectionObjectIds,
   activeTool,
-  pixelTextureRevision,
   cadPreviewSignal,
   primitiveBoxDraft,
   multiObjectGizmoActive,
@@ -71,7 +70,6 @@ export function ViewportScene({
   meshSelection: MeshComponentSelection | null
   selectionObjectIds: string[]
   activeTool: ActiveTool
-  pixelTextureRevision: unknown
   cadPreviewSignal: unknown
   primitiveBoxDraft: unknown
   multiObjectGizmoActive: boolean
@@ -95,7 +93,6 @@ export function ViewportScene({
         showGrid={showGrid}
         facetExaggeration={facetExaggeration}
         showDensityHeatmap={showDensityHeatmap}
-        pixelTextureRevision={pixelTextureRevision}
         cadPreviewSignal={cadPreviewSignal}
       />
       <WebGLContextHandler />

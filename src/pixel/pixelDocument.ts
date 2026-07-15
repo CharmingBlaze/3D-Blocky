@@ -53,6 +53,7 @@ export function clonePixelDocuments(
 }
 
 export function pixelDocumentEqual(a: PixelDocument, b: PixelDocument): boolean {
+  if (a === b) return true
   if (
     a.id !== b.id ||
     a.width !== b.width ||
@@ -65,6 +66,7 @@ export function pixelDocumentEqual(a: PixelDocument, b: PixelDocument): boolean 
   for (let i = 0; i < a.layers.length; i++) {
     const la = a.layers[i]
     const lb = b.layers[i]
+    if (la === lb) continue
     if (
       la.id !== lb.id ||
       la.name !== lb.name ||
@@ -75,6 +77,7 @@ export function pixelDocumentEqual(a: PixelDocument, b: PixelDocument): boolean 
     ) {
       return false
     }
+    if (la.pixels === lb.pixels) continue
     for (let p = 0; p < la.pixels.length; p++) {
       if (la.pixels[p] !== lb.pixels[p]) return false
     }
@@ -86,6 +89,7 @@ export function pixelDocumentsEqual(
   a: Record<string, PixelDocument>,
   b: Record<string, PixelDocument>
 ): boolean {
+  if (a === b) return true
   const keysA = Object.keys(a).sort()
   const keysB = Object.keys(b).sort()
   if (keysA.length !== keysB.length) return false

@@ -4,6 +4,8 @@ import { heightAxisForView } from '../primitives/viewAxes'
 import { ensureObjectUVs, collectUvIndicesForFaces } from './uvObject'
 import { uvBoundsFromIndices } from './uvEditing'
 import {
+  clusterFacesSmartUv,
+  resolveAutoUnwrapMethod,
   resolveViewProjectionSpec,
   unwrapSelectedFaces,
   type UvUnwrapMethod,
@@ -29,6 +31,43 @@ function makeWideBox() {
   )
 }
 
+function makeIcosphere() {
+  return ensureObjectUVs(
+    primitiveBoxToSceneObject(
+      'icosphere',
+      TEST_BOX,
+      heightAxisForView('front'),
+      0x8899aa,
+      48
+    )
+  )
+}
+
+function adjacentBentPair(obj: ReturnType<typeof makeIcosphere>): [number, number] {
+  for (let a = 0; a < obj.faces.length; a++) {
+    for (let b = a + 1; b < obj.faces.length; b++) {
+      const shared = obj.faces[a]!.filter((vi) => obj.faces[b]!.includes(vi))
+      if (shared.length < 2) continue
+      const na = faceNormal3D(obj, a)
+      const nb = faceNormal3D(obj, b)
+      const dot = Math.max(-1, Math.min(1, na.x * nb.x + na.y * nb.y + na.z * nb.z))
+      const angle = Math.acos(dot) * 180 / Math.PI
+      if (angle > 1 && angle < 66) return [a, b]
+    }
+  }
+  throw new Error('Expected an adjacent bent face pair')
+}
+
+function uvIndexForVertex(
+  obj: ReturnType<typeof makeIcosphere>,
+  faceUvIndices: number[][],
+  faceIndex: number,
+  vertexIndex: number
+): number {
+  const corner = obj.faces[faceIndex]!.indexOf(vertexIndex)
+  return faceUvIndices[faceIndex]![corner]!
+}
+
 function frontFacingFaces(obj: ReturnType<typeof makeCube>): number[] {
   return obj.faces
     .map((_, i) => i)
@@ -36,6 +75,22 @@ function frontFacingFaces(obj: ReturnType<typeof makeCube>): number[] {
 }
 
 describe('unwrapSelectedFaces', () => {
+  it('gives generated curved primitives a compact box-style default atlas', () => {
+    const sphere = makeIcosphere()
+    const allFaces = sphere.faces.map((_, i) => i)
+    const allUi = collectUvIndicesForFaces(sphere, allFaces)
+    const bounds = uvBoundsFromIndices(sphere.uvs, allUi)
+
+    expect(sphere.uvAutoPacked).toBe(true)
+    expect(sphere.uvLayoutVersion).toBe(1)
+    expect(sphere.uvMappingMode).toBe('perFace')
+    expect(sphere.faceUvIndices).toHaveLength(sphere.faces.length)
+    expect(bounds.minU).toBeGreaterThanOrEqual(-0.001)
+    expect(bounds.minV).toBeGreaterThanOrEqual(-0.001)
+    expect(bounds.maxU).toBeLessThanOrEqual(1.001)
+    expect(bounds.maxV).toBeLessThanOrEqual(1.001)
+  })
+
   it.each<UvUnwrapMethod>(['auto', 'smart', 'regions', 'planar', 'box', 'blockbench', 'lightmap'])(
     'produces finite, indexed UVs for %s',
     (method) => {
@@ -93,6 +148,50 @@ describe('unwrapSelectedFaces', () => {
     const bounds = uvBoundsFromIndices(uvs, selectedUi)
     expect(bounds.maxU).toBeLessThanOrEqual(1.05)
     expect(bounds.maxV).toBeLessThanOrEqual(1.05)
+  })
+
+  it('keeps adjacent selected curved faces together with Auto UV', () => {
+    const sphere = makeIcosphere()
+    const faces = adjacentBentPair(sphere)
+    expect(resolveAutoUnwrapMethod(sphere, faces)).toBe('smart')
+
+    const result = unwrapSelectedFaces(sphere, faces, 'auto', { repackAll: true })
+    const sharedVertices = sphere.faces[faces[0]]!.filter((vi) => sphere.faces[faces[1]]!.includes(vi))
+    expect(sharedVertices.length).toBe(2)
+    for (const vi of sharedVertices) {
+      expect(uvIndexForVertex(sphere, result.faceUvIndices, faces[0], vi)).toBe(
+        uvIndexForVertex(sphere, result.faceUvIndices, faces[1], vi)
+      )
+    }
+  })
+
+  it('rebuilds UV topology every time the unwrap method changes', () => {
+    const sphere = makeIcosphere()
+    const faces = adjacentBentPair(sphere)
+    const sharedVertex = sphere.faces[faces[0]]!.find((vi) => sphere.faces[faces[1]]!.includes(vi))!
+
+    const smart = unwrapSelectedFaces(sphere, faces, 'smart', { repackAll: true })
+    expect(uvIndexForVertex(sphere, smart.faceUvIndices, faces[0], sharedVertex)).toBe(
+      uvIndexForVertex(sphere, smart.faceUvIndices, faces[1], sharedVertex)
+    )
+
+    const planar = unwrapSelectedFaces({ ...sphere, ...smart }, faces, 'planar', { repackAll: true })
+    expect(uvIndexForVertex(sphere, planar.faceUvIndices, faces[0], sharedVertex)).not.toBe(
+      uvIndexForVertex(sphere, planar.faceUvIndices, faces[1], sharedVertex)
+    )
+
+    const smartAgain = unwrapSelectedFaces({ ...sphere, ...planar }, faces, 'smart', { repackAll: true })
+    expect(uvIndexForVertex(sphere, smartAgain.faceUvIndices, faces[0], sharedVertex)).toBe(
+      uvIndexForVertex(sphere, smartAgain.faceUvIndices, faces[1], sharedVertex)
+    )
+  })
+
+  it('cuts a closed curved surface into multiple smart islands', () => {
+    const sphere = makeIcosphere()
+    const allFaces = sphere.faces.map((_, i) => i)
+    const islands = clusterFacesSmartUv(sphere, allFaces, 66)
+    expect(islands.length).toBeGreaterThan(1)
+    expect(Math.max(...islands.map((island) => island.length))).toBeLessThan(allFaces.length)
   })
 
   it('still repacks the entire mesh when all faces are selected', () => {

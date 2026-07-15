@@ -1,6 +1,5 @@
 import { create } from 'zustand'
-import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
-import { ensurePositiveVolume } from '../mesh/meshWinding'
+import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
@@ -21,29 +20,27 @@ import {
   updateObjectMaterialSettings,
 } from '../material/materialEditorSlice'
 import {
-  registerPixelDocument,
   addPixelLayer,
+  applyDocumentPaint,
   applyShapeToDocument,
   bucketFillDocument,
+  bumpPixelDocRevision,
   createBlankDocumentForObject,
   deletePixelLayer,
-  detachPixelDocumentForEditing,
   duplicatePixelLayer,
+  flushPixelDocumentGpuSync,
   importImageAsLayer,
   importImageAsNewDocument,
   mergeLayerDown,
-  paintAtPixelLive,
-  paintSoftBrushStrokeOnDocumentLive,
-  paintStrokeOnDocumentLive,
   patchPixelLayer,
   pixelEditorInitialState,
   publishPixelDocumentIdentity,
+  registerPixelDocument,
   reorderPixelLayer,
   resetSoftBrushStroke,
+  resyncAllPixelDocuments,
   sampleColorFromDocument,
   syncPixelDocumentGpu,
-  flushPixelDocumentGpuSync,
-  resyncAllPixelDocuments,
 } from '../pixel/pixelEditorSlice'
 import {
   clearSelectionOnDocument,
@@ -66,7 +63,8 @@ import { resolveEffectiveMaterial, ensureObjectMaterial } from '../material/mate
 import type { CustomPalette, GradientDirection, GradientHandle2D, HarmonyScheme, MaterialMode, Rgba4 } from '../material/materialTypes'
 import { rgba4ToHex } from '../material/materialTypes'
 import { PRESET_PALETTES, generateHarmonyPalette, savePixelPenPalettes, loadCustomPalettes, loadPixelPenPalettes } from '../material/palettes'
-import { assignUvMappingForMode, ensureObjectUVs } from '../uv/uvObject'
+import { ensureObjectUVs } from '../uv/uvObject'
+import { preparePixelPaintUvLayout } from '../pixel/pixelPaintUv'
 import { sanitizeSceneSnapshot, type SceneSnapshot } from '../history/sceneHistory'
 import { reconcilePixelDocumentCache } from '../rendering/textureCache'
 import {
@@ -233,6 +231,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   pixelEditorCustomPalettes: CustomPalette[]
   pixelDocuments: Record<string, import('../pixel/pixelTypes').PixelDocument>
   pixelTextureRevision: number
+  pixelDocRevisions: Record<string, number>
   pixelEditHistoryPending: boolean
 
   toggleMaterialEditor: () => void
@@ -315,6 +314,11 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
     layerId: string,
     patch: Partial<{ name: string; visible: boolean; opacity: number; blendMode: PixelBlendMode }>
   ) => void
+  paintDocumentStroke: (
+    docId: string,
+    points: { x: number; y: number }[],
+    options?: { tool?: 'pencil' | 'eraser'; round?: boolean; syncGpu?: boolean; restart?: boolean }
+  ) => void
   paintPixelStroke: (points: { x: number; y: number }[], tool?: 'pencil' | 'eraser', options?: { round?: boolean }) => void
   paintPixelShape: (
     tool: 'line' | 'rectangle' | 'ellipse',
@@ -340,6 +344,8 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
     y1: number
   ) => void
   ensureTextureDocumentForObject: (objectId: string) => string | null
+  resetPixelPaintUvLayout: (objectId: string) => void
+  clearPixelEditorMaterial: () => void
 }
 
 function reconcileAppBlobUrls(getState: () => AppState): void {
@@ -514,6 +520,53 @@ function sanitizeImageSelectionIds(
         ? selectedBillboardImageId
         : null,
   }
+}
+
+
+/** Bump per-doc revision for the painted document only. */
+function withPixelTextureBump<T extends Record<string, unknown>>(
+  s: { pixelDocRevisions: Record<string, number> },
+  docId: string | null | undefined,
+  patch: T
+): T & { pixelDocRevisions: Record<string, number> } {
+  return {
+    ...patch,
+    pixelDocRevisions: bumpPixelDocRevision(s.pixelDocRevisions, docId),
+  }
+}
+
+function runDocumentPaint(
+  state: AppState,
+  docId: string,
+  points: { x: number; y: number }[],
+  opts?: {
+    tool?: 'pencil' | 'eraser'
+    round?: boolean
+    syncGpu?: boolean
+    restart?: boolean
+  }
+): void {
+  if (points.length === 0) return
+  const eraser = opts?.tool === 'eraser'
+  const tool = eraser ? 'eraser' : state.pixelEditorTool
+  applyDocumentPaint(state.pixelDocuments, docId, {
+    points,
+    color: state.pixelEditorColor,
+    tool,
+    brushSize: state.pixelEditorBrushSize,
+    brushShape: state.pixelEditorBrushShape,
+    brushHardness: state.pixelEditorBrushHardness,
+    brushOpacity: state.pixelEditorBrushOpacity,
+    brushFlow: state.pixelEditorBrushFlow,
+    pixelPerfect: state.pixelEditorPixelPerfect,
+    symH: state.pixelEditorSymmetryH,
+    symV: state.pixelEditorSymmetryV,
+    restart: opts?.restart ?? points.length === 1,
+    // The Paint-on-model toggle controls where input is accepted, not whether
+    // the 3D preview is live. All 2D strokes use the RAF/dirty-rect GPU path.
+    syncGpu: opts?.syncGpu ?? true,
+    round: opts?.round ?? true,
+  })
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -892,15 +945,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const id = objectId ?? generateId()
       const { docs, docId: newId } = createBlankDocumentForObject(state.pixelDocuments, id, width, height)
       docId = newId
-      set((s) => ({
-        pixelDocuments: docs,
-        pixelEditorDocId: docId,
-        objectTextures: {
-          ...s.objectTextures,
-          [docId!]: { url: '', name: 'Pixel texture', width, height },
-        },
-        pixelTextureRevision: s.pixelTextureRevision + 1,
-      }))
+      set((s) =>
+        withPixelTextureBump(s, docId, {
+          pixelDocuments: docs,
+          pixelEditorDocId: docId,
+          objectTextures: {
+            ...s.objectTextures,
+            [docId!]: { url: '', name: 'Pixel texture', width, height },
+          },
+        })
+      )
       if (objectId) {
         const obj = get().objects.find((o) => o.id === objectId)
         if (obj) {
@@ -941,11 +995,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().beginPixelEdit()
     const next = cutSelectionOnDocument(pixelDocuments, pixelEditorDocId, pixelEditorSelection)
     if (!next) return false
-    set((s) => ({
-      pixelDocuments: next,
-      pixelEditorSelection: null,
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelDocuments: next,
+        pixelEditorSelection: null,
+      })
+    )
     get().commitPixelEdit()
     return true
   },
@@ -960,11 +1015,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorSelection
     )
     if (!result) return false
-    set((s) => ({
-      pixelDocuments: result.docs,
-      pixelEditorSelection: result.pasted,
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelDocuments: result.docs,
+        pixelEditorSelection: result.pasted,
+      })
+    )
     get().commitPixelEdit()
     return true
   },
@@ -978,10 +1034,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorDocId,
       pixelEditorSelection
     )
-    set((s) => ({
-      pixelDocuments: next,
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelDocuments: next,
+      })
+    )
     get().commitPixelEdit()
     return true
   },
@@ -1063,15 +1120,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   beginPixelEdit: () => {
     if (get().pixelEditHistoryPending) return
-    const { pixelEditorDocId, pixelDocuments } = get()
-    // Detach pixel buffers from any shared history snapshot before in-place strokes.
-    if (pixelEditorDocId && pixelDocuments[pixelEditorDocId]) {
-      set({
-        pixelEditHistoryPending: true,
-        pixelDocuments: detachPixelDocumentForEditing(pixelDocuments, pixelEditorDocId),
-      })
-      return
-    }
+    // History snapshots own deep-cloned pixel buffers. The live document is
+    // therefore already safe to mutate and must not be cloned again here.
+    // Cloning a 4K layer before its first dab was the largest input stall.
     set({ pixelEditHistoryPending: true })
   },
 
@@ -1086,12 +1137,61 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorDocId && pixelDocuments[pixelEditorDocId]
         ? publishPixelDocumentIdentity(pixelDocuments, pixelEditorDocId)
         : { ...pixelDocuments }
-    set({
-      pixelEditHistoryPending: false,
-      pixelTextureRevision: get().pixelTextureRevision + 1,
-      pixelDocuments: published,
-    })
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelEditHistoryPending: false,
+        pixelDocuments: published,
+      })
+    )
     if (pending) get().commitHistory('Pixel edit')
+  },
+
+  resetPixelPaintUvLayout: (objectId) => {
+    const obj = get().objects.find((candidate) => candidate.id === objectId)
+    if (!obj) return
+    const layout = preparePixelPaintUvLayout(obj)
+    get().updateObject(objectId, {
+      uvs: layout.uvs,
+      faceUvIndices: layout.faceUvIndices,
+      uvMappingMode: 'perFace',
+      uvAutoPacked: true,
+    })
+    set({
+      uvEditorSelectedFaces: obj.faces.map((_, index) => index),
+      uvEditorSelectedPoints: [],
+      uvEditorViewAll: false,
+      uvEditorMode: 'faces',
+    })
+    get().commitHistory('Rebuild paint UVs')
+  },
+
+  clearPixelEditorMaterial: () => {
+    const { pixelEditorDocId, pixelDocuments } = get()
+    if (!pixelEditorDocId) return
+    const current = pixelDocuments[pixelEditorDocId]
+    if (!current) return
+
+    const { docs } = createBlankDocumentForObject(
+      pixelDocuments,
+      pixelEditorDocId,
+      current.width,
+      current.height
+    )
+    syncPixelDocumentGpu(docs, pixelEditorDocId)
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelDocuments: docs,
+        pixelEditorSelection: null,
+        objects: s.objects.map((obj) => {
+          const material = resolveEffectiveMaterial(obj)
+          const textureId = material.textureId ?? obj.id
+          return textureId === pixelEditorDocId
+            ? updateObjectMaterialSettings(obj, { textureCanvasMode: 'replace' })
+            : obj
+        }),
+      })
+    )
+    get().commitHistory('Clear pixel material')
   },
 
   ensureTextureDocumentForObject: (objectId) => {
@@ -1108,7 +1208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? setObjectMaterialMode(ensureObjectMaterial(obj), 'texture', docId)
             : obj
         if (needsUvs) {
-          const withUvs = assignUvMappingForMode(next, 'perFace', true)
+          const withUvs = ensureObjectUVs(next)
           next = {
             ...withUvs,
             ...next,
@@ -1118,101 +1218,118 @@ export const useAppStore = create<AppState>((set, get) => ({
             uvAutoPacked: withUvs.uvAutoPacked,
           }
         }
-        get().updateObject(objectId, next)
+        get().updateObject(objectId, {
+          material: next.material,
+          ...(needsUvs
+            ? {
+                uvs: next.uvs,
+                faceUvIndices: next.faceUvIndices,
+                uvMappingMode: next.uvMappingMode,
+                uvAutoPacked: next.uvAutoPacked,
+                uvLayoutVersion: next.uvLayoutVersion,
+              }
+            : {}),
+        })
       }
       return docId
     }
     const { docs, docId: newId } = createBlankDocumentForObject(pixelDocuments, objectId)
-    const withUvs = assignUvMappingForMode(obj, 'perFace', true)
-    const mesh = HalfEdgeMesh.fromObject(withUvs)
-    ensurePositiveVolume(mesh)
-    const textured = mesh.toObject(objectId, obj.name, {
-      ...withUvs,
-      ...setObjectMaterialMode({ ...withUvs, material: ensureObjectMaterial(obj).material }, 'texture', newId),
+    // Preserve complete authored UVs exactly. Only objects with no usable UV
+    // topology receive a default layout; opening Pixel Editor never repacks.
+    const withUvs =
+      obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length
+        ? obj
+        : ensureObjectUVs(obj)
+    const textured = setObjectMaterialMode(ensureObjectMaterial(withUvs), 'texture', newId)
+    get().updateObject(objectId, {
+      material: textured.material,
       uvs: withUvs.uvs,
       faceUvIndices: withUvs.faceUvIndices,
-      uvMappingMode: 'perFace',
+      uvMappingMode: withUvs.uvMappingMode,
       uvAutoPacked: withUvs.uvAutoPacked,
+      uvLayoutVersion: withUvs.uvLayoutVersion,
     })
-    get().updateObject(objectId, textured)
-    set((s) => ({
-      pixelDocuments: docs,
-      pixelEditorDocId: newId,
-      objectTextures: {
-        ...s.objectTextures,
-        [newId]: { url: '', name: 'Pixel texture', width: 64, height: 64 },
-      },
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, newId, {
+        pixelDocuments: docs,
+        pixelEditorDocId: newId,
+        objectTextures: {
+          ...s.objectTextures,
+          [newId]: { url: '', name: 'Pixel texture', width: 64, height: 64 },
+        },
+      })
+    )
     return newId
   },
-
   createNewPixelDocument: (width, height, linkObjectId) => {
     const id = linkObjectId ?? generateId()
     const { docs, docId } = createBlankDocumentForObject(get().pixelDocuments, id, width, height)
-    set((s) => ({
-      pixelDocuments: docs,
-      pixelEditorDocId: docId,
-      objectTextures: {
-        ...s.objectTextures,
-        [docId]: { url: '', name: 'Pixel texture', width, height },
-      },
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: docs,
+        pixelEditorDocId: docId,
+        objectTextures: {
+          ...s.objectTextures,
+          [docId]: { url: '', name: 'Pixel texture', width, height },
+        },
+      })
+    )
     if (linkObjectId) {
       const obj = get().objects.find((o) => o.id === linkObjectId)
       if (obj) {
-        const withUvs = assignUvMappingForMode(obj, 'perFace', true)
-        const mesh = HalfEdgeMesh.fromObject(withUvs)
-        ensurePositiveVolume(mesh)
-        get().updateObject(linkObjectId, mesh.toObject(linkObjectId, obj.name, {
-          ...withUvs,
-          ...setObjectMaterialMode(ensureObjectMaterial(withUvs), 'texture', docId),
+        const withUvs =
+          obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length
+            ? obj
+            : ensureObjectUVs(obj)
+        const textured = setObjectMaterialMode(ensureObjectMaterial(withUvs), 'texture', docId)
+        get().updateObject(linkObjectId, {
+          material: textured.material,
           uvs: withUvs.uvs,
           faceUvIndices: withUvs.faceUvIndices,
-          uvMappingMode: 'perFace',
+          uvMappingMode: withUvs.uvMappingMode,
           uvAutoPacked: withUvs.uvAutoPacked,
-        }))
+          uvLayoutVersion: withUvs.uvLayoutVersion,
+        })
       }
     }
     get().commitHistory('New pixel document')
   },
-
   resizeOpenPixelDocument: (width, height) => {
     const { pixelEditorDocId, pixelDocuments } = get()
     if (!pixelEditorDocId || !pixelDocuments[pixelEditorDocId]) return
     const doc = resizePixelDoc(pixelDocuments[pixelEditorDocId], width, height)
     const nextDocs = { ...pixelDocuments, [pixelEditorDocId]: doc }
     syncPixelDocumentGpu(nextDocs, pixelEditorDocId)
-    set((s) => ({
-      pixelDocuments: nextDocs,
-      objectTextures: {
-        ...s.objectTextures,
-        [pixelEditorDocId]: {
-          ...(s.objectTextures[pixelEditorDocId] ?? { url: '', name: 'Pixel texture' }),
-          width,
-          height,
+    set((s) =>
+      withPixelTextureBump(s, pixelEditorDocId, {
+        pixelDocuments: nextDocs,
+        objectTextures: {
+          ...s.objectTextures,
+          [pixelEditorDocId]: {
+            ...(s.objectTextures[pixelEditorDocId] ?? { url: '', name: 'Pixel texture' }),
+            width,
+            height,
+          },
         },
-      },
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+      })
+    )
     get().commitHistory('Resize pixel canvas')
   },
-
   importPixelImage: async (file, mode) => {
     try {
       if (mode === 'new') {
         const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
         const doc = docs[docId]
-        set((s) => ({
-          pixelDocuments: docs,
-          pixelEditorDocId: docId,
-          objectTextures: {
-            ...s.objectTextures,
-            [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
-          },
-          pixelTextureRevision: s.pixelTextureRevision + 1,
-        }))
+        set((s) =>
+          withPixelTextureBump(s, docId, {
+            pixelDocuments: docs,
+            pixelEditorDocId: docId,
+            objectTextures: {
+              ...s.objectTextures,
+              [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
+            },
+          })
+        )
         reconcileAppBlobUrls(get)
         const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
         if (objectId) {
@@ -1224,7 +1341,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const docId = get().pixelEditorDocId
       if (!docId) return
       const docs = await importImageAsLayer(get().pixelDocuments, docId, file)
-      set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+      set((s) => withPixelTextureBump(s, docId, { pixelDocuments: docs }))
       reconcileAppBlobUrls(get)
       get().commitHistory('Import pixel layer')
     } catch (err) {
@@ -1232,21 +1349,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error(`Could not import "${file.name}": ${detail}`)
     }
   },
-
   importHairTextureImage: async (file) => {
     try {
       const { docs, docId } = await importImageAsNewDocument(get().pixelDocuments, file)
       const doc = docs[docId]
       if (!doc) throw new Error('Imported texture document is missing')
-      set((s) => ({
-        pixelDocuments: docs,
-        objectTextures: {
-          ...s.objectTextures,
-          [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
-        },
-        pixelTextureRevision: s.pixelTextureRevision + 1,
-        hairTextureId: docId,
-      }))
+      set((s) =>
+        withPixelTextureBump(s, docId, {
+          pixelDocuments: docs,
+          objectTextures: {
+            ...s.objectTextures,
+            [docId]: { url: '', name: file.name, width: doc.width, height: doc.height },
+          },
+          hairTextureId: docId,
+        })
+      )
       reconcileAppBlobUrls(get)
       get().commitHistory('Import hair texture')
       return docId
@@ -1255,7 +1372,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error(`Could not import hair texture "${file.name}": ${detail}`)
     }
   },
-
   savePixelDocument: async () => {
     const state = get()
     const docId = state.pixelEditorDocId
@@ -1273,7 +1389,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().pixelEditHistoryPending) get().commitHistory('Pixel edit')
     set({ pixelEditHistoryPending: false })
   },
-
   exportPixelDocumentPng: async () => {
     const state = get()
     const { pixelEditorDocId, pixelDocuments } = state
@@ -1301,20 +1416,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       const imported = parsePixelDocumentFile(text)
       const docId = get().pixelEditorDocId ?? imported.id
       const doc = { ...imported, id: docId }
-      set((s) => ({
-        pixelDocuments: registerPixelDocument(s.pixelDocuments, doc),
-        pixelEditorDocId: docId,
-        objectTextures: {
-          ...s.objectTextures,
-          [docId]: {
-            url: '',
-            name: file.name.replace(/\.[^.]+$/, ''),
-            width: doc.width,
-            height: doc.height,
+      set((s) =>
+        withPixelTextureBump(s, docId, {
+          pixelDocuments: registerPixelDocument(s.pixelDocuments, doc),
+          pixelEditorDocId: docId,
+          objectTextures: {
+            ...s.objectTextures,
+            [docId]: {
+              url: '',
+              name: file.name.replace(/\.[^.]+$/, ''),
+              width: doc.width,
+              height: doc.height,
+            },
           },
-        },
-        pixelTextureRevision: s.pixelTextureRevision + 1,
-      }))
+        })
+      )
       reconcileAppBlobUrls(get)
       const objectId = get().selectedObjectId ?? get().selectionObjectIds[0]
       if (objectId) {
@@ -1326,123 +1442,84 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error(`Could not import "${file.name}": ${detail}`)
     }
   },
-
   selectPixelEditorDocument: (docId) => {
     if (!get().pixelDocuments[docId]) return
     set({ pixelEditorDocId: docId, pixelEditorSelection: null })
   },
-
   addPixelEditorLayer: () => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: addPixelLayer(s.pixelDocuments, docId),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: addPixelLayer(s.pixelDocuments, docId),
+      })
+    )
   },
 
   deletePixelEditorLayer: (layerId) => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: deletePixelLayer(s.pixelDocuments, docId, layerId),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: deletePixelLayer(s.pixelDocuments, docId, layerId),
+      })
+    )
   },
 
   duplicatePixelEditorLayer: (layerId) => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: duplicatePixelLayer(s.pixelDocuments, docId, layerId),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: duplicatePixelLayer(s.pixelDocuments, docId, layerId),
+      })
+    )
   },
 
   mergePixelEditorLayerDown: (layerId) => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: mergeLayerDown(s.pixelDocuments, docId, layerId),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: mergeLayerDown(s.pixelDocuments, docId, layerId),
+      })
+    )
   },
 
   reorderPixelEditorLayer: (layerId, toIndex) => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: reorderPixelLayer(s.pixelDocuments, docId, layerId, toIndex),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: reorderPixelLayer(s.pixelDocuments, docId, layerId, toIndex),
+      })
+    )
   },
 
   patchPixelEditorLayer: (layerId, patch) => {
     const docId = get().pixelEditorDocId
     if (!docId) return
     get().beginPixelEdit()
-    set((s) => ({
-      pixelDocuments: patchPixelLayer(s.pixelDocuments, docId, layerId, patch),
-      pixelTextureRevision: s.pixelTextureRevision + 1,
-    }))
+    set((s) =>
+      withPixelTextureBump(s, docId, {
+        pixelDocuments: patchPixelLayer(s.pixelDocuments, docId, layerId, patch),
+      })
+    )
+  },
+
+  paintDocumentStroke: (docId, points, options) => {
+    runDocumentPaint(get(), docId, points, options)
   },
 
   paintPixelStroke: (points, tool = 'pencil', options) => {
-    const {
-      pixelEditorDocId,
-      pixelDocuments,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      pixelEditorBrushShape,
-      pixelEditorBrushHardness,
-      pixelEditorBrushOpacity,
-      pixelEditorBrushFlow,
-      pixelEditorTool,
-      pixelEditorPixelPerfect,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-    } = get()
-    if (!pixelEditorDocId || points.length === 0) return
-
-    if (pixelEditorTool === 'paintBrush' && tool !== 'eraser') {
-      paintSoftBrushStrokeOnDocumentLive(
-        pixelDocuments,
-        pixelEditorDocId,
-        points,
-        pixelEditorColor,
-        {
-          size: pixelEditorBrushSize,
-          hardness: pixelEditorBrushHardness,
-          opacity: pixelEditorBrushOpacity,
-          flow: pixelEditorBrushFlow,
-          shape: pixelEditorBrushShape,
-        },
-        pixelEditorSymmetryH,
-        pixelEditorSymmetryV,
-        { restart: points.length === 1 }
-      )
-      return
-    }
-
-    // Pencil / eraser stay hard pixel tips.
-    const round = options?.round ?? true
-    paintStrokeOnDocumentLive(
-      pixelDocuments,
-      pixelEditorDocId,
-      points,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      tool,
-      pixelEditorPixelPerfect,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-      { round }
-    )
+    const docId = get().pixelEditorDocId
+    if (!docId) return
+    get().paintDocumentStroke(docId, points, { tool, round: options?.round })
   },
 
   paintPixelShape: (tool, x0, y0, x1, y1) => {
@@ -1470,7 +1547,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorSymmetryH,
       pixelEditorSymmetryV
     )
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+    set((s) => withPixelTextureBump(s, pixelEditorDocId, { pixelDocuments: docs }))
   },
 
   bucketFillPixel: (x, y, global) => {
@@ -1500,7 +1577,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorSymmetryH,
       pixelEditorSymmetryV
     )
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+    set((s) => withPixelTextureBump(s, docId, { pixelDocuments: docs }))
   },
 
   samplePixelColor: (x, y) => {
@@ -1526,98 +1603,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   paintOnModelPixel: (docId, x, y) => {
-    const {
-      pixelDocuments,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      pixelEditorBrushShape,
-      pixelEditorBrushHardness,
-      pixelEditorBrushOpacity,
-      pixelEditorBrushFlow,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-      pixelEditorTool,
-    } = get()
-    if (pixelEditorTool === 'paintBrush') {
-      paintSoftBrushStrokeOnDocumentLive(
-        pixelDocuments,
-        docId,
-        [{ x, y }],
-        pixelEditorColor,
-        {
-          size: pixelEditorBrushSize,
-          hardness: pixelEditorBrushHardness,
-          opacity: pixelEditorBrushOpacity,
-          flow: pixelEditorBrushFlow,
-          shape: pixelEditorBrushShape,
-        },
-        pixelEditorSymmetryH,
-        pixelEditorSymmetryV,
-        { restart: true }
-      )
-      return
-    }
-    const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
-    paintAtPixelLive(
-      pixelDocuments,
-      docId,
-      x,
-      y,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      tool,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-      { round: true }
-    )
+    get().paintDocumentStroke(docId, [{ x, y }], { syncGpu: true, restart: true })
   },
 
   paintOnModelStroke: (docId, points) => {
-    const {
-      pixelDocuments,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      pixelEditorBrushShape,
-      pixelEditorBrushHardness,
-      pixelEditorBrushOpacity,
-      pixelEditorBrushFlow,
-      pixelEditorPixelPerfect,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-      pixelEditorTool,
-    } = get()
-    if (points.length === 0) return
-    if (pixelEditorTool === 'paintBrush') {
-      paintSoftBrushStrokeOnDocumentLive(
-        pixelDocuments,
-        docId,
-        points,
-        pixelEditorColor,
-        {
-          size: pixelEditorBrushSize,
-          hardness: pixelEditorBrushHardness,
-          opacity: pixelEditorBrushOpacity,
-          flow: pixelEditorBrushFlow,
-          shape: pixelEditorBrushShape,
-        },
-        pixelEditorSymmetryH,
-        pixelEditorSymmetryV
-      )
-      return
-    }
-    const tool = pixelEditorTool === 'eraser' ? 'eraser' : 'pencil'
-    paintStrokeOnDocumentLive(
-      pixelDocuments,
-      docId,
-      points,
-      pixelEditorColor,
-      pixelEditorBrushSize,
-      tool,
-      pixelEditorPixelPerfect,
-      pixelEditorSymmetryH,
-      pixelEditorSymmetryV,
-      { round: true }
-    )
+    get().paintDocumentStroke(docId, points, { syncGpu: true })
   },
 
   paintOnModelShape: (docId, tool, x0, y0, x1, y1) => {
@@ -1643,7 +1633,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pixelEditorSymmetryH,
       pixelEditorSymmetryV
     )
-    set((s) => ({ pixelDocuments: docs, pixelTextureRevision: s.pixelTextureRevision + 1 }))
+    set((s) => withPixelTextureBump(s, docId, { pixelDocuments: docs }))
   },
 }))
 

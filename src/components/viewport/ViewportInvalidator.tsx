@@ -45,7 +45,6 @@ export function ViewportSceneInvalidator({
   showGrid,
   facetExaggeration,
   showDensityHeatmap,
-  pixelTextureRevision,
   cadPreviewSignal,
 }: {
   objects: unknown
@@ -59,7 +58,6 @@ export function ViewportSceneInvalidator({
   showGrid: unknown
   facetExaggeration: unknown
   showDensityHeatmap: unknown
-  pixelTextureRevision: unknown
   cadPreviewSignal: unknown
 }) {
   const { slotIndex, layoutVisible } = useViewportRuntime()
@@ -70,6 +68,8 @@ export function ViewportSceneInvalidator({
       : null
 
   // Shared scene / selection — each visible slot demand-renders itself.
+  // Pixel texture uploads invalidate via invalidateAllViewports — do not
+  // re-render the React viewport tree on every stroke commit.
   useEffect(() => {
     if (!layoutVisible) return
     invalidateViewport(slotIndex, 'scene')
@@ -85,7 +85,6 @@ export function ViewportSceneInvalidator({
     showGrid,
     facetExaggeration,
     showDensityHeatmap,
-    pixelTextureRevision,
     layoutVisible,
     slotIndex,
   ])

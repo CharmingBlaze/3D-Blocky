@@ -5,7 +5,7 @@ import {
   faceCorners3D,
   faceNormal3D,
   isDoodleLikeObject,
-  detachFacesUvTopology,
+  separateFacesUvTopology,
   type SceneObjectWithUVs,
 } from './uvObject'
 import {
@@ -106,6 +106,24 @@ export interface UnwrapOptions {
   projectionAxes?: { right: Vec3; up: Vec3 }
   /** Active 3D viewport — ortho views use the shared view-axis table. */
   projectionView?: ViewType
+}
+
+function compactUnwrapTopology(
+  uvs: Uv2[],
+  faceUvIndices: number[][]
+): { uvs: Uv2[]; faceUvIndices: number[][] } {
+  const remap = new Map<number, number>()
+  const compactUvs: Uv2[] = []
+  const compactFaces = faceUvIndices.map((face) => face.map((oldUi) => {
+    let nextUi = remap.get(oldUi)
+    if (nextUi === undefined) {
+      nextUi = compactUvs.length
+      remap.set(oldUi, nextUi)
+      compactUvs.push(cloneUv2(uvs[oldUi] ?? { u: 0, v: 0 }))
+    }
+    return nextUi
+  }))
+  return { uvs: compactUvs, faceUvIndices: compactFaces }
 }
 
 export type ViewProjectionSpec =
@@ -333,16 +351,24 @@ export function clusterFacesSmartUv(
     if (visited.has(seed) || !allowed.has(seed)) continue
     const island: number[] = []
     const queue = [seed]
+    const seedNormal = faceNormal3D(obj, seed)
     visited.add(seed)
 
-    while (queue.length > 0) {
-      const cur = queue.shift()!
+    for (let head = 0; head < queue.length; head++) {
+      const cur = queue[head]!
       island.push(cur)
       const nCur = faceNormal3D(obj, cur)
       for (const nb of faceNeighbors(cur, obj, edgeToFaces, spatialEdgeToFaces)) {
         if (!allowed.has(nb) || visited.has(nb)) continue
         const nNb = faceNormal3D(obj, nb)
-        if (normalAngleDeg(nCur, nNb) <= angleLimitDeg) {
+        // Comparing only neighboring normals lets a smooth closed surface grow
+        // into one impossible, overlapping island. Keep local continuity while
+        // also limiting drift from the island seed, which creates useful seams
+        // on spheres and long bends without splitting a small selected patch.
+        if (
+          normalAngleDeg(nCur, nNb) <= angleLimitDeg &&
+          normalAngleDeg(seedNormal, nNb) <= angleLimitDeg
+        ) {
           visited.add(nb)
           queue.push(nb)
         }
@@ -352,6 +378,59 @@ export function clusterFacesSmartUv(
   }
 
   return islands
+}
+
+/** Connected components of a face selection, independent of UV seams. */
+export function clusterFacesConnected(obj: SceneObject, faceIndices: number[]): number[][] {
+  const allowed = new Set(faceIndices)
+  const { edgeToFaces, spatialEdgeToFaces } = buildEdgeAdjacency(obj)
+  const visited = new Set<number>()
+  const components: number[][] = []
+
+  for (const seed of faceIndices) {
+    if (visited.has(seed) || !allowed.has(seed)) continue
+    const component: number[] = []
+    const queue = [seed]
+    visited.add(seed)
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head]!
+      component.push(current)
+      for (const neighbor of faceNeighbors(current, obj, edgeToFaces, spatialEdgeToFaces)) {
+        if (!allowed.has(neighbor) || visited.has(neighbor)) continue
+        visited.add(neighbor)
+        queue.push(neighbor)
+      }
+    }
+    components.push(component)
+  }
+  return components
+}
+
+function isAabbBoxLike(obj: SceneObject, faceIndices: number[]): boolean {
+  if (faceIndices.length < 6) return false
+  const size = aabbSizeForFaces(obj, faceIndices)
+  const mins = { x: Infinity, y: Infinity, z: Infinity }
+  const maxs = { x: -Infinity, y: -Infinity, z: -Infinity }
+  for (const fi of faceIndices) {
+    for (const vi of obj.faces[fi] ?? []) {
+      const p = obj.positions[vi]
+      if (!p) continue
+      mins.x = Math.min(mins.x, p.x); mins.y = Math.min(mins.y, p.y); mins.z = Math.min(mins.z, p.z)
+      maxs.x = Math.max(maxs.x, p.x); maxs.y = Math.max(maxs.y, p.y); maxs.z = Math.max(maxs.z, p.z)
+    }
+  }
+  const tolerance = Math.max(size.x, size.y, size.z) * 1e-4 + 1e-7
+  const onBoundaryPlane = (fi: number) => {
+    const face = obj.faces[fi] ?? []
+    return (['x', 'y', 'z'] as const).some((axis) =>
+      face.every((vi) => {
+        const value = obj.positions[vi]?.[axis]
+        return value !== undefined &&
+          (Math.abs(value - mins[axis]) <= tolerance || Math.abs(value - maxs[axis]) <= tolerance)
+      })
+    )
+  }
+  return faceIndices.every(onBoundaryPlane)
 }
 
 /** Pick unwrap strategy from mesh shape — no manual seam marking required. */
@@ -378,7 +457,26 @@ export function resolveAutoUnwrapMethod(
   const largestBucket = Math.max(...buckets.values(), 0)
   const bucketBalance = largestBucket / Math.max(faceCount, 1)
 
-  if (bucketCount >= 4 && bucketCount <= 6 && bucketBalance < 0.55) return 'box'
+  if (
+    bucketCount >= 4 &&
+    bucketCount <= 6 &&
+    bucketBalance < 0.55 &&
+    isAabbBoxLike(obj, indices)
+  ) return 'box'
+
+  const connected = clusterFacesConnected(obj, indices)
+  const planar = clusterFacesPlanarRegions(obj, indices)
+  const planarRegionByFace = new Map<number, number>()
+  planar.forEach((region, regionIndex) => {
+    for (const fi of region) planarRegionByFace.set(fi, regionIndex)
+  })
+  const hasBentConnectedPatch = connected.some((component) =>
+    component.length > 1 &&
+    new Set(component.map((fi) => planarRegionByFace.get(fi))).size > 1
+  )
+  // A selected run of neighboring, non-coplanar faces should stay together as
+  // a smart island. Planar Regions remains the best fit for flat selections.
+  if (hasBentConnectedPatch) return 'smart'
   if (faceCount <= 48 && bucketCount <= 8) return 'regions'
   return 'smart'
 }
@@ -632,7 +730,7 @@ export function unwrapSelectedFaces(
 ): { uvs: Uv2[]; faceUvIndices: number[][]; uvAutoPacked?: boolean } {
   const margin = options.margin ?? 0.02
   const allFaceCount = obj.faces.length
-  const faces = faceIndices.filter((fi) => fi >= 0 && fi < allFaceCount)
+  const faces = [...new Set(faceIndices.filter((fi) => fi >= 0 && fi < allFaceCount))]
   if (faces.length === 0) {
     return {
       uvs: obj.uvs.map(cloneUv2),
@@ -643,16 +741,19 @@ export function unwrapSelectedFaces(
   const fullMesh = faces.length >= allFaceCount
   if (method === 'view') {
     const spec = resolveViewProjectionSpec(obj, faces, options)
-    const source = fullMesh ? obj : detachFacesUvTopology(obj, faces)
+    const source = separateFacesUvTopology(obj, faces)
     const uvs = source.uvs.map(cloneUv2)
     const faceUvIndices = source.faceUvIndices.map((face) => [...face])
     projectFacesFromView({ ...obj, uvs, faceUvIndices }, uvs, faceUvIndices, faces, spec)
+    for (const component of clusterFacesConnected(obj, faces)) {
+      weldIslandUvTopology(faceUvIndices, uvs, obj, component)
+    }
     if (!fullMesh) {
       packPartialUnwrapIslands(uvs, faceUvIndices, allFaceCount, faces, [faces], margin, {
         skipRefit: true,
       })
     }
-    return { uvs, faceUvIndices, uvAutoPacked: true }
+    return { ...compactUnwrapTopology(uvs, faceUvIndices), uvAutoPacked: true }
   }
 
   let resolved: UvUnwrapMethod =
@@ -663,8 +764,12 @@ export function unwrapSelectedFaces(
       : options.angleLimitDeg ?? (resolved === 'smart' ? AUTO_SEAM_ANGLE_DEG : 89)
 
   if (fullMesh) {
-    const uvs = obj.uvs.map(cloneUv2)
-    const faceUvIndices = obj.faceUvIndices.map((f) => [...f])
+    // Always begin from independent face corners. Otherwise welding left by a
+    // previous Smart/Region unwrap leaks into a later per-face method and makes
+    // repeated Unwrap presses order-dependent.
+    const source = separateFacesUvTopology(obj, faces)
+    const uvs = source.uvs.map(cloneUv2)
+    const faceUvIndices = source.faceUvIndices.map((f) => [...f])
     const work: SceneObjectWithUVs = { ...obj, faceUvIndices }
     repackEntireMesh(
       work,
@@ -677,13 +782,12 @@ export function unwrapSelectedFaces(
       true
     )
     return {
-      uvs,
-      faceUvIndices,
+      ...compactUnwrapTopology(uvs, faceUvIndices),
       uvAutoPacked: options.markPacked ?? true,
     }
   }
 
-  const detached = detachFacesUvTopology(obj, faces)
+  const detached = separateFacesUvTopology(obj, faces)
   const uvs = detached.uvs.map(cloneUv2)
   const faceUvIndices = detached.faceUvIndices.map((f) => [...f])
   const work: SceneObjectWithUVs = { ...obj, uvs, faceUvIndices }
@@ -764,7 +868,10 @@ export function unwrapSelectedFaces(
     })
   }
 
-  return { uvs, faceUvIndices, uvAutoPacked: options.markPacked ?? false }
+  return {
+    ...compactUnwrapTopology(uvs, faceUvIndices),
+    uvAutoPacked: options.markPacked ?? false,
+  }
 }
 
 /** Full-mesh auto unwrap with implicit seams. */

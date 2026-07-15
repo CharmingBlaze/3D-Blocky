@@ -67,7 +67,6 @@ export function ViewportPanel({
     viewportXRay,
     setActiveView,
     setViewportSlotView,
-    pixelTextureRevision,
   } = useAppStore(
     useShallow((s) => ({
       objects: s.objects,
@@ -92,7 +91,6 @@ export function ViewportPanel({
       viewportXRay: s.viewportXRay,
       setActiveView: s.setActiveView,
       setViewportSlotView: s.setViewportSlotView,
-      pixelTextureRevision: s.pixelTextureRevision,
     }))
   )
 
@@ -374,7 +372,6 @@ export function ViewportPanel({
               meshSelection={meshSelection}
               selectionObjectIds={selectionObjectIds}
               activeTool={activeTool}
-              pixelTextureRevision={pixelTextureRevision}
               cadPreviewSignal={cadPreview}
               primitiveBoxDraft={primitiveBoxDraft}
               multiObjectGizmoActive={multiObjectGizmoActive}

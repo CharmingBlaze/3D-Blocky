@@ -13,6 +13,7 @@ import { invalidateFaceGroupCache } from '../mesh/faceGroups'
 import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import { stampDrawMaterial } from '../material/materialEditorSlice'
+import { ensureObjectUVs } from '../uv/uvObject'
 import { rebuildObjectIndex, getObjectIndex } from './objectIndex'
 import type { UvTextureInfo } from './appStore'
 
@@ -96,8 +97,14 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
       const { symmetryEnabled, symmetryAxis, symmetryPlane, polyBudget, drawDoubleSided } = store()
       const budget = obj.polyBudget ?? polyBudget
       const stamped = stampDrawMaterial(obj, drawDoubleSided)
-      const prepared = enforceSceneObjectPolyBudget(prepareSceneObject(stamped), budget)
-      const batch = [prepared]
+      // Every newly drawn object enters the scene with one complete normalized
+      // atlas. Existing authored UVs (hair cards, image planes, imports) are
+      // preserved; geometry without a finished layout gets the default box atlas.
+      // Doing this once at creation avoids lazy unwrap work in render/editor loops.
+      const prepared = ensureObjectUVs(
+        enforceSceneObjectPolyBudget(prepareSceneObject(stamped), budget)
+      )
+      const batch: SceneObject[] = [prepared]
       if (symmetryEnabled && !options?.skipSymmetry) {
         batch.push(mirrorSceneObject(prepared, symmetryAxis, symmetryPlane))
       }

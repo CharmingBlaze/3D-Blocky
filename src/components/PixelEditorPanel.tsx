@@ -11,6 +11,8 @@ import {
   getPixelCompositeCache,
   subscribePixelCompositeCache,
 } from '../pixel/pixelCompositeCache'
+import { syncPixelDocumentComposite } from '../pixel/pixelEditorSlice'
+import type { PixelDirtyRect } from '../pixel/pixelDirtyRect'
 import type { PixelTool } from '../pixel/pixelTypes'
 import { PIXEL_SIZE_PRESETS } from '../pixel/pixelTypes'
 import { resolveEffectiveMaterial } from '../material/materials'
@@ -25,7 +27,7 @@ import { subscribeUvDraft, type UvDraftSnapshot } from '../uv/uvDraftRelay'
 import {
   clearUvPaintOverlayCaches,
   paintUvAtlasOverlay,
-  resolveMeshForTextureDoc,
+  resolveSelectedUvOverlayMesh,
 } from '../uv/uvPaintOverlay'
 import type { Uv2 } from '../uv/uvTypes'
 
@@ -118,7 +120,8 @@ export function PixelEditorPanel() {
       sampleColor: s.samplePixelColor,
       commitColor: s.commitPixelEditorColor,
       setUvEditorOpen: s.setUvEditorOpen,
-      unwrapSelectedUvFaces: s.unwrapSelectedUvFaces,
+      resetPixelPaintUvLayout: s.resetPixelPaintUvLayout,
+      clearMaterial: s.clearPixelEditorMaterial,
     }))
   )
 
@@ -153,17 +156,20 @@ export function PixelEditorPanel() {
   const uvEditorSelectedFaces = useAppStore((s) => s.uvEditorSelectedFaces)
   /** Committed UV pool identity — store replaces the array on unwrap / island edits. */
   const committedOverlayUvs = useAppStore((s) => {
-    if (!store.docId || !store.showUvOverlay) return null
-    return resolveMeshForTextureDoc(s.objects, store.docId, objectId)?.uvs ?? null
+    if (!store.showUvOverlay) return null
+    return resolveSelectedUvOverlayMesh(s.objects, objectId)?.uvs ?? null
   })
   const committedOverlayFaceUvs = useAppStore((s) => {
-    if (!store.docId || !store.showUvOverlay) return null
-    return resolveMeshForTextureDoc(s.objects, store.docId, objectId)?.faceUvIndices ?? null
+    if (!store.showUvOverlay) return null
+    return resolveSelectedUvOverlayMesh(s.objects, objectId)?.faceUvIndices ?? null
   })
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const canvasStackRef = useRef<HTMLDivElement>(null)
+  const paintCanvasRectRef = useRef<DOMRect | null>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
+  /** Cached UV island draw — rebuilt only on UV/selection/mesh change, not every ants tick. */
+  const uvOverlayCacheRef = useRef<HTMLCanvasElement | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const uvDraftRef = useRef<UvDraftSnapshot | null>(null)
   const uvOverlayObjectIdRef = useRef<string | null>(null)
@@ -179,6 +185,8 @@ export function PixelEditorPanel() {
     y1: number
   } | null>(null)
   const strokeRef = useRef<{ x: number; y: number }[]>([])
+  /** Index into strokeRef of the last point already sent to the live paint path. */
+  const strokePaintFromRef = useRef(0)
   const dragRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const marqueeSelectRef = useRef(false)
   const [marqueeSelect, setMarqueeSelect] = useState(false)
@@ -229,10 +237,11 @@ export function PixelEditorPanel() {
     (clientX: number, clientY: number, continuous = false) => {
       const canvasStack = canvasStackRef.current
       if (!canvasStack || !doc) return null
+      const rect = paintCanvasRectRef.current ?? canvasStack.getBoundingClientRect()
       return pointerToDocumentPixel(
         clientX,
         clientY,
-        canvasStack.getBoundingClientRect(),
+        rect,
         doc.width,
         doc.height,
         continuous
@@ -243,47 +252,132 @@ export function PixelEditorPanel() {
 
   const canvasSizeRef = useRef({ w: 0, h: 0 })
   const imageDataRef = useRef<ImageData | null>(null)
+  const imageDataPixelsRef = useRef<Uint8ClampedArray | null>(null)
   const docRef = useRef(doc)
   docRef.current = doc
 
-  const paintCanvasPixels = useCallback((pixels: Uint8ClampedArray, width: number, height: number) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    if (canvasSizeRef.current.w !== width || canvasSizeRef.current.h !== height) {
-      canvas.width = width
-      canvas.height = height
-      canvasSizeRef.current = { w: width, h: height }
-      imageDataRef.current = null
-    }
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    let imageData = imageDataRef.current
-    if (!imageData || imageData.width !== width || imageData.height !== height) {
-      imageData = new ImageData(width, height)
-      imageDataRef.current = imageData
-    }
-    imageData.data.set(pixels)
-    ctx.putImageData(imageData, 0, 0)
-  }, [])
+  const paintCanvasPixels = useCallback(
+    (
+      pixels: Uint8ClampedArray,
+      width: number,
+      height: number,
+      dirty: PixelDirtyRect | null = null
+    ) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      if (canvasSizeRef.current.w !== width || canvasSizeRef.current.h !== height) {
+        canvas.width = width
+        canvas.height = height
+        canvasSizeRef.current = { w: width, h: height }
+        imageDataRef.current = null
+        imageDataPixelsRef.current = null
+      }
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      // Prefer wrapping the composite buffer so dirty putImageData skips a full copy.
+      if (imageDataPixelsRef.current !== pixels || !imageDataRef.current) {
+        imageDataRef.current = new ImageData(pixels, width, height)
+        imageDataPixelsRef.current = pixels
+      }
+      const imageData = imageDataRef.current
+      if (dirty && dirty.w > 0 && dirty.h > 0) {
+        ctx.putImageData(imageData, 0, 0, dirty.x, dirty.y, dirty.w, dirty.h)
+      } else {
+        ctx.putImageData(imageData, 0, 0)
+      }
+    },
+    []
+  )
 
-  // Shared composite cache keeps 2D canvas synced with 3D paint without double-flattening every pointer move.
+  // Shared composite cache: live strokes flatten immediately, then this subscriber
+  // paints the 2D canvas so the stroke tracks the pointer (no RAF backlog).
   useEffect(() => {
     if (!store.open || !store.docId) return
 
-    const drawFromCacheOrDoc = () => {
+    const drawFromCacheOrDoc = (dirty: PixelDirtyRect | null = null) => {
       const current = docRef.current
       if (!current) return
       const cached = getPixelCompositeCache(store.docId!)
       if (cached && cached.width === current.width && cached.height === current.height) {
-        paintCanvasPixels(cached.pixels, current.width, current.height)
+        paintCanvasPixels(cached.pixels, current.width, current.height, dirty)
         return
       }
-      paintCanvasPixels(compositeLayers(current), current.width, current.height)
+      // Seed the shared cache so the first live dab can dirty-rect instead of
+      // uploading a mostly-empty GPU texture.
+      const seeded = syncPixelDocumentComposite(
+        { [current.id]: current },
+        current.id,
+        null
+      )
+      if (seeded) {
+        paintCanvasPixels(seeded, current.width, current.height, null)
+        return
+      }
+      paintCanvasPixels(compositeLayers(current), current.width, current.height, null)
     }
 
-    drawFromCacheOrDoc()
+    drawFromCacheOrDoc(null)
     return subscribePixelCompositeCache(store.docId, drawFromCacheOrDoc)
   }, [store.open, store.docId, doc?.id, doc?.width, doc?.height, paintCanvasPixels])
+
+  const rebuildUvOverlayCache = useCallback(() => {
+    if (!store.showUvOverlay || !store.docId || !doc) {
+      uvOverlayCacheRef.current = null
+      return
+    }
+    const { objects } = useAppStore.getState()
+    const mesh = resolveSelectedUvOverlayMesh(objects, objectId)
+    if (!mesh) {
+      uvOverlayCacheRef.current = null
+      return
+    }
+    if (uvOverlayObjectIdRef.current && uvOverlayObjectIdRef.current !== mesh.id) {
+      clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
+    }
+    uvOverlayObjectIdRef.current = mesh.id
+
+    let cache = uvOverlayCacheRef.current
+    if (!cache || cache.width !== doc.width || cache.height !== doc.height) {
+      cache = document.createElement('canvas')
+      cache.width = doc.width
+      cache.height = doc.height
+      uvOverlayCacheRef.current = cache
+    }
+    const ctx = cache.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, doc.width, doc.height)
+
+    const draft = uvDraftRef.current
+    const uvs: readonly Uv2[] =
+      draft && draft.objectId === mesh.id ? draft.uvs : mesh.uvs
+
+    const selectedFaces =
+      uvEditorSelectedFaces.length > 0
+        ? uvEditorSelectedFaces
+        : meshSelectionFaces && meshSelectionFaces.length > 0
+          ? meshSelectionFaces
+          : []
+
+    paintUvAtlasOverlay({
+      ctx,
+      texW: doc.width,
+      texH: doc.height,
+      mesh,
+      uvs,
+      selectedFaces,
+      // Outlines only — fills were the expensive path on dense meshes.
+      drawFills: false,
+    })
+  }, [
+    doc,
+    store.showUvOverlay,
+    store.docId,
+    objectId,
+    uvEditorSelectedFaces,
+    meshSelectionFaces,
+    committedOverlayUvs,
+    committedOverlayFaceUvs,
+  ])
 
   const redrawOverlay = useCallback(() => {
     const overlay = overlayRef.current
@@ -296,34 +390,10 @@ export function PixelEditorPanel() {
     if (!ctx) return
     ctx.clearRect(0, 0, doc.width, doc.height)
 
-    if (store.showUvOverlay && store.docId) {
-      const { objects } = useAppStore.getState()
-      const mesh = resolveMeshForTextureDoc(objects, store.docId, objectId)
-      if (mesh) {
-        if (uvOverlayObjectIdRef.current && uvOverlayObjectIdRef.current !== mesh.id) {
-          clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
-        }
-        uvOverlayObjectIdRef.current = mesh.id
-
-        const draft = uvDraftRef.current
-        const uvs: readonly Uv2[] =
-          draft && draft.objectId === mesh.id ? draft.uvs : mesh.uvs
-
-        const selectedFaces =
-          uvEditorSelectedFaces.length > 0
-            ? uvEditorSelectedFaces
-            : meshSelectionFaces && meshSelectionFaces.length > 0
-              ? meshSelectionFaces
-              : []
-
-        paintUvAtlasOverlay({
-          ctx,
-          texW: doc.width,
-          texH: doc.height,
-          mesh,
-          uvs,
-          selectedFaces,
-        })
+    if (store.showUvOverlay) {
+      const cache = uvOverlayCacheRef.current
+      if (cache && cache.width === doc.width && cache.height === doc.height) {
+        ctx.drawImage(cache, 0, 0)
       }
     }
 
@@ -377,20 +447,16 @@ export function PixelEditorPanel() {
     store.tool,
     store.zoom,
     store.showUvOverlay,
-    store.docId,
-    objectId,
-    uvEditorSelectedFaces,
-    meshSelectionFaces,
-    committedOverlayUvs,
-    committedOverlayFaceUvs,
     marqueeSelect,
   ])
 
+  // Rebuild UV cache only when UV/selection topology changes — not on every ants frame.
   useEffect(() => {
+    rebuildUvOverlayCache()
     redrawOverlay()
-  }, [redrawOverlay])
+  }, [rebuildUvOverlayCache, redrawOverlay])
 
-  // Live UV drafts (island drag in UV editor) — RAF-coalesced redraw only when overlay is on.
+  // Live UV drafts (island drag in UV editor) — RAF-coalesced cache rebuild when overlay is on.
   useEffect(() => {
     if (!store.open || !store.showUvOverlay) {
       uvDraftRef.current = null
@@ -401,14 +467,16 @@ export function PixelEditorPanel() {
       if (overlayDirtyRafRef.current) return
       overlayDirtyRafRef.current = requestAnimationFrame(() => {
         overlayDirtyRafRef.current = 0
+        rebuildUvOverlayCache()
         redrawOverlay()
       })
     })
-  }, [store.open, store.showUvOverlay, redrawOverlay])
+  }, [store.open, store.showUvOverlay, rebuildUvOverlayCache, redrawOverlay])
 
   // Drop edge caches when overlay is toggled off, doc closes, or panel unmounts.
   useEffect(() => {
     if (!store.showUvOverlay || !store.open) {
+      uvOverlayCacheRef.current = null
       if (uvOverlayObjectIdRef.current) {
         clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
         uvOverlayObjectIdRef.current = null
@@ -421,6 +489,7 @@ export function PixelEditorPanel() {
         cancelAnimationFrame(overlayDirtyRafRef.current)
         overlayDirtyRafRef.current = 0
       }
+      uvOverlayCacheRef.current = null
       if (uvOverlayObjectIdRef.current) {
         clearUvPaintOverlayCaches(uvOverlayObjectIdRef.current)
         uvOverlayObjectIdRef.current = null
@@ -444,6 +513,7 @@ export function PixelEditorPanel() {
       if (dt >= 32) {
         last = now
         antsOffsetRef.current = (antsOffsetRef.current + 1) % 64
+        // Blit cached UV + redraw ants only — do not rebuild island geometry.
         redrawOverlay()
       }
       antsRafRef.current = requestAnimationFrame(tick)
@@ -584,13 +654,33 @@ export function PixelEditorPanel() {
   }, [])
 
   const finishStroke = useCallback(() => {
+    const pts = strokeRef.current
+    const from = strokePaintFromRef.current
+    if (pts.length > from) {
+      const segment = pts.slice(from)
+      const tool = store.tool === 'eraser' ? 'eraser' : 'pencil'
+      store.paintStroke(segment, tool)
+      strokePaintFromRef.current = pts.length - 1
+    }
     strokeRef.current = []
+    paintCanvasRectRef.current = null
+    strokePaintFromRef.current = 0
     dragRef.current = null
     setShapePreview(null)
     if (editingRef.current) {
       store.commitEdit()
       editingRef.current = false
     }
+  }, [store])
+
+  const flushStrokePaint = useCallback(() => {
+    const pts = strokeRef.current
+    const from = strokePaintFromRef.current
+    if (pts.length <= from) return
+    const segment = pts.slice(from)
+    const tool = store.tool === 'eraser' ? 'eraser' : 'pencil'
+    store.paintStroke(segment, tool)
+    strokePaintFromRef.current = pts.length - 1
   }, [store])
 
   const constrainShape = useCallback(
@@ -622,6 +712,9 @@ export function PixelEditorPanel() {
       panDragRef.current = { x: e.clientX, y: e.clientY, panX: store.panX, panY: store.panY }
       return
     }
+    // Freeze the displayed canvas bounds for the gesture. Reading layout on every
+    // pointermove caused severe stalls on large documents and busy scenes.
+    paintCanvasRectRef.current = canvasStackRef.current?.getBoundingClientRect() ?? null
     const p = screenToPixel(e.clientX, e.clientY)
     if (!p || !doc) return
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -678,6 +771,7 @@ export function PixelEditorPanel() {
       store.beginEdit()
       editingRef.current = true
       strokeRef.current = [paintPt]
+      strokePaintFromRef.current = 0
       store.paintStroke([paintPt], store.tool === 'eraser' ? 'eraser' : 'pencil')
     }
   }
@@ -717,22 +811,37 @@ export function PixelEditorPanel() {
     }
     if (strokeRef.current.length > 0 && isPixelFreehandPaintTool(store.tool)) {
       const continuous = store.tool === 'paintBrush'
-      const p = screenToPixel(e.clientX, e.clientY, continuous)
-      if (!p) return
-      const last = strokeRef.current[strokeRef.current.length - 1]!
-      const moved = continuous
-        ? Math.hypot(p.x - last.x, p.y - last.y) >= 0.2
-        : last.x !== p.x || last.y !== p.y
-      if (moved) {
-        strokeRef.current.push(p)
-        store.paintStroke([last, p], store.tool === 'eraser' ? 'eraser' : 'pencil')
+      const native = e.nativeEvent
+      const samples =
+        typeof native.getCoalescedEvents === 'function'
+          ? native.getCoalescedEvents()
+          : [native]
+      // Some browsers return an empty coalesced list, and some omit the newest
+      // event. Always retain the actual React pointer sample.
+      const inputSamples = samples.length > 0 ? [...samples] : [native]
+      const newest = inputSamples[inputSamples.length - 1]
+      if (!newest || newest.clientX !== native.clientX || newest.clientY !== native.clientY) {
+        inputSamples.push(native)
       }
+      for (const sample of inputSamples) {
+        const p = screenToPixel(sample.clientX, sample.clientY, continuous)
+        if (!p) continue
+        const last = strokeRef.current[strokeRef.current.length - 1]!
+        const moved = continuous
+          ? Math.hypot(p.x - last.x, p.y - last.y) >= 0.2
+          : last.x !== p.x || last.y !== p.y
+        if (moved) strokeRef.current.push(p)
+      }
+      // Paint the small accumulated segment now. Canvas compositing is dirty-rect
+      // only; the separate GPU scheduler still merges expensive 3D refreshes.
+      flushStrokePaint()
     }
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (panDragRef.current) {
       panDragRef.current = null
+      paintCanvasRectRef.current = null
       return
     }
     if (dragRef.current && doc) {
@@ -760,6 +869,7 @@ export function PixelEditorPanel() {
         store.commitEdit()
         editingRef.current = false
       }
+      paintCanvasRectRef.current = null
       return
     }
     finishStroke()
@@ -933,6 +1043,18 @@ export function PixelEditorPanel() {
           disabled={!doc}
           alwaysShowLabel
         />
+        <button
+          type="button"
+          className="side-btn side-btn-wide"
+          disabled={!doc}
+          title="Delete the current pixel layers and start with a completely transparent material"
+          onClick={() => {
+            if (!window.confirm('Clear the current material and replace it with a transparent canvas? You can undo this action.')) return
+            store.clearMaterial()
+          }}
+        >
+          Clear Material
+        </button>
       </div>
     </section>
   )
@@ -1149,13 +1271,13 @@ export function PixelEditorPanel() {
           <button
             type="button"
             className="side-btn side-btn-wide"
-            title="Open UV Editor and auto-unwrap"
+            title="Give every face unique, non-overlapping texture space and open the UV Editor"
             onClick={() => {
+              if (objectId) store.resetPixelPaintUvLayout(objectId)
               store.setUvEditorOpen(true)
-              if (objectId) store.unwrapSelectedUvFaces('auto')
             }}
           >
-            Unwrap UVs
+            Rebuild Paint UVs
           </button>
         </div>
       )}
@@ -1211,7 +1333,7 @@ export function PixelEditorPanel() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
+        onPointerCancel={onPointerUp}
       >
         {renderFloatingToolbar()}
         {doc ? (

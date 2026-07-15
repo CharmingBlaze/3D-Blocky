@@ -21,6 +21,8 @@ export interface Material {
   textureBrightness?: number
   textureShadowDetail?: number
   textureGradient?: { start: Rgba4; end: Rgba4; angle: number }
+  /** Pixel documents either paint over the base color or replace it with transparent canvas. */
+  textureCanvasMode?: 'overlay' | 'replace'
   opacity: number
   doubleSided: boolean
 }
