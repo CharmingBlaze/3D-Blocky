@@ -290,7 +290,7 @@ export function ExportDialog({ onClose, initialTab = 'export' }: ExportDialogPro
                 <span className="bb-format-meta">
                   <strong>Save Project</strong>
                   <em>
-                    Native {PROJECT_FILE_EXTENSION} — meshes, textures, and scene settings
+                    Native {PROJECT_FILE_EXTENSION} — meshes, textures, hair tools, and scene settings
                   </em>
                 </span>
               </button>
@@ -323,7 +323,7 @@ export function ExportDialog({ onClose, initialTab = 'export' }: ExportDialogPro
               <h3>Project file</h3>
               <p>
                 Saves the editable scene as <code>{DEFAULT_PROJECT_FILENAME}</code> — objects,
-                painted textures, references, and selection.
+                painted textures, image planes, hair tool settings, references, and selection.
               </p>
               <dl className="ie-stats">
                 <div>

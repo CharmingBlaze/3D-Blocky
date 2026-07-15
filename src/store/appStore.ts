@@ -377,12 +377,18 @@ function restoreSceneToStore(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   get: () => AppState,
   snapshot: SceneSnapshot,
-  options?: { resetEditors?: boolean; extra?: Partial<AppState> }
+  options?: {
+    resetEditors?: boolean
+    extra?: Partial<AppState>
+    retainTextureIds?: Iterable<string>
+  }
 ): void {
   invalidateFaceGroupCache()
   invalidateSubdivisionPreviewCache()
   clearSculptSession()
-  const restored = sanitizeSceneSnapshot(snapshot)
+  const restored = sanitizeSceneSnapshot(snapshot, {
+    retainTextureIds: options?.retainTextureIds,
+  })
   const objects = ensureTexturedSceneUvs(restored.objects)
   rebuildObjectIndex(objects)
   const imageSelection = sanitizeImageSelectionIds(

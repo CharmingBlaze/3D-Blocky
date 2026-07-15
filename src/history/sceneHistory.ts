@@ -10,6 +10,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
 import { parseEdgeKey } from '../mesh/meshSelection'
 import type { BillboardImage, ReferenceImage } from '../images/imageDropTypes'
+import { cloneMaterial } from '../material/materialTypes'
 
 export interface SnapshotTextureInfo {
   url: string
@@ -52,24 +53,8 @@ export function cloneSceneObject(obj: SceneObject): SceneObject {
     faceUvIndices: obj.faceUvIndices?.map((f) => [...f]),
     cornerColors: obj.cornerColors?.map((c) => [c[0], c[1], c[2], c[3]] as [number, number, number, number]),
     faceColorIndices: obj.faceColorIndices?.map((f) => [...f]),
-    material: obj.material
-      ? {
-          ...obj.material,
-          solidColor: obj.material.solidColor
-            ? ([...obj.material.solidColor] as [number, number, number, number])
-            : undefined,
-        }
-      : undefined,
-    faceMaterials: obj.faceMaterials?.map((m) =>
-      m
-        ? {
-            ...m,
-            solidColor: m.solidColor
-              ? ([...m.solidColor] as [number, number, number, number])
-              : undefined,
-          }
-        : null
-    ),
+    material: obj.material ? cloneMaterial(obj.material) : undefined,
+    faceMaterials: obj.faceMaterials?.map((m) => (m ? cloneMaterial(m) : null)),
     pivot: obj.pivot ? { ...obj.pivot } : undefined,
     transform: obj.transform ? cloneTransform(obj.transform) : undefined,
     primitiveSource: obj.primitiveSource
@@ -89,6 +74,30 @@ export function cloneSceneObject(obj: SceneObject): SceneObject {
           ...obj.sketchSource,
           relative: obj.sketchSource.relative.map((point) => ({ ...point })),
           center: { ...obj.sketchSource.center },
+          planeFrame: obj.sketchSource.planeFrame
+            ? {
+                origin: { ...obj.sketchSource.planeFrame.origin },
+                right: { ...obj.sketchSource.planeFrame.right },
+                up: { ...obj.sketchSource.planeFrame.up },
+              }
+            : obj.sketchSource.planeFrame,
+        }
+      : undefined,
+    vectorSource: obj.vectorSource
+      ? {
+          ...obj.vectorSource,
+          path: {
+            ...obj.vectorSource.path,
+            anchors: obj.vectorSource.path.anchors.map((a) => ({
+              ...a,
+              position: { ...a.position },
+              inHandle: a.inHandle ? { ...a.inHandle } : null,
+              outHandle: a.outHandle ? { ...a.outHandle } : null,
+            })),
+            shapeParams: obj.vectorSource.path.shapeParams
+              ? { ...obj.vectorSource.path.shapeParams }
+              : undefined,
+          },
         }
       : undefined,
   }
@@ -242,20 +251,47 @@ function rgbaEqual(
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3]
 }
 
+function vec2Equal(
+  a: [number, number] | undefined,
+  b: [number, number] | undefined
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return !a && !b
+  return a[0] === b[0] && a[1] === b[1]
+}
+
 function materialEqual(
   a: SceneObject['material'],
   b: SceneObject['material']
 ): boolean {
   if (a === b) return true
   if (!a || !b) return !a && !b
+  if (
+    a.mode !== b.mode ||
+    a.opacity !== b.opacity ||
+    a.doubleSided !== b.doubleSided ||
+    a.textureId !== b.textureId ||
+    a.textureWrap !== b.textureWrap ||
+    a.textureRotation !== b.textureRotation ||
+    a.textureTintStrength !== b.textureTintStrength ||
+    a.textureLumaAlpha !== b.textureLumaAlpha ||
+    a.textureBrightness !== b.textureBrightness ||
+    a.textureShadowDetail !== b.textureShadowDetail ||
+    !rgbaEqual(a.textureTint, b.textureTint) ||
+    !rgbaEqual(a.solidColor, b.solidColor) ||
+    !vec2Equal(a.textureRepeat, b.textureRepeat) ||
+    !vec2Equal(a.textureOffset, b.textureOffset)
+  ) {
+    return false
+  }
+  const ga = a.textureGradient
+  const gb = b.textureGradient
+  if (ga === gb) return true
+  if (!ga || !gb) return !ga && !gb
   return (
-    a.mode === b.mode &&
-    a.opacity === b.opacity &&
-    a.doubleSided === b.doubleSided &&
-    a.textureId === b.textureId &&
-    a.textureTintStrength === b.textureTintStrength &&
-    rgbaEqual(a.textureTint, b.textureTint) &&
-    rgbaEqual(a.solidColor, b.solidColor)
+    ga.angle === gb.angle &&
+    rgbaEqual(ga.start, gb.start) &&
+    rgbaEqual(ga.end, gb.end)
   )
 }
 
@@ -434,7 +470,10 @@ export function snapshotsEqual(a: SceneSnapshot, b: SceneSnapshot): boolean {
   return true
 }
 
-export function sanitizeSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
+export function sanitizeSceneSnapshot(
+  snapshot: SceneSnapshot,
+  options?: { retainTextureIds?: Iterable<string> }
+): SceneSnapshot {
   const objectIds = new Set(snapshot.objects.map((o) => o.id))
   const objects = snapshot.objects.map(prepareSceneObject)
 
@@ -479,12 +518,13 @@ export function sanitizeSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
     selectedObjectId = selectionObjectIds[selectionObjectIds.length - 1] ?? null
   }
 
-  const objectTextures: Record<string, SnapshotTextureInfo> = {}
-  for (const [id, info] of Object.entries(snapshot.objectTextures)) {
-    if (objectIds.has(id)) objectTextures[id] = { ...info }
-  }
-
+  // Texture docs are keyed by document id (often ≠ object id) for image planes, hair, shared maps.
   const textureIds = new Set<string>()
+  if (options?.retainTextureIds) {
+    for (const id of options.retainTextureIds) {
+      if (id) textureIds.add(id)
+    }
+  }
   for (const obj of objects) {
     const tid = obj.material?.textureId
     if (tid) textureIds.add(tid)
@@ -494,10 +534,24 @@ export function sanitizeSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
   }
   for (const id of objectIds) textureIds.add(id)
 
+  const objectTextures: Record<string, SnapshotTextureInfo> = {}
+  for (const [id, info] of Object.entries(snapshot.objectTextures)) {
+    if (textureIds.has(id)) objectTextures[id] = { ...info }
+  }
+
   const pixelDocuments: Record<string, PixelDocument> = {}
   for (const [id, doc] of Object.entries(snapshot.pixelDocuments ?? {})) {
-    if (textureIds.has(id) || objectIds.has(id)) {
+    if (textureIds.has(id)) {
       pixelDocuments[id] = clonePixelDocument(doc)
+      // Ensure meta exists for every retained pixel doc (labels / UV editor sizes).
+      if (!objectTextures[id]) {
+        objectTextures[id] = {
+          url: '',
+          name: doc.layers[0]?.name ?? 'Texture',
+          width: doc.width,
+          height: doc.height,
+        }
+      }
     }
   }
 
@@ -520,8 +574,11 @@ export function sanitizeSceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
   }
 }
 
-export function applySceneSnapshot(snapshot: SceneSnapshot): SceneSnapshot {
-  return sanitizeSceneSnapshot(snapshot)
+export function applySceneSnapshot(
+  snapshot: SceneSnapshot,
+  options?: { retainTextureIds?: Iterable<string> }
+): SceneSnapshot {
+  return sanitizeSceneSnapshot(snapshot, options)
 }
 
 export class SceneHistoryStack {

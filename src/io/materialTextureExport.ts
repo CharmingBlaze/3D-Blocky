@@ -7,6 +7,10 @@ import { exportCompositeToPngBlob } from '../pixel/pixelTools'
 import type { PixelDocument } from '../pixel/pixelTypes'
 import type { UvTextureInfo } from '../store/appStore'
 import { downloadBlob, downloadJSON, JSON_EXPORT_FILTERS, ZIP_EXPORT_FILTERS } from './download'
+import {
+  bakeMaterialTexturePixels,
+  materialTextureProcessKey,
+} from './exportTextureBake'
 
 export interface TextureExportContext {
   pixelDocuments: Record<string, PixelDocument>
@@ -151,6 +155,38 @@ export async function pixelDocumentToPngBytes(doc: PixelDocument): Promise<Uint8
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+export async function materialTextureToPngBytes(
+  doc: PixelDocument,
+  mat: Material
+): Promise<{ data: Uint8Array; hasAlpha: boolean }> {
+  const baked = bakeMaterialTexturePixels(doc, mat)
+  const blob = await exportCompositeToPngBlob(baked.pixels, baked.width, baked.height)
+  return { data: new Uint8Array(await blob.arrayBuffer()), hasAlpha: baked.hasAlpha }
+}
+
+/** Stable texture file name shared by OBJ MTL + ZIP when materials match. */
+export function textureExportFilename(
+  obj: SceneObject,
+  textureId: string,
+  mat: Material,
+  ctx: TextureExportContext,
+  ext = 'png'
+): string {
+  const processKey = materialTextureProcessKey(mat)
+  const identityKey = materialTextureProcessKey({
+    mode: 'texture',
+    opacity: 1,
+    doubleSided: false,
+  })
+  const meta = ctx.objectTextures[textureId]
+  const base = meta?.name
+    ? sanitizeExportBasename(meta.name.replace(/\.[^.]+$/, ''))
+    : sanitizeExportBasename(obj.name)
+  const suffix =
+    processKey === identityKey ? '' : `_${sanitizeExportBasename(processKey).slice(0, 20)}`
+  return `${base}${suffix}_texture.${ext}`
+}
+
 export async function collectObjectTextureFiles(
   objects: SceneObject[],
   ctx: TextureExportContext
@@ -160,13 +196,17 @@ export async function collectObjectTextureFiles(
 
   for (const obj of objects) {
     const textureId = resolveObjectTextureId(obj)
-    if (!textureId || seen.has(textureId)) continue
+    if (!textureId) continue
     const doc = ctx.pixelDocuments[textureId]
     if (!doc) continue
-    seen.add(textureId)
+    const mat = resolveEffectiveMaterial(obj)
+    const dedupeKey = `${textureId}|${materialTextureProcessKey(mat)}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    const { data } = await materialTextureToPngBytes(doc, mat)
     files.push({
-      path: textureFilenameForObject(obj),
-      data: await pixelDocumentToPngBytes(doc),
+      path: textureExportFilename(obj, textureId, mat, ctx),
+      data,
       objectId: obj.id,
       textureId,
     })
@@ -189,7 +229,8 @@ export function buildMaterialsManifest(
       objectName: obj.name,
       material,
       textureId,
-      textureFile: textureId && doc ? textureFilenameForObject(obj) : null,
+      textureFile:
+        textureId && doc ? textureExportFilename(obj, textureId, material, ctx) : null,
       textureWidth: doc?.width ?? meta?.width ?? null,
       textureHeight: doc?.height ?? meta?.height ?? null,
     }
@@ -248,12 +289,10 @@ export async function downloadObjectTexturePng(
   if (!textureId) throw new Error('Object is not using a texture material.')
   const doc = ctx.pixelDocuments[textureId]
   if (!doc) throw new Error('No pixel texture found for this object.')
-  const blob = await exportCompositeToPngBlob(compositeLayers(doc), doc.width, doc.height)
-  const metaName = ctx.objectTextures[textureId]?.name
-  const filename = metaName
-    ? `${sanitizeExportBasename(metaName.replace(/\.[^.]+$/, ''))}.png`
-    : textureFilenameForObject(obj)
-  await downloadBlob(blob, filename, {
+  const mat = resolveEffectiveMaterial(obj)
+  const { data } = await materialTextureToPngBytes(doc, mat)
+  const filename = textureExportFilename(obj, textureId, mat, ctx)
+  await downloadBlob(new Blob([data], { type: 'image/png' }), filename, {
     title: 'Export texture',
     filters: [{ name: 'PNG image', extensions: ['png'] }],
   })

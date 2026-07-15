@@ -42,7 +42,10 @@ export type HistorySlice = HistoryLayoutState & HistoryLayoutActions
 
 export interface HistorySliceDeps {
   getSnapshot: () => SceneSnapshot
-  restoreSnapshot: (snapshot: SceneSnapshot, options?: { resetEditors?: boolean }) => void
+  restoreSnapshot: (
+    snapshot: SceneSnapshot,
+    options?: { resetEditors?: boolean; retainTextureIds?: Iterable<string> }
+  ) => void
   reconcileResources: () => void
 }
 

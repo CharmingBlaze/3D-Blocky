@@ -13,9 +13,10 @@ import {
   collectObjectTextureFiles,
   createZipBlob,
   sanitizeExportBasename,
-  textureFilenameForObject,
+  textureExportFilename,
   type TextureExportContext,
 } from './materialTextureExport'
+import { bakeMaterialTexturePixels, bakeMaterialUvTransform } from './exportTextureBake'
 import {
   APP_NAME,
   DEFAULT_EXPORT_BASENAME,
@@ -81,6 +82,15 @@ export function exportSceneOBJ(
       withUvs.faceUvIndices?.length
     const writeSmoothNormals = Boolean(withUvs.smoothShading)
 
+    // OBJ/MTL cannot express sampler UV transforms — bake into vt when needed.
+    const exportUvs =
+      hasTexture && withUvs.uvs ? bakeMaterialUvTransform(withUvs.uvs, effMat) : withUvs.uvs
+
+    const textureHasAlpha =
+      hasTexture && ctx?.pixelDocuments[texId]
+        ? bakeMaterialTexturePixels(ctx.pixelDocuments[texId]!, effMat).hasAlpha
+        : false
+
     objText += `\no ${withUvs.name}\n`
     objText += `g ${withUvs.name}\n`
     // Blender reads Wavefront smooth groups — keep shared topology so Shade Smooth works.
@@ -90,8 +100,8 @@ export function exportSceneOBJ(
       objText += `v ${pos.x.toFixed(6)} ${pos.y.toFixed(6)} ${pos.z.toFixed(6)}\n`
     }
 
-    if (hasTexture && withUvs.uvs) {
-      for (const uv of withUvs.uvs) {
+    if (hasTexture && exportUvs) {
+      for (const uv of exportUvs) {
         objText += `vt ${uv.u.toFixed(6)} ${uv.v.toFixed(6)}\n`
       }
     }
@@ -125,10 +135,12 @@ export function exportSceneOBJ(
       return `${v}`
     }
 
-    if (hasTexture) {
-      const mtlName = materialNames.get(`tex:${texId}`) ?? `tex_${sanitizeExportBasename(withUvs.name)}`
-      if (!materialNames.has(`tex:${texId}`)) {
-        materialNames.set(`tex:${texId}`, mtlName)
+    if (hasTexture && ctx) {
+      const mapName = textureExportFilename(withUvs, texId, effMat, ctx)
+      const mtlKey = `tex:${texId}:${mapName}`
+      const mtlName = materialNames.get(mtlKey) ?? `tex_${sanitizeExportBasename(withUvs.name)}`
+      if (!materialNames.has(mtlKey)) {
+        materialNames.set(mtlKey, mtlName)
         const kd = colorToKd(withUvs.color)
         mtlText += `\nnewmtl ${mtlName}\n`
         mtlText += `Kd ${kd.r.toFixed(4)} ${kd.g.toFixed(4)} ${kd.b.toFixed(4)}\n`
@@ -136,7 +148,11 @@ export function exportSceneOBJ(
         mtlText += `Ks 0.0000 0.0000 0.0000\n`
         mtlText += `d ${Math.max(0, Math.min(1, effMat.opacity)).toFixed(4)}\n`
         mtlText += `illum 2\n`
-        mtlText += `map_Kd ${textureFilenameForObject(withUvs)}\n`
+        mtlText += `map_Kd ${mapName}\n`
+        // Alpha cutouts (image planes, hair luma-alpha) need dissolve map for DCC tools.
+        if (textureHasAlpha) {
+          mtlText += `map_d ${mapName}\n`
+        }
       }
 
       objText += `usemtl ${mtlName}\n`
@@ -178,7 +194,7 @@ export function exportSceneOBJ(
     }
 
     vertexOffset += withUvs.positions.length
-    if (hasTexture && withUvs.uvs) uvOffset += withUvs.uvs.length
+    if (hasTexture && exportUvs) uvOffset += exportUvs.length
     if (vertexNormals) normalOffset += vertexNormals.length
   }
 

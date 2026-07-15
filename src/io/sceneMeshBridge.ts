@@ -4,13 +4,14 @@ import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { identityFaceGroups } from '../mesh/faceGroups'
 import { worldPointFromObject } from '../mesh/objectTransform'
 import { resolveEffectiveMaterial } from '../material/materials'
-import { compositeLayers } from '../pixel/compositeLayers'
 import { ensureObjectUVs } from '../uv/uvObject'
 import { generateId, type Vec3 } from '../utils/math'
 import { APP_NAME } from '../app/branding'
 import type { TextureExportContext } from './materialTextureExport'
 import { EXPORT_UNIT_SCALE } from '../scene/units'
 import { setFlatNormalsFromIndices } from '../rendering/meshGeometry'
+import { bakeMaterialTexturePixels } from './exportTextureBake'
+import type { Material } from '../material/materialTypes'
 
 export interface ExportMeshBuildOptions {
   textures?: TextureExportContext
@@ -35,18 +36,36 @@ export function bakeSceneObjectForExport(obj: SceneObject): SceneObject {
   return ensureSceneObjectOutward(baked)
 }
 
+function wrapModeFromMaterial(mat: Material): THREE.Wrapping {
+  if (mat.textureWrap === 'repeat') return THREE.RepeatWrapping
+  if (mat.textureWrap === 'mirror') return THREE.MirroredRepeatWrapping
+  return THREE.ClampToEdgeWrapping
+}
+
 function createDataTextureFromDocument(
   docId: string,
+  mat: Material,
   ctx: TextureExportContext
-): THREE.DataTexture | null {
+): { map: THREE.DataTexture; hasAlpha: boolean } | null {
   const doc = ctx.pixelDocuments[docId]
   if (!doc) return null
-  const composite = compositeLayers(doc)
-  const data = new Uint8Array(composite)
-  const tex = new THREE.DataTexture(data, doc.width, doc.height, THREE.RGBAFormat)
+  const baked = bakeMaterialTexturePixels(doc, mat)
+  const tex = new THREE.DataTexture(
+    new Uint8Array(baked.pixels),
+    baked.width,
+    baked.height,
+    THREE.RGBAFormat
+  )
   tex.colorSpace = THREE.SRGBColorSpace
-  tex.wrapS = THREE.ClampToEdgeWrapping
-  tex.wrapT = THREE.ClampToEdgeWrapping
+  const wrap = wrapModeFromMaterial(mat)
+  tex.wrapS = wrap
+  tex.wrapT = wrap
+  const repeat = mat.textureRepeat ?? [1, 1]
+  const offset = mat.textureOffset ?? [0, 0]
+  tex.repeat.set(Math.max(0.01, repeat[0]), Math.max(0.01, repeat[1]))
+  tex.offset.set(offset[0], offset[1])
+  tex.center.set(0.5, 0.5)
+  tex.rotation = ((mat.textureRotation ?? 0) * Math.PI) / 180
   // Keep pixel rows unflipped (canvas/PNG top = row 0). Export UVs are flipped in
   // sceneObjectToThreeMesh to match glTF's top-left UV origin. Do not rely on flipY —
   // GLTFExporter uses putImageData for DataTexture, which ignores the canvas transform.
@@ -54,7 +73,7 @@ function createDataTextureFromDocument(
   tex.minFilter = THREE.NearestFilter
   tex.magFilter = THREE.NearestFilter
   tex.needsUpdate = true
-  return tex
+  return { map: tex, hasAlpha: baked.hasAlpha }
 }
 
 /** Keep painted UV layouts intact — only generate UVs when missing. */
@@ -106,16 +125,18 @@ export function sceneObjectToThreeMesh(
 
   let material: THREE.MeshStandardMaterial
   if (useTexture && options?.textures) {
-    const map = createDataTextureFromDocument(texId, options.textures)
+    const bakedMap = createDataTextureFromDocument(texId, effMat, options.textures)
+    const hasAlpha = bakedMap?.hasAlpha ?? false
     material = new THREE.MeshStandardMaterial({
-      map: map ?? undefined,
+      map: bakedMap?.map ?? undefined,
+      // Tint / luma / brightness already baked into pixels.
       color: 0xffffff,
       metalness: 0.05,
       roughness: 0.85,
       flatShading,
-      transparent: true,
+      transparent: hasAlpha || effMat.opacity < 0.999,
       opacity: effMat.opacity,
-      alphaTest: 0.05,
+      alphaTest: hasAlpha ? 0.05 : 0,
       depthWrite: effMat.opacity >= 1,
       side: effMat.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
     })

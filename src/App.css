@@ -2378,7 +2378,7 @@ html[data-theme-contrast='light'] .theme-select {
   overflow: auto;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 0;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
 }
 
@@ -2410,7 +2410,7 @@ html[data-theme-contrast='light'] .theme-select {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 0;
   border: 1px solid var(--border);
   background: var(--bg-hover);
   color: var(--text-muted);
@@ -2513,13 +2513,43 @@ html[data-theme-contrast='light'] .theme-select {
   cursor: pointer;
 }
 
+/* Square Adobe-style radios (native control, square chrome) */
+.ie-radio input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.ie-radio input[type='radio']:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--bg-elevated);
+}
+
+.ie-radio input[type='radio']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ie-radio input[type='radio']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .ie-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin: 0 0 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--bg-hover);
   border: 1px solid var(--border);
 }
@@ -2546,7 +2576,7 @@ html[data-theme-contrast='light'] .theme-select {
 .ie-action {
   width: 100%;
   padding: 11px 14px;
-  border-radius: 9px;
+  border-radius: 0;
   font-size: 13px;
   font-weight: 600;
   border: 1px solid var(--border);
@@ -2575,7 +2605,7 @@ html[data-theme-contrast='light'] .theme-select {
 .ie-warn {
   margin: 0 0 12px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 12px;
   line-height: 1.4;
   color: var(--accent-orange);
@@ -2604,7 +2634,7 @@ html[data-theme-contrast='light'] .theme-select {
 .bb-dialog {
   width: min(780px, 100%);
   max-height: min(88vh, 640px);
-  border-radius: 6px;
+  border-radius: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2686,7 +2716,7 @@ html[data-theme-contrast='light'] .theme-select {
   text-align: left;
   padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -2711,7 +2741,7 @@ html[data-theme-contrast='light'] .theme-select {
   font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -2765,7 +2795,7 @@ html[data-theme-contrast='light'] .theme-select {
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--bg-hover);
 }
 
@@ -2810,7 +2840,7 @@ html[data-theme-contrast='light'] .theme-select {
 
 .import-export-btn {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   font-weight: 500;
   font-size: 13px;
   background: var(--bg-hover);
@@ -3529,7 +3559,7 @@ html[data-theme-contrast='light'] .theme-select {
   z-index: 1001;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 24px;
   min-width: 320px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -3549,7 +3579,7 @@ html[data-theme-contrast='light'] .theme-select {
 .export-dialog-actions button {
   flex: 1;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 0;
   font-weight: 500;
   background: var(--bg-hover);
   border: 1px solid var(--border);

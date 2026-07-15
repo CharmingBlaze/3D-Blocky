@@ -12,11 +12,53 @@ import {
   DEFAULT_PROJECT_FILENAME,
   LEGACY_PROJECT_FORMAT,
 } from '../app/branding'
+import type { HairUvTransform } from '../stroke/hairUvTransform'
+import {
+  DEFAULT_HAIR_UV_TRANSFORM,
+  normalizeHairUvTransform,
+} from '../stroke/hairUvTransform'
+import type { HairTextureSettings } from '../stroke/hairTextureSettings'
+import { DEFAULT_HAIR_TEXTURE_SETTINGS } from '../stroke/hairTextureSettings'
+import type { HairTipStyle, StrokeMode } from '../store/strokeSlice'
 
 export { PROJECT_FILE_EXTENSION, DEFAULT_PROJECT_FILENAME, LEGACY_PROJECT_FILE_EXTENSION } from '../app/branding'
 
+/** Current on-disk project schema. v1 files still load. */
+export const PROJECT_FILE_VERSION = 2 as const
+
+export interface ProjectHairState {
+  textureId: string | null
+  uvTransform: HairUvTransform
+  textureSettings: HairTextureSettings
+  tipStyle: HairTipStyle
+}
+
+export interface ProjectStrokeState {
+  strokeMode: StrokeMode
+  blobInflation: number
+  extrudeAmount: number
+  sketchExtrudeMode: boolean
+  penExtrudeMode: boolean
+}
+
+export interface ProjectSceneSettingsState {
+  polyBudget: number
+  brushDensity: number
+  drawDoubleSided: boolean
+  closeThreshold: number
+  defaultDepth: number
+  activeColor: number
+}
+
+/** Optional preferences restored on Open (v2+). Absent on legacy v1 files. */
+export interface ProjectPreferences {
+  hair?: ProjectHairState
+  stroke?: ProjectStrokeState
+  sceneSettings?: ProjectSceneSettingsState
+}
+
 export interface SerializedProjectFile {
-  version: 1
+  version: 1 | typeof PROJECT_FILE_VERSION
   format: typeof APP_PROJECT_FORMAT | typeof LEGACY_PROJECT_FORMAT
   savedAt: string
   objects: SceneSnapshot['objects']
@@ -43,6 +85,22 @@ export interface SerializedProjectFile {
   selectedObjectId: string | null
   selectionObjectIds: string[]
   meshSelection: SceneSnapshot['meshSelection']
+  /** v2+: hair tool binding (active texture, UV map, tip style). */
+  hair?: ProjectHairState
+  /** v2+: stroke tool defaults that affect new doodles. */
+  stroke?: ProjectStrokeState
+  /** v2+: global sculpt/draw scene settings. */
+  sceneSettings?: ProjectSceneSettingsState
+}
+
+export interface ProjectSerializeInput {
+  snapshot: SceneSnapshot
+  preferences?: ProjectPreferences
+}
+
+export interface ProjectLoadResult {
+  snapshot: SceneSnapshot
+  preferences: ProjectPreferences
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,8 +167,82 @@ async function dataUrlToBlobUrl(dataUrl: string): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+function parseHairTipStyle(value: unknown): HairTipStyle {
+  return value === 'square' ? 'square' : 'pointed'
+}
+
+function parseHairPreferences(raw: unknown): ProjectHairState | undefined {
+  if (!isRecord(raw)) return undefined
+  const textureId =
+    typeof raw.textureId === 'string' && raw.textureId.length > 0
+      ? raw.textureId
+      : raw.textureId === null
+        ? null
+        : null
+  const uvTransform = normalizeHairUvTransform(
+    isRecord(raw.uvTransform) ? (raw.uvTransform as Partial<HairUvTransform>) : DEFAULT_HAIR_UV_TRANSFORM
+  )
+  const textureSettings: HairTextureSettings = {
+    ...DEFAULT_HAIR_TEXTURE_SETTINGS,
+    ...(isRecord(raw.textureSettings) ? (raw.textureSettings as Partial<HairTextureSettings>) : {}),
+  }
+  return {
+    textureId,
+    uvTransform,
+    textureSettings,
+    tipStyle: parseHairTipStyle(raw.tipStyle),
+  }
+}
+
+const STROKE_MODES: StrokeMode[] = [
+  'outline',
+  'centerline',
+  'blob',
+  'capsule',
+  'ribbon',
+  'tapered-tube',
+  'hair-paths',
+  'hair-strips',
+  'hair-round',
+]
+
+function parseStrokePreferences(raw: unknown): ProjectStrokeState | undefined {
+  if (!isRecord(raw)) return undefined
+  const mode = typeof raw.strokeMode === 'string' && STROKE_MODES.includes(raw.strokeMode as StrokeMode)
+    ? (raw.strokeMode as StrokeMode)
+    : 'blob'
+  return {
+    strokeMode: mode,
+    blobInflation: Number.isFinite(raw.blobInflation) ? Number(raw.blobInflation) : 0.65,
+    extrudeAmount: Number.isFinite(raw.extrudeAmount) ? Number(raw.extrudeAmount) : 16,
+    sketchExtrudeMode: Boolean(raw.sketchExtrudeMode),
+    penExtrudeMode: Boolean(raw.penExtrudeMode),
+  }
+}
+
+function parseSceneSettingsPreferences(raw: unknown): ProjectSceneSettingsState | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    polyBudget: Number.isFinite(raw.polyBudget) ? Number(raw.polyBudget) : 128,
+    brushDensity: Number.isFinite(raw.brushDensity) ? Number(raw.brushDensity) : 12,
+    drawDoubleSided: Boolean(raw.drawDoubleSided),
+    closeThreshold: Number.isFinite(raw.closeThreshold) ? Number(raw.closeThreshold) : 8,
+    defaultDepth: Number.isFinite(raw.defaultDepth) ? Number(raw.defaultDepth) : 0,
+    activeColor: Number.isFinite(raw.activeColor) ? Number(raw.activeColor) : 0x6ecbf5,
+  }
+}
+
+export function preferencesFromProjectFile(file: SerializedProjectFile): ProjectPreferences {
+  return {
+    hair: parseHairPreferences(file.hair),
+    stroke: parseStrokePreferences(file.stroke),
+    sceneSettings: parseSceneSettingsPreferences(file.sceneSettings),
+  }
+}
+
 export async function serializeProjectFromSnapshot(
-  snapshot: SceneSnapshot
+  snapshot: SceneSnapshot,
+  preferences?: ProjectPreferences
 ): Promise<SerializedProjectFile> {
   const objectTextures: SerializedProjectFile['objectTextures'] = {}
   for (const [id, info] of Object.entries(snapshot.objectTextures)) {
@@ -157,8 +289,8 @@ export async function serializeProjectFromSnapshot(
     })
   }
 
-  return {
-    version: 1,
+  const file: SerializedProjectFile = {
+    version: PROJECT_FILE_VERSION,
     format: APP_PROJECT_FORMAT,
     savedAt: new Date().toISOString(),
     objects: snapshot.objects,
@@ -177,6 +309,12 @@ export async function serializeProjectFromSnapshot(
         }
       : null,
   }
+
+  if (preferences?.hair) file.hair = preferences.hair
+  if (preferences?.stroke) file.stroke = preferences.stroke
+  if (preferences?.sceneSettings) file.sceneSettings = preferences.sceneSettings
+
+  return file
 }
 
 export function parseProjectFile(text: string): SerializedProjectFile {
@@ -189,7 +327,7 @@ export function parseProjectFile(text: string): SerializedProjectFile {
   if (!isRecord(parsed)) {
     throw new Error('Invalid project file: expected a project object.')
   }
-  if (parsed.version !== 1) {
+  if (parsed.version !== 1 && parsed.version !== PROJECT_FILE_VERSION) {
     throw new Error('Unsupported project file version.')
   }
   if (parsed.format !== APP_PROJECT_FORMAT && parsed.format !== LEGACY_PROJECT_FORMAT) {
@@ -259,23 +397,40 @@ export async function snapshotFromProjectFile(file: SerializedProjectFile): Prom
     })
   }
 
-  return applySceneSnapshot({
-    objects: file.objects,
-    objectTextures,
-    pixelDocuments,
-    referenceImages,
-    billboardImages,
-    selectedObjectId: file.selectedObjectId,
-    selectionObjectIds: file.selectionObjectIds ?? [],
-    meshSelection: file.meshSelection,
-  })
+  const preferences = preferencesFromProjectFile(file)
+  const retainTextureIds: string[] = []
+  if (preferences.hair?.textureId) retainTextureIds.push(preferences.hair.textureId)
+
+  return applySceneSnapshot(
+    {
+      objects: file.objects,
+      objectTextures,
+      pixelDocuments,
+      referenceImages,
+      billboardImages,
+      selectedObjectId: file.selectedObjectId,
+      selectionObjectIds: file.selectionObjectIds ?? [],
+      meshSelection: file.meshSelection,
+    },
+    { retainTextureIds }
+  )
+}
+
+export async function loadProjectFromText(text: string): Promise<ProjectLoadResult> {
+  const parsed = parseProjectFile(text)
+  const snapshot = await snapshotFromProjectFile(parsed)
+  return {
+    snapshot,
+    preferences: preferencesFromProjectFile(parsed),
+  }
 }
 
 export async function saveProjectFile(
   snapshot: SceneSnapshot,
-  filename = DEFAULT_PROJECT_FILENAME
+  filename = DEFAULT_PROJECT_FILENAME,
+  preferences?: ProjectPreferences
 ): Promise<boolean> {
-  const project = await serializeProjectFromSnapshot(snapshot)
+  const project = await serializeProjectFromSnapshot(snapshot, preferences)
   return downloadJSON(project, filename, {
     title: 'Save project',
     filters: PROJECT_FILE_FILTERS,

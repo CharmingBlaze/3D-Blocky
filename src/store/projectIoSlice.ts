@@ -7,8 +7,8 @@ import {
 import {
   DEFAULT_PROJECT_FILENAME,
   saveProjectFile,
-  parseProjectFile,
-  snapshotFromProjectFile,
+  loadProjectFromText,
+  type ProjectPreferences,
 } from '../io/projectIO'
 import { pickOpenFile } from '../io/fileDialogs'
 import { PROJECT_FILE_FILTERS } from '../io/download'
@@ -20,6 +20,13 @@ import type {
   ReferenceImage,
 } from '../images/imageDropTypes'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
+import type { HairUvTransform } from '../stroke/hairUvTransform'
+import { DEFAULT_HAIR_UV_TRANSFORM } from '../stroke/hairUvTransform'
+import type { HairTextureSettings } from '../stroke/hairTextureSettings'
+import { DEFAULT_HAIR_TEXTURE_SETTINGS } from '../stroke/hairTextureSettings'
+import type { HairTipStyle, StrokeMode } from './strokeSlice'
+import { strokeLayoutInitialState } from './strokeSlice'
+import { sceneSettingsInitialState } from './sceneSettingsSlice'
 
 export interface ProjectIoLayoutActions {
   reconcileGpuResources: () => void
@@ -37,7 +44,7 @@ export interface ProjectIoSliceDeps {
   reconcileBlobUrls: () => void
   restoreScene: (
     snapshot: SceneSnapshot,
-    options?: { resetEditors?: boolean; extra?: object }
+    options?: { resetEditors?: boolean; extra?: object; retainTextureIds?: Iterable<string> }
   ) => void
   resetHistory: (snapshot: SceneSnapshot) => void
   getSnapshot: () => SceneSnapshot
@@ -49,11 +56,101 @@ type ProjectStore = {
   billboardImages: BillboardImage[]
   pixelDocuments: Record<string, import('../pixel/pixelTypes').PixelDocument>
   polyBudget: number
+  brushDensity: number
+  drawDoubleSided: boolean
+  closeThreshold: number
+  defaultDepth: number
+  activeColor: number
   selectedObjectId: string | null
   selectionObjectIds: string[]
   meshSelection: MeshComponentSelection | null
   pixelTextureRevision: number
+  hairTextureId: string | null
+  hairUvTransform: HairUvTransform
+  hairTextureSettings: HairTextureSettings
+  hairTipStyle: HairTipStyle
+  strokeMode: StrokeMode
+  blobInflation: number
+  extrudeAmount: number
+  sketchExtrudeMode: boolean
+  penExtrudeMode: boolean
   commitHistory: (label?: string) => boolean
+}
+
+export function collectProjectPreferences(state: ProjectStore): ProjectPreferences {
+  return {
+    hair: {
+      textureId: state.hairTextureId,
+      uvTransform: { ...state.hairUvTransform },
+      textureSettings: { ...state.hairTextureSettings },
+      tipStyle: state.hairTipStyle,
+    },
+    stroke: {
+      strokeMode: state.strokeMode,
+      blobInflation: state.blobInflation,
+      extrudeAmount: state.extrudeAmount,
+      sketchExtrudeMode: state.sketchExtrudeMode,
+      penExtrudeMode: state.penExtrudeMode,
+    },
+    sceneSettings: {
+      polyBudget: state.polyBudget,
+      brushDensity: state.brushDensity,
+      drawDoubleSided: state.drawDoubleSided,
+      closeThreshold: state.closeThreshold,
+      defaultDepth: state.defaultDepth,
+      activeColor: state.activeColor,
+    },
+  }
+}
+
+/** Defaults applied on Open so v1 files (and missing sections) do not leak prior-session tool state. */
+export function defaultProjectPreferencesPartial(): Record<string, unknown> {
+  return {
+    hairTextureId: null,
+    hairUvTransform: { ...DEFAULT_HAIR_UV_TRANSFORM },
+    hairTextureSettings: { ...DEFAULT_HAIR_TEXTURE_SETTINGS },
+    hairTipStyle: 'pointed' as HairTipStyle,
+    strokeMode: strokeLayoutInitialState.strokeMode,
+    blobInflation: strokeLayoutInitialState.blobInflation,
+    extrudeAmount: strokeLayoutInitialState.extrudeAmount,
+    sketchExtrudeMode: strokeLayoutInitialState.sketchExtrudeMode,
+    penExtrudeMode: strokeLayoutInitialState.penExtrudeMode,
+    polyBudget: sceneSettingsInitialState.polyBudget,
+    brushDensity: sceneSettingsInitialState.brushDensity,
+    drawDoubleSided: sceneSettingsInitialState.drawDoubleSided,
+    closeThreshold: sceneSettingsInitialState.closeThreshold,
+    defaultDepth: sceneSettingsInitialState.defaultDepth,
+    activeColor: sceneSettingsInitialState.activeColor,
+  }
+}
+
+/** Map loaded project preferences into store fields. Always starts from defaults. */
+export function projectPreferencesToStorePartial(
+  preferences: ProjectPreferences
+): Record<string, unknown> {
+  const extra: Record<string, unknown> = { ...defaultProjectPreferencesPartial() }
+  if (preferences.hair) {
+    extra.hairTextureId = preferences.hair.textureId
+    extra.hairUvTransform = { ...preferences.hair.uvTransform }
+    extra.hairTextureSettings = { ...preferences.hair.textureSettings }
+    extra.hairTipStyle = preferences.hair.tipStyle
+  }
+  if (preferences.stroke) {
+    extra.strokeMode = preferences.stroke.strokeMode
+    extra.blobInflation = preferences.stroke.blobInflation
+    extra.extrudeAmount = preferences.stroke.extrudeAmount
+    extra.sketchExtrudeMode = preferences.stroke.sketchExtrudeMode
+    extra.penExtrudeMode = preferences.stroke.penExtrudeMode
+  }
+  if (preferences.sceneSettings) {
+    extra.polyBudget = preferences.sceneSettings.polyBudget
+    extra.brushDensity = preferences.sceneSettings.brushDensity
+    extra.drawDoubleSided = preferences.sceneSettings.drawDoubleSided
+    extra.closeThreshold = preferences.sceneSettings.closeThreshold
+    extra.defaultDepth = preferences.sceneSettings.defaultDepth
+    extra.activeColor = preferences.sceneSettings.activeColor
+  }
+  return extra
 }
 
 export function createProjectIoSlice<T extends object>(
@@ -109,16 +206,25 @@ export function createProjectIoSlice<T extends object>(
     },
 
     saveProject: async () => {
-      return saveProjectFile(deps.getSnapshot(), DEFAULT_PROJECT_FILENAME)
+      const state = store()
+      return saveProjectFile(
+        deps.getSnapshot(),
+        DEFAULT_PROJECT_FILENAME,
+        collectProjectPreferences(state)
+      )
     },
 
     loadProjectFile: async (file) => {
       try {
         const text = await file.text()
-        const parsed = parseProjectFile(text)
-        const snapshot = await snapshotFromProjectFile(parsed)
+        const { snapshot, preferences } = await loadProjectFromText(text)
+        const retainTextureIds = preferences.hair?.textureId ? [preferences.hair.textureId] : []
         deps.resetHistory(snapshot)
-        deps.restoreScene(snapshot, { resetEditors: true })
+        deps.restoreScene(snapshot, {
+          resetEditors: true,
+          retainTextureIds,
+          extra: projectPreferencesToStorePartial(preferences),
+        })
       } catch (err) {
         const detail = err instanceof Error ? err.message : 'Unknown error'
         throw new Error(`Could not load "${file.name}": ${detail}`)
