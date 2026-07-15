@@ -60,11 +60,11 @@ import {
   DRAW_TOOLS,
   DEFORM_TOOLS,
   MESH_EDIT_TOOLS,
-  MESH_SELECT_TOOLS,
   SCULPT_TOOLS,
   TRANSFORM_GIZMO_TOOLS,
   beginCameraPlaneDrag,
   canDragComponentSelection,
+  canPickComponentSelection,
   dragDeltaFromPointer,
   isBoxSelectInteraction,
   isComponentSelectionMode,
@@ -862,19 +862,7 @@ export function useViewportPointerHandlers({
       if (isComponentSelectionMode(selectionMode) && e.button === 0 && rect && camera) {
         const store = useAppStore.getState()
 
-        if (
-          activeTool === 'move' &&
-          !e.shiftKey &&
-          selectionHasComponents(store.meshSelection)
-        ) {
-          const obj = store.objects.find((o) => o.id === store.meshSelection!.objectId)
-          if (obj && tryBeginMeshSelectionDrag(e, store.meshSelection!, obj)) {
-            e.currentTarget.setPointerCapture(e.pointerId)
-          }
-          return
-        }
-
-        if (canDragComponentSelection(activeTool)) {
+        if (canPickComponentSelection(activeTool)) {
           camera.updateMatrixWorld()
           if (
             'updateProjectionMatrix' in camera &&
@@ -908,7 +896,7 @@ export function useViewportPointerHandlers({
               isHitInMeshSelection(hit, sel, selectionMode, obj)
 
             if (
-              MESH_SELECT_TOOLS.includes(activeTool) &&
+              canDragComponentSelection(activeTool) &&
               hitSelected &&
               !e.shiftKey &&
               obj &&
@@ -931,7 +919,8 @@ export function useViewportPointerHandlers({
               return
             }
 
-            if (!e.shiftKey && obj) {
+            // Free-drag after pick only for select/move; rotate/scale use the gizmo.
+            if (!e.shiftKey && obj && canDragComponentSelection(activeTool)) {
               const selAfter = useAppStore.getState().meshSelection
               if (
                 selAfter &&
@@ -951,7 +940,7 @@ export function useViewportPointerHandlers({
 
             if (
               !e.shiftKey &&
-              MESH_SELECT_TOOLS.includes(activeTool) &&
+              canDragComponentSelection(activeTool) &&
               sel &&
               obj &&
               pickedObjectId === sel.objectId &&
@@ -1417,8 +1406,7 @@ export function useViewportPointerHandlers({
         (e.buttons & 1) === 0 &&
         !componentDragRef.current &&
         !marqueeStartRef.current &&
-        ((isComponentSelectionMode(selectionMode) &&
-          (MESH_SELECT_TOOLS.includes(activeTool) || activeTool === 'move')) ||
+        ((isComponentSelectionMode(selectionMode) && canPickComponentSelection(activeTool)) ||
           MESH_EDIT_TOOLS.includes(activeTool) ||
           DEFORM_TOOLS.includes(activeTool))
       ) {

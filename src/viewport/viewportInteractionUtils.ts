@@ -36,10 +36,16 @@ export function isBoxSelectInteraction(mode: SelectionMode, tool: ActiveTool): b
   }
   return (
     isComponentSelectionMode(mode) &&
-    (MESH_SELECT_TOOLS.includes(tool) || tool === 'move')
+    (MESH_SELECT_TOOLS.includes(tool) || TRANSFORM_GIZMO_TOOLS.includes(tool))
   )
 }
 
+/** Click-pick / multiselect while a component select or transform gizmo tool is active. */
+export function canPickComponentSelection(tool: ActiveTool): boolean {
+  return MESH_SELECT_TOOLS.includes(tool) || TRANSFORM_GIZMO_TOOLS.includes(tool)
+}
+
+/** Free-drag the current component selection without using the gizmo (select tools + move). */
 export function canDragComponentSelection(tool: ActiveTool): boolean {
   return MESH_SELECT_TOOLS.includes(tool) || tool === 'move'
 }

@@ -12,12 +12,13 @@ import { useViewportPointerHandlers } from '../../hooks/useViewportPointerHandle
 import {
   DEFORM_TOOLS,
   MESH_EDIT_TOOLS,
-  MESH_SELECT_TOOLS,
   SCULPT_TOOLS,
   TRANSFORM_GIZMO_TOOLS,
   VECTOR_TOOLS,
+  canPickComponentSelection,
   isComponentSelectionMode,
 } from '../../viewport/viewportInteractionUtils'
+import { isGizmoHandlingPointer } from '../../viewport/gizmoPointerGate'
 import { ViewportRuntimeProvider } from './ViewportRuntimeContext'
 import { ViewportCanvas } from './ViewportCanvas'
 import { ViewportDomOverlays } from './ViewportDomOverlays'
@@ -239,8 +240,7 @@ export function ViewportPanel({
   const cursorClass =
     selectionMode === 'object' && activeTool === 'select-object'
       ? 'cursor-select'
-      : isComponentSelectionMode(selectionMode) &&
-          (MESH_SELECT_TOOLS.includes(activeTool) || activeTool === 'move')
+      : isComponentSelectionMode(selectionMode) && canPickComponentSelection(activeTool)
         ? 'cursor-select'
         : TRANSFORM_GIZMO_TOOLS.includes(activeTool)
           ? 'cursor-transform'
@@ -277,11 +277,16 @@ export function ViewportPanel({
       e.preventDefault()
       return
     }
+    // TransformControls listens on the canvas and runs first; when it claims a
+    // handle, skip selection/marquee so gizmo drags are not stolen.
+    if (isGizmoHandlingPointer()) return
     handlePointerDown(e)
   }
 
   const handleViewportPointerMove = (e: React.PointerEvent) => {
-    if (!cameraNavigationGestureRef.current) handlePointerMove(e)
+    if (cameraNavigationGestureRef.current) return
+    if (isGizmoHandlingPointer()) return
+    handlePointerMove(e)
   }
 
   const handleViewportPointerUp = (e: React.PointerEvent) => {
@@ -289,6 +294,7 @@ export function ViewportPanel({
       cameraNavigationGestureRef.current = false
       return
     }
+    // Gate is cleared in TransformControls mouseUp before bubble reaches here.
     handlePointerUp(e)
   }
 
@@ -297,6 +303,7 @@ export function ViewportPanel({
       cameraNavigationGestureRef.current = false
       return
     }
+    if (isGizmoHandlingPointer()) return
     handlePointerLeave(e)
   }
 
@@ -304,11 +311,11 @@ export function ViewportPanel({
     <div
       ref={bindContainerRef}
       className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}${imageDragOver ? ' image-drag-over' : ''}`}
-      onClick={viewportGizmoActive ? undefined : onActivate}
-      onPointerDown={viewportGizmoActive ? undefined : handleViewportPointerDown}
-      onPointerMove={viewportGizmoActive ? undefined : handleViewportPointerMove}
-      onPointerUp={viewportGizmoActive ? undefined : handleViewportPointerUp}
-      onPointerLeave={viewportGizmoActive ? undefined : handleViewportPointerLeave}
+      onClick={onActivate}
+      onPointerDown={handleViewportPointerDown}
+      onPointerMove={handleViewportPointerMove}
+      onPointerUp={handleViewportPointerUp}
+      onPointerLeave={handleViewportPointerLeave}
       onWheelCapture={!isActive ? onActivate : undefined}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

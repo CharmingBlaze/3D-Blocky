@@ -1,9 +1,13 @@
 import { TransformControls, type TransformControlsProps } from '@react-three/drei'
-import { forwardRef, useCallback, useLayoutEffect, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type { TransformControls as TransformControlsImpl } from 'three-stdlib'
 import { applyTransformControlsTheme } from '../theme/gizmoTheme'
 import { useTheme } from '../theme/useTheme'
 import { pushViewportSharedInteraction, popViewportSharedInteraction } from '../rendering/viewportFrameLoop'
+import {
+  beginGizmoPointerCapture,
+  endGizmoPointerCapture,
+} from '../viewport/gizmoPointerGate'
 import { useViewportSlotIndex } from './ViewportSlotContext'
 
 
@@ -24,6 +28,8 @@ export const ThemedTransformControls = forwardRef<
     applyTransformControlsTheme(controls, theme)
   })
 
+  useEffect(() => () => endGizmoPointerCapture(), [])
+
   const mergeRef = (instance: TransformControlsImpl | null) => {
     localRef.current = instance
     if (typeof forwardedRef === 'function') forwardedRef(instance)
@@ -32,6 +38,8 @@ export const ThemedTransformControls = forwardRef<
 
   const handleMouseDown = useCallback(
     (event: TransformControlEvent) => {
+      // TransformControls only emits mouseDown when a handle/axis is hit.
+      beginGizmoPointerCapture()
       pushViewportSharedInteraction(slotIndex)
       onMouseDown?.(event)
     },
@@ -41,6 +49,7 @@ export const ThemedTransformControls = forwardRef<
   const handleMouseUp = useCallback(
     (event: TransformControlEvent) => {
       popViewportSharedInteraction(slotIndex)
+      endGizmoPointerCapture()
       onMouseUp?.(event)
     },
     [onMouseUp, slotIndex]
