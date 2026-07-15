@@ -444,7 +444,7 @@ function makeSketchSource(
   extrudeDepth: number
 ): SketchSource {
   const hairKind =
-    kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round'
+    kind === 'ribbon' || kind === 'tapered-tube' || kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round'
   const tipStyle: HairTipStyle =
     input.hairTipStyle === 'square' ? 'square' : 'pointed'
   return {
@@ -770,6 +770,27 @@ export function hairSketchDoodleToObject(
     undefined,
     { uvAutoPacked: true, uvMappingMode: 'box' }
   )
+}
+
+/** General-purpose textured ribbon with full width at both ends. */
+export function ribbonSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const object = hairSketchDoodleToObject(
+    { ...input, hairTipStyle: 'square', name: input.name ?? 'Ribbon' },
+    'path'
+  )
+  if (!object?.sketchSource) return object
+  return { ...object, name: input.name ?? 'Ribbon', sketchSource: { ...object.sketchSource, kind: 'ribbon', tipStyle: 'square' } }
+}
+
+/** General-purpose UV-mapped tube tapering toward both ends. */
+export function taperedTubeSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const object = roundedHairSketchDoodleToObject({
+    ...input,
+    hairTipStyle: 'pointed',
+    name: input.name ?? 'Tapered Tube',
+  })
+  if (!object?.sketchSource) return object
+  return { ...object, name: input.name ?? 'Tapered Tube', sketchSource: { ...object.sketchSource, kind: 'tapered-tube', tipStyle: 'pointed' } }
 }
 
 /**

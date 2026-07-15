@@ -182,12 +182,16 @@ export function interpretStroke(
 
   // Hair modes are routed via sketch doodle builders (not polyline intents).
   // Keep a path-tube fallback if they ever reach the classifier path.
-  if (strokeMode === 'hair-paths' || strokeMode === 'hair-strips' || strokeMode === 'hair-round') {
+  if (strokeMode === 'ribbon' || strokeMode === 'tapered-tube' || strokeMode === 'hair-paths' || strokeMode === 'hair-strips' || strokeMode === 'hair-round') {
     return {
       ...base,
       intent: 'path-tube',
       name:
-        strokeMode === 'hair-strips'
+        strokeMode === 'ribbon'
+          ? 'Ribbon'
+          : strokeMode === 'tapered-tube'
+            ? 'Tapered Tube'
+        : strokeMode === 'hair-strips'
           ? 'Hair Strips'
           : strokeMode === 'hair-round'
             ? 'Rounded Hair'

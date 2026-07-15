@@ -28,6 +28,8 @@ export type SketchDoodleKind =
   | 'sharp'
   | 'path'
   | 'outline'
+  | 'ribbon'
+  | 'tapered-tube'
   | 'hair-path'
   | 'hair-strip'
   | 'hair-round'
@@ -225,20 +227,20 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
   const { relative, brushDensity, polyBudget, isClosed, kind } = source
   const depth = Math.max(1.6, Math.abs(extrudeDepth))
 
-  if (kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round') {
+  if (kind === 'ribbon' || kind === 'tapered-tube' || kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round') {
     const spine =
       kind === 'hair-strip'
         ? prepareHairStripCenterline(relative, polyBudget)
         : prepareHairPathCenterline(relative, polyBudget)
     if (!spine) return null
     const tipStyle: HairTipStyle = source.tipStyle === 'square' ? 'square' : 'pointed'
-    if (kind === 'hair-round') {
+    if (kind === 'hair-round' || kind === 'tapered-tube') {
       return generateTaperedPointedTube(spine, {
         radius: resolveRoundedHairRadius(extrudeDepth, brushDensity),
         radialSegments: Math.max(6, Math.min(8, primitiveSegmentsForBudget(polyBudget, 7))),
         preserveSpine: true,
         color,
-        tipStyle,
+        tipStyle: kind === 'tapered-tube' ? 'pointed' : tipStyle,
       })
     }
     const style = kind === 'hair-strip' ? 'strip' : 'path'
@@ -247,7 +249,7 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
       depth: resolveHairDepth(extrudeDepth, brushDensity, style),
       color,
       flat: style === 'strip',
-      tipStyle,
+      tipStyle: kind === 'ribbon' ? 'square' : tipStyle,
     })
   }
 
@@ -375,6 +377,8 @@ export function regenerateSketchObjectFromSource(
 
   if (
     nextSource.kind === 'outline' ||
+    nextSource.kind === 'ribbon' ||
+    nextSource.kind === 'tapered-tube' ||
     nextSource.kind === 'hair-path' ||
     nextSource.kind === 'hair-strip' ||
     nextSource.kind === 'hair-round' ||
@@ -393,7 +397,9 @@ export function regenerateSketchObjectFromSource(
   }
 
   const hairUvs =
-    (nextSource.kind === 'hair-path' ||
+    (nextSource.kind === 'ribbon' ||
+      nextSource.kind === 'tapered-tube' ||
+      nextSource.kind === 'hair-path' ||
       nextSource.kind === 'hair-strip' ||
       nextSource.kind === 'hair-round') &&
     mesh.uvs.length > 0 &&

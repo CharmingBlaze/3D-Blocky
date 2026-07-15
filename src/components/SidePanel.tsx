@@ -40,6 +40,8 @@ const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
     label: 'Capsule',
     hint: 'Closed loop → silhouette capsule; open stroke → bend a capsule along the path',
   },
+  { id: 'ribbon', label: 'Ribbon', hint: 'Flat UV-mapped strip for straps, cloth, leaves, and decals' },
+  { id: 'tapered-tube', label: 'Tapered Tube', hint: 'UV-mapped round tube tapering toward both ends' },
   {
     id: 'hair-paths',
     label: 'Hair Paths',
@@ -964,7 +966,7 @@ export function SidePanel() {
             </SideBtnGroup>
             <div className="side-create-label">Hair</div>
             <SideBtnGroup cols={3}>
-              {STROKE_MODES.slice(4).map((m) => (
+              {STROKE_MODES.slice(6).map((m) => (
                 <button
                   key={m.id}
                   className={`side-btn ${strokeMode === m.id && !activeExtrudeOn && !activeLatheOn ? 'active' : ''}`}
@@ -975,10 +977,23 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
-            {strokeMode.startsWith('hair-') && (
+            <div className="side-create-label">Sweeps</div>
+            <SideBtnGroup cols={2}>
+              {STROKE_MODES.slice(4, 6).map((m) => (
+                <button
+                  key={m.id}
+                  className={`side-btn ${strokeMode === m.id && !activeExtrudeOn && !activeLatheOn ? 'active' : ''}`}
+                  onClick={() => setStrokeMode(m.id)}
+                  title={m.hint}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </SideBtnGroup>
+            {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || strokeMode === 'tapered-tube') && (
               <div className="hair-draw-options">
                 <div className="hair-draw-options-heading">
-                  <span>Hair setup</span>
+                  <span>Stroke appearance</span>
                   <span className="muted">for new strokes</span>
                 </div>
                 <button
@@ -1006,7 +1021,7 @@ export function SidePanel() {
                   </label>
                 </div>
                 <p className="side-color-hint muted">
-                  Draw in a viewport to create a strand. Texture, mapping, and tips are saved on each new strand.
+                  Draw in a viewport to create the stroke. Texture, mapping, and tip settings are saved on the new object.
                 </p>
               </div>
             )}

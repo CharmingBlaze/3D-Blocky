@@ -4,6 +4,8 @@ import {
   sharpSketchDoodleToObject,
   hairSketchDoodleToObject,
   roundedHairSketchDoodleToObject,
+  ribbonSketchDoodleToObject,
+  taperedTubeSketchDoodleToObject,
 } from './sketchDoodle'
 import { polylineToMesh, isHoleLinePolyline, type PolylineInput } from './polylineToMesh'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
@@ -56,6 +58,12 @@ export function strokeToMesh(input: StrokeInput): SceneObject | null {
   }
   if (input.strokeMode === 'centerline') {
     return pathSketchDoodleToObject(input)
+  }
+  if (input.strokeMode === 'ribbon') {
+    return ribbonSketchDoodleToObject(input)
+  }
+  if (input.strokeMode === 'tapered-tube') {
+    return taperedTubeSketchDoodleToObject(input)
   }
   if (input.strokeMode === 'hair-paths') {
     return hairSketchDoodleToObject(input, 'path')

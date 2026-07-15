@@ -34,6 +34,8 @@ export type StrokeMode =
   | 'centerline'
   | 'blob'
   | 'capsule'
+  | 'ribbon'
+  | 'tapered-tube'
   | 'hair-paths'
   | 'hair-strips'
   | 'hair-round'
@@ -41,7 +43,7 @@ export type DrawInputMode = 'regular' | 'vector-pen'
 export type { HairTipStyle }
 
 export function isHairStrokeMode(mode: StrokeMode): boolean {
-  return mode === 'hair-paths' || mode === 'hair-strips' || mode === 'hair-round'
+  return mode === 'ribbon' || mode === 'tapered-tube' || mode === 'hair-paths' || mode === 'hair-strips' || mode === 'hair-round'
 }
 
 export interface ExtrudeDragAnchor {
