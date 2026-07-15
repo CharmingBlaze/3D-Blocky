@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   uvEditorPanCssFromPainted,
+  uvEditorFitRect,
+  uvEditorScreenToWorld,
   uvEditorPanFromScrollRatio,
   uvEditorScrollAxisMetrics,
   uvEditorScrollDocSpan,
   uvEditorZoomAtScreenPoint,
+  uvEditorWheelZoom,
 } from './uvEditorView'
 
 describe('uvEditorView camera', () => {
@@ -37,6 +40,20 @@ describe('uvEditorView camera', () => {
     }
     expect(uvAfter.u).toBeCloseTo(uvBefore.u, 8)
     expect(uvAfter.v).toBeCloseTo(uvBefore.v, 8)
+  })
+
+  it('fits a world rectangle with one coherent camera transaction', () => {
+    const view = uvEditorFitRect({ minX: 10, minY: 20, maxX: 110, maxY: 70 }, 500, 300, 25)
+    expect(view.zoom).toBe(4.5)
+    expect(uvEditorScreenToWorld(view, 250, 150)).toEqual({ x: 60, y: 45 })
+  })
+
+  it('uses smooth wheel deltas without losing the cursor anchor', () => {
+    const start = { panX: 20, panY: 30, zoom: 2 }
+    const next = uvEditorWheelZoom(start, 180, 120, -40)
+    expect(next.zoom).toBeGreaterThan(start.zoom)
+    expect(uvEditorScreenToWorld(next, 180, 120).x).toBeCloseTo(80, 8)
+    expect(uvEditorScreenToWorld(next, 180, 120).y).toBeCloseTo(45, 8)
   })
 
   it('maps scrollbar thumb travel to camera pan', () => {

@@ -394,6 +394,7 @@ export function SidePanel() {
     referenceImages,
     selectedReferenceImageId,
     updateReferenceImage,
+    commitReferenceImageEdit,
     removeReferenceImage,
     billboardImages,
     selectedBillboardImageId,
@@ -526,6 +527,7 @@ export function SidePanel() {
       referenceImages: s.referenceImages,
       selectedReferenceImageId: s.selectedReferenceImageId,
       updateReferenceImage: s.updateReferenceImage,
+      commitReferenceImageEdit: s.commitReferenceImageEdit,
       removeReferenceImage: s.removeReferenceImage,
       billboardImages: s.billboardImages,
       selectedBillboardImageId: s.selectedBillboardImageId,
@@ -1731,6 +1733,33 @@ export function SidePanel() {
               <>
                 <div className="side-create-label">Selected reference</div>
                 <SideSlider
+                  label="Horizontal position"
+                  value={selectedReference.x}
+                  display={`${Math.round(selectedReference.x * 100)}%`}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={(v) => updateReferenceImage(selectedReference.id, { x: v })}
+                />
+                <SideSlider
+                  label="Vertical position"
+                  value={selectedReference.y}
+                  display={`${Math.round(selectedReference.y * 100)}%`}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={(v) => updateReferenceImage(selectedReference.id, { y: v })}
+                />
+                <SideSlider
+                  label="Reference size"
+                  value={selectedReference.width}
+                  display={`${Math.round(selectedReference.width * 100)}%`}
+                  min={0.08}
+                  max={1.5}
+                  step={0.01}
+                  onChange={(v) => updateReferenceImage(selectedReference.id, { width: v })}
+                />
+                <SideSlider
                   label="Reference opacity"
                   value={selectedReference.opacity}
                   display={`${Math.round(selectedReference.opacity * 100)}%`}
@@ -1742,13 +1771,25 @@ export function SidePanel() {
                 <p className="side-color-hint muted">
                   Select tool (Q) to move · drag corner handle to resize · Delete to remove.
                 </p>
-                <button
-                  type="button"
-                  className="side-btn side-btn-wide"
-                  onClick={() => removeReferenceImage(selectedReference.id)}
-                >
-                  Remove reference
-                </button>
+                <SideBtnGroup cols={2}>
+                  <button
+                    type="button"
+                    className="side-btn"
+                    onClick={() => {
+                      updateReferenceImage(selectedReference.id, { x: 0.5, y: 0.5, width: 0.38, opacity: 0.55 })
+                      commitReferenceImageEdit()
+                    }}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    className="side-btn"
+                    onClick={() => removeReferenceImage(selectedReference.id)}
+                  >
+                    Remove
+                  </button>
+                </SideBtnGroup>
               </>
             )}
             {selectedBillboard && (
@@ -1777,9 +1818,12 @@ export function SidePanel() {
             )}
             {imageDropMode === 'textured-plane' && (
               <p className="side-color-hint muted">
-                Drops a textured mesh you can move like any object.
+                Drops an aspect-correct, double-sided textured mesh you can move and UV edit like any object.
               </p>
             )}
+            <p className="side-color-hint muted">
+              Drop an image directly on any existing object to texture it and open its UV workspace.
+            </p>
           </SideSection>
 
           <SideSection title="Object" columns={2} order={30}>

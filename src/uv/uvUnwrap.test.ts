@@ -4,6 +4,7 @@ import { heightAxisForView } from '../primitives/viewAxes'
 import { ensureObjectUVs, collectUvIndicesForFaces } from './uvObject'
 import { uvBoundsFromIndices } from './uvEditing'
 import { unwrapSelectedFaces } from './uvUnwrap'
+import type { UvUnwrapMethod } from './uvUnwrap'
 
 const TEST_BOX = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } }
 
@@ -14,6 +15,31 @@ function makeCube() {
 }
 
 describe('unwrapSelectedFaces', () => {
+  it.each<UvUnwrapMethod>(['auto', 'smart', 'regions', 'planar', 'box', 'blockbench', 'lightmap'])(
+    'produces finite, indexed UVs for %s',
+    (method) => {
+      const cube = makeCube()
+      const allFaces = cube.faces.map((_, i) => i)
+      const result = unwrapSelectedFaces(cube, allFaces, method, {
+        angleLimitDeg: 66,
+        margin: 0.02,
+        repackAll: true,
+      })
+      expect(result.faceUvIndices).toHaveLength(cube.faces.length)
+      for (let fi = 0; fi < cube.faces.length; fi++) {
+        expect(result.faceUvIndices[fi]).toHaveLength(cube.faces[fi]!.length)
+        for (const ui of result.faceUvIndices[fi]!) {
+          expect(ui).toBeGreaterThanOrEqual(0)
+          expect(ui).toBeLessThan(result.uvs.length)
+        }
+      }
+      for (const uv of result.uvs) {
+        expect(Number.isFinite(uv.u)).toBe(true)
+        expect(Number.isFinite(uv.v)).toBe(true)
+      }
+    }
+  )
+
   it('unwraps only selected faces for auto without repacking the whole mesh', () => {
     const cube = makeCube()
     const untouchedBefore = collectUvIndicesForFaces(cube, [0, 1, 2, 3, 4])
@@ -60,5 +86,22 @@ describe('unwrapSelectedFaces', () => {
     const bounds = uvBoundsFromIndices(uvs, allUi)
     expect(bounds.minU).toBeGreaterThanOrEqual(-0.02)
     expect(bounds.maxU).toBeLessThanOrEqual(1.02)
+  })
+
+  it('projects selected faces from explicit viewport axes', () => {
+    const cube = makeCube()
+    const allFaces = cube.faces.map((_, i) => i)
+    const { uvs, faceUvIndices } = unwrapSelectedFaces(cube, allFaces, 'view', {
+      projectionAxes: {
+        right: { x: 1, y: 0, z: 0 },
+        up: { x: 0, y: 1, z: 0 },
+      },
+    })
+    const allUi = collectUvIndicesForFaces({ ...cube, uvs, faceUvIndices }, allFaces)
+    const bounds = uvBoundsFromIndices(uvs, allUi)
+    expect(bounds.minU).toBeCloseTo(0, 6)
+    expect(bounds.minV).toBeCloseTo(0, 6)
+    expect(bounds.maxU).toBeCloseTo(1, 6)
+    expect(bounds.maxV).toBeCloseTo(1, 6)
   })
 })

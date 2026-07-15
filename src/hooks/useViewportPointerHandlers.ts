@@ -144,6 +144,7 @@ export function useViewportPointerHandlers({
     x1: number
     y1: number
   } | null>(null)
+  const [imageDragOver, setImageDragOver] = useState(false)
 
   const {
     objects,
@@ -208,6 +209,7 @@ export function useViewportPointerHandlers({
     bendCommit,
     imageDropMode,
     dropImageInView,
+    loadObjectTexture,
     selectReferenceImage,
     selectBillboardImage,
   } = useAppStore(
@@ -275,6 +277,7 @@ export function useViewportPointerHandlers({
       bendCommit: s.bendCommit,
       imageDropMode: s.imageDropMode,
       dropImageInView: s.dropImageInView,
+      loadObjectTexture: s.loadObjectTexture,
       selectReferenceImage: s.selectReferenceImage,
       selectBillboardImage: s.selectBillboardImage,
     }))
@@ -1892,18 +1895,18 @@ export function useViewportPointerHandlers({
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (imageDropMode === 'off') return
       if ([...e.dataTransfer.types].includes('Files')) {
         e.preventDefault()
         e.dataTransfer.dropEffect = 'copy'
+        setImageDragOver(true)
       }
     },
-    [imageDropMode]
+    []
   )
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
-      if (imageDropMode === 'off') return
+      setImageDragOver(false)
       e.preventDefault()
       e.stopPropagation()
       const file = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'))
@@ -1912,6 +1915,22 @@ export function useViewportPointerHandlers({
       const rect = containerRef.current?.getBoundingClientRect()
       const camera = cameraRef.current
       if (!rect || !camera) return
+
+      // Object drops always mean "texture this object". Empty-space drops use
+      // the explicit References & Images placement mode below.
+      const objectId = pickObjectAt(e.clientX, e.clientY, rect, camera, slotIndex)
+      if (objectId) {
+        try {
+          await loadObjectTexture(objectId, file)
+          useAppStore.getState().selectObject(objectId)
+          useAppStore.getState().setUvEditorOpen(true)
+        } catch (err) {
+          console.error(err)
+        }
+        return
+      }
+
+      if (imageDropMode === 'off') return
 
       const world = worldPointFromViewDrop({
         view,
@@ -1928,7 +1947,7 @@ export function useViewportPointerHandlers({
         console.error(err)
       }
     },
-    [imageDropMode, view, defaultDepth, dropImageInView]
+    [imageDropMode, view, defaultDepth, dropImageInView, loadObjectTexture, slotIndex]
   )
 
   return {
@@ -1939,7 +1958,11 @@ export function useViewportPointerHandlers({
     handlePointerLeave,
     handleWheel,
     handleDragOver,
+    handleDragLeave: (e: React.DragEvent) => {
+      if (e.currentTarget === e.target) setImageDragOver(false)
+    },
     handleDrop,
+    imageDragOver,
     perspectivePrimitiveScrollHeight,
     roundedBoxParamWheel,
   }

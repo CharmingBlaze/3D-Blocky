@@ -386,9 +386,15 @@ export const MeshRenderer = memo(function MeshRenderer({
       : wrap === 'mirror'
         ? THREE.MirroredRepeatWrapping
         : THREE.ClampToEdgeWrapping
+    const repeat = materialSettings.textureRepeat ?? [1, 1]
+    const offset = materialSettings.textureOffset ?? [0, 0]
+    clone.repeat.set(Math.max(0.01, repeat[0]), Math.max(0.01, repeat[1]))
+    clone.offset.set(offset[0], offset[1])
+    clone.center.set(0.5, 0.5)
+    clone.rotation = ((materialSettings.textureRotation ?? 0) * Math.PI) / 180
     clone.needsUpdate = true
     return clone
-  }, [texture, pixelDoc, materialSettings.textureWrap, materialSettings.textureLumaAlpha, materialSettings.textureBrightness, materialSettings.textureShadowDetail, materialSettings.textureGradient])
+  }, [texture, pixelDoc, materialSettings.textureWrap, materialSettings.textureRepeat, materialSettings.textureOffset, materialSettings.textureRotation, materialSettings.textureLumaAlpha, materialSettings.textureBrightness, materialSettings.textureShadowDetail, materialSettings.textureGradient])
   useEffect(() => () => sampledTexture?.dispose(), [sampledTexture])
   const textureTint = materialSettings.textureTint
     ? `#${materialSettings.textureTint.slice(0, 3).map((n) => {

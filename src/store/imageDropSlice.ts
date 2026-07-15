@@ -157,6 +157,7 @@ export function createImageDropSlice<T extends ImageDropLayoutState>(
           aspect
         )
         const prepared = prepareSceneObject(obj)
+        prepared.material = { ...prepared.material!, textureId: prepared.id, doubleSided: true }
         setPartial((s) => {
           const st = s as unknown as ImageDropStore
           return {

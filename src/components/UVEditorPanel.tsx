@@ -65,14 +65,20 @@ import {
 } from '../uv/uvTransformSession'
 import {
   isUvEditorScrollbarTarget,
+  clampUvEditorZoom,
+  uvEditorFitRect,
   uvEditorPanCssFromPainted,
   uvEditorPanFromScrollRatio,
   uvEditorScrollAxisMetrics,
   uvEditorScrollDocSpan,
-  uvEditorZoomAtScreenPoint,
+  uvEditorScreenToWorld,
+  uvEditorWheelZoom,
 } from '../uv/uvEditorView'
 import { UvEditorToolbar } from './uv/UvEditorToolbar'
 import { UvObjectPreview } from './uv/UvObjectPreview'
+import { polygonIntersectsMarquee } from '../uv/uvMarquee'
+import { connectedUvFaces } from '../uv/uvSelection'
+import { resolveUvPreviewFaceSelection } from '../uv/uvPreviewSelection'
 
 const HANDLE_SIZE = 7
 const ROTATE_HANDLE_RADIUS = 7
@@ -479,25 +485,16 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
   const zoom = uvEditorZoom
   const pan = useMemo(() => ({ x: uvEditorPanX, y: uvEditorPanY }), [uvEditorPanX, uvEditorPanY])
 
-  const setZoom = useCallback(
-    (value: number | ((prev: number) => number)) => {
-      const next = typeof value === 'function' ? value(uvEditorZoom) : value
-      const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next))
-      setUvEditorView(clamped, uvEditorPanX, uvEditorPanY)
+  const commitView = useCallback(
+    (view: { zoom: number; panX: number; panY: number }) => {
+      setUvEditorView(clampUvEditorZoom(view.zoom, MIN_ZOOM, MAX_ZOOM), view.panX, view.panY)
     },
-    [uvEditorZoom, uvEditorPanX, uvEditorPanY, setUvEditorView]
-  )
-
-  const setPan = useCallback(
-    (value: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => {
-      const prev = { x: uvEditorPanX, y: uvEditorPanY }
-      const next = typeof value === 'function' ? value(prev) : value
-      setUvEditorView(uvEditorZoom, next.x, next.y)
-    },
-    [uvEditorZoom, uvEditorPanX, uvEditorPanY, setUvEditorView]
+    [setUvEditorView]
   )
 
   const [spacePan, setSpacePan] = useState(false)
+  const [imageLayerEdit, setImageLayerEdit] = useState(false)
+  const [autoResizeUvsWithImage, setAutoResizeUvsWithImage] = useState(false)
   const [unwrapMethod, setUnwrapMethod] = useState<UvUnwrapMethod>('auto')
   const snapCtxRef = useRef<UvSnapContext | null>(null)
   const dragSelectionBoundsRef = useRef<{
@@ -579,15 +576,19 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     else setUvEditorSelectedFaces([])
   }, [objectId, selectUvFaces, setUvEditorSelectedPoints, setUvEditorSelectedFaces])
 
+  const selectConnectedIsland = useCallback(() => {
+    if (!objectId || !ensured || uvEditorMode !== 'faces') return
+    const seed = uvEditorSelectedFaces[0]
+    if (seed === undefined) return
+    selectUvFaces(objectId, connectedUvFaces(ensured.faceUvIndices, seed))
+  }, [objectId, ensured, uvEditorMode, uvEditorSelectedFaces, selectUvFaces])
+
   /** Sticky: whole coplanar region; off: single face breaks away on move. */
   const resolveFacePick = useCallback(
     (faceIndex: number, current: number[], additive: boolean): number[] => {
       if (!obj) return current
       if (!uvEditorSticky) {
-        if (!additive) return [faceIndex]
-        return current.includes(faceIndex)
-          ? current.filter((fi) => fi !== faceIndex)
-          : [...current, faceIndex]
+        return resolveUvPreviewFaceSelection(current, faceIndex, additive)
       }
       const region = expandFaceToPlanarRegion(obj, faceIndex)
       if (!additive) return region
@@ -760,22 +761,14 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       }
 
       if (!Number.isFinite(minX)) {
-        setPan({ x: 24, y: 24 })
-        setZoom(1)
+        commitView({ zoom: 1, panX: 24, panY: 24 })
         return
       }
 
       const pad = 32
-      const bw = Math.max(maxX - minX, 1)
-      const bh = Math.max(maxY - minY, 1)
-      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min((cw - pad * 2) / bw, (ch - pad * 2) / bh)))
-      setZoom(nz)
-      setPan({
-        x: (cw - (minX + maxX) * nz) / 2,
-        y: (ch - (minY + maxY) * nz) / 2,
-      })
+      commitView(uvEditorFitRect({ minX, minY, maxX, maxY }, cw, ch, pad, MIN_ZOOM, MAX_ZOOM))
     },
-    [collectFaceUvIndices, getUvs, texW, texH, setPan, setZoom]
+    [collectFaceUvIndices, getUvs, texW, texH, commitView]
   )
 
   const frameSelection = useCallback(() => {
@@ -812,20 +805,12 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     }
 
     if (!Number.isFinite(minX)) {
-      setPan({ x: 24, y: 24 })
-      setZoom(1)
+      commitView({ zoom: 1, panX: 24, panY: 24 })
       return
     }
 
     const pad = 32
-    const bw = Math.max(maxX - minX, 1)
-    const bh = Math.max(maxY - minY, 1)
-    const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min((cw - pad * 2) / bw, (ch - pad * 2) / bh)))
-    setZoom(nz)
-    setPan({
-      x: (cw - (minX + maxX) * nz) / 2,
-      y: (ch - (minY + maxY) * nz) / 2,
-    })
+    commitView(uvEditorFitRect({ minX, minY, maxX, maxY }, cw, ch, pad, MIN_ZOOM, MAX_ZOOM))
   }, [
     ensured,
     frameToFaceIndices,
@@ -835,8 +820,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     regionFacesForEdit,
     uvEditorViewAll,
     uvEditorSelectedPoints,
-    setPan,
-    setZoom,
+    commitView,
   ])
 
   const fitCanvasToCamera = useCallback(() => {
@@ -847,13 +831,8 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     if (cw <= 0 || ch <= 0) return
 
     const pad = 32
-    const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min((cw - pad * 2) / texW, (ch - pad * 2) / texH)))
-    setZoom(nz)
-    setPan({
-      x: (cw - texW * nz) / 2,
-      y: (ch - texH * nz) / 2,
-    })
-  }, [texW, texH, setPan, setZoom])
+    commitView(uvEditorFitRect({ minX: 0, minY: 0, maxX: texW, maxY: texH }, cw, ch, pad, MIN_ZOOM, MAX_ZOOM))
+  }, [texW, texH, commitView])
 
   // Scrollbars use a fixed padded-atlas document so thumbs stay meaningful when zoomed in.
   const containerEl = containerRef.current
@@ -1109,10 +1088,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       const sx = clientX - rect.left
       const sy = clientY - rect.top
       const { panX, panY, zoom: z } = getViewPanZoom()
-      return {
-        x: (sx - panX) / z,
-        y: (sy - panY) / z,
-      }
+      return uvEditorScreenToWorld({ panX, panY, zoom: z }, sx, sy)
     },
     [getViewPanZoom]
   )
@@ -1309,7 +1285,37 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     }
 
     if (img) {
-      ctx.drawImage(img, 0, 0, texW, texH)
+      const repeat = obj?.material?.textureRepeat ?? [1, 1]
+      const offset = obj?.material?.textureOffset ?? [0, 0]
+      const rotation = obj?.material?.textureRotation ?? 0
+      const transformed =
+        Math.abs(repeat[0] - 1) > 1e-6 ||
+        Math.abs(repeat[1] - 1) > 1e-6 ||
+        Math.abs(offset[0]) > 1e-6 ||
+        Math.abs(offset[1]) > 1e-6 ||
+        Math.abs(rotation) > 1e-6
+      if (transformed) {
+        const pattern = ctx.createPattern(img, 'repeat')
+        if (pattern) {
+          pattern.setTransform(
+            new DOMMatrix()
+              .translate(offset[0] * texW, offset[1] * texH)
+              .scale(1 / Math.max(0.01, repeat[0]), 1 / Math.max(0.01, repeat[1]))
+          )
+          ctx.save()
+          ctx.beginPath()
+          ctx.rect(0, 0, texW, texH)
+          ctx.clip()
+          ctx.translate(texW / 2, texH / 2)
+          ctx.rotate((rotation * Math.PI) / 180)
+          ctx.translate(-texW / 2, -texH / 2)
+          ctx.fillStyle = pattern
+          ctx.fillRect(-texW * 2, -texH * 2, texW * 5, texH * 5)
+          ctx.restore()
+        }
+      } else {
+        ctx.drawImage(img, 0, 0, texW, texH)
+      }
     } else {
       drawChecker(ctx, texW, texH, theme.uvGridA, theme.uvGridB)
     }
@@ -1525,6 +1531,9 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     uvEditorSelectedFaces,
     uvEditorMode,
     texture?.url,
+    obj?.material?.textureRepeat,
+    obj?.material?.textureOffset,
+    obj?.material?.textureRotation,
     uvEditorPanel.width,
     uvEditorPanel.height,
     getSelectionBBoxPx,
@@ -1756,6 +1765,36 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     getSelectionBBoxPx,
     regionFacesForEdit,
   ])
+
+  const paintMarqueeOverlay = useCallback((marquee: { x0: number; y0: number; x1: number; y1: number }) => {
+    const screen = screenOverlayRef.current
+    const container = containerRef.current
+    if (!screen || !container) return
+    const width = container.clientWidth
+    const height = container.clientHeight
+    if (screen.width !== width) screen.width = width
+    if (screen.height !== height) screen.height = height
+    const ctx = screen.getContext('2d')
+    if (!ctx) return
+    const view = getViewPanZoom()
+    const x0 = marquee.x0 * view.zoom + view.panX
+    const y0 = marquee.y0 * view.zoom + view.panY
+    const x1 = marquee.x1 * view.zoom + view.panX
+    const y1 = marquee.y1 * view.zoom + view.panY
+    const left = Math.min(x0, x1)
+    const top = Math.min(y0, y1)
+    const boxWidth = Math.abs(x1 - x0)
+    const boxHeight = Math.abs(y1 - y0)
+    ctx.clearRect(0, 0, width, height)
+    ctx.save()
+    ctx.fillStyle = theme.css['--accent-soft']
+    ctx.strokeStyle = theme.accent
+    ctx.lineWidth = 1
+    ctx.setLineDash([5, 3])
+    ctx.fillRect(left, top, boxWidth, boxHeight)
+    ctx.strokeRect(left + 0.5, top + 0.5, boxWidth, boxHeight)
+    ctx.restore()
+  }, [getViewPanZoom, theme])
 
   const beginLive3dFacePreview = useCallback(
     (indicesOverride?: number[]) => {
@@ -2106,21 +2145,6 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     return null
   }
 
-  const isInSelectionBBox = useCallback(
-    (px: number, py: number, faceIndices: number[]) => {
-      const box = getSelectionBBoxPx(faceIndices)
-      if (!box) return false
-      const pad = 4 / (liveViewRef.current?.zoom ?? zoom)
-      return (
-        px >= box.minX - pad &&
-        px <= box.maxX + pad &&
-        py >= box.minY - pad &&
-        py <= box.maxY + pad
-      )
-    },
-    [getSelectionBBoxPx, zoom]
-  )
-
   const beginPendingUvDrag = (
     activeKind: UvDragKind,
     uvIndices: number[],
@@ -2290,7 +2314,12 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         cursor = 'nwse-resize'
       } else if (pickRotateHandle(px.x, px.y)) {
         cursor = 'grab'
-      } else if (isInSelectionBBox(px.x, px.y, regionFacesForEdit)) {
+      } else if (
+        (() => {
+          const faceUnderPointer = pickFace(px.x, px.y)
+          return faceUnderPointer !== null && regionFacesForEdit.includes(faceUnderPointer)
+        })()
+      ) {
         cursor = 'move'
       }
     }
@@ -2429,7 +2458,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       } else if (!e.shiftKey) {
         clearAllUvSelection()
       }
-    } else if (uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0) {
+    } else if (uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0 && !e.shiftKey) {
       const resize = pickResizeHandle(px.x, px.y, regionFacesForEdit)
       if (resize) {
         captureUndoPoint('Edit UV')
@@ -2477,7 +2506,12 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         setIslandFields((f) => ({ ...f, rot: 0 }))
         lastIslandRotRef.current = 0
         capturePointer = true
-      } else if (isInSelectionBBox(px.x, px.y, regionFacesForEdit)) {
+      } else if (
+        (() => {
+          const faceUnderPointer = pickFace(px.x, px.y)
+          return faceUnderPointer !== null && regionFacesForEdit.includes(faceUnderPointer)
+        })()
+      ) {
         if (startFaceDragNow(regionFacesForEdit, px, e.clientX, e.clientY)) {
           capturePointer = true
         }
@@ -2680,7 +2714,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
       liveViewRef.current = {
         panX: active.panX + dx,
         panY: (active.panY ?? 0) + dy,
-        zoom,
+        zoom: getViewPanZoom().zoom,
       }
       applyCamera()
       syncScrollThumbsFromView(liveViewRef.current)
@@ -2729,7 +2763,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     if (active.kind === 'marquee' && active.startX !== undefined && active.startY !== undefined) {
       const px = screenToUvPixel(e.clientX, e.clientY)
       active.marquee = { x0: active.startX, y0: active.startY, x1: px.x, y1: px.y }
-      scheduleRedraw()
+      paintMarqueeOverlay(active.marquee)
     }
   }
 
@@ -2768,10 +2802,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         const picked: number[] = []
         for (const fi of allFaceIndices) {
           const pts = getFacePixels(fi)
-          const anyInside = pts.some(
-            (p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1
-          )
-          if (anyInside) picked.push(fi)
+          if (polygonIntersectsMarquee(pts, d.marquee)) picked.push(fi)
         }
         const prev = useAppStore.getState().uvEditorSelectedFaces
         if (picked.length > 0) {
@@ -2875,6 +2906,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
 
     dragRef.current = null
     clearSelectionOverlay()
+    if (kind === 'marquee') paintHoverOverlay()
     if (kind === 'pan') {
       commitLiveView()
       applyCamera()
@@ -2925,30 +2957,8 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         draftUvsRef.current = null
         if (objectId) clearUvDraft(objectId)
         cancelPreviewRelay()
-        const px = screenToUvPixel(e.clientX, e.clientY)
-        if (uvEditorMode === 'faces') {
-          const face = pickFace(px.x, px.y)
-          if (face !== null) {
-            const nextFaces = resolveFacePick(face, uvEditorSelectedFaces, e.shiftKey)
-            selectUvFaces(objectId, nextFaces)
-          } else if (!e.shiftKey) {
-            clearAllUvSelection()
-            selectUvFaces(objectId, [])
-          }
-        } else if (uvEditorMode === 'points') {
-          const handle = pickHandle(px.x, px.y)
-          if (handle !== null) {
-            const indices = e.shiftKey
-              ? uvEditorSelectedPoints.includes(handle)
-                ? uvEditorSelectedPoints.filter((i) => i !== handle)
-                : [...uvEditorSelectedPoints, handle]
-              : [handle]
-            setUvEditorSelectedPoints(indices)
-            setUvEditorSelectedFaces([])
-          } else if (!e.shiftKey) {
-            clearAllUvSelection()
-          }
-        }
+        // Selection was resolved on pointer-down. Repeating it here toggled a
+        // Shift-clicked face/point twice and made additive selection appear broken.
       }
     } else {
       resetDraftPreview()
@@ -2993,10 +3003,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
         panY: useAppStore.getState().uvEditorPanY,
       }
 
-      const factor = e.deltaY > 0 ? 0.9 : 1.1
-      const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, base.zoom * factor))
-      // Keep the UV under the cursor fixed (zoom toward mouse).
-      const next = uvEditorZoomAtScreenPoint(base, screenX, screenY, nz)
+      const next = uvEditorWheelZoom(base, screenX, screenY, e.deltaY, MIN_ZOOM, MAX_ZOOM)
       liveViewRef.current = next
       pendingZoomViewRef.current = next
       applyCamera()
@@ -3124,10 +3131,115 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     if (file) await loadObjectTexture(objectId, file)
   }
 
+  const zoomCanvasFromCenter = (direction: 'in' | 'out') => {
+    const container = containerRef.current
+    if (!container) return
+    const current = getViewPanZoom()
+    const next = uvEditorWheelZoom(
+      current,
+      container.clientWidth / 2,
+      container.clientHeight / 2,
+      direction === 'in' ? -120 : 120,
+      MIN_ZOOM,
+      MAX_ZOOM
+    )
+    liveViewRef.current = null
+    commitView(next)
+  }
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault()
     const file = e.dataTransfer.files[0]
     if (file?.type.startsWith('image/') && objectId) void loadObjectTexture(objectId, file)
+  }
+
+  const textureWrap = obj?.material?.textureWrap ?? 'clamp'
+  const cycleTextureWrap = () => {
+    if (!objectId || !obj) return
+    const next = textureWrap === 'clamp' ? 'repeat' : textureWrap === 'repeat' ? 'mirror' : 'clamp'
+    updateObject(objectId, {
+      material: { ...obj.material!, textureWrap: next },
+    })
+    if (next !== 'clamp') setUvEditorTilePreview(true)
+  }
+
+  const setTextureTransform = (patch: {
+    repeat?: [number, number]
+    offset?: [number, number]
+    rotation?: number
+    wrap?: 'clamp' | 'repeat' | 'mirror'
+  }) => {
+    if (!objectId || !obj) return
+    updateObject(objectId, {
+      material: {
+        ...obj.material!,
+        textureWrap: patch.wrap ?? (patch.repeat ? 'repeat' : obj.material?.textureWrap ?? 'clamp'),
+        textureRepeat: patch.repeat ?? obj.material?.textureRepeat ?? [1, 1],
+        textureOffset: patch.offset ?? obj.material?.textureOffset ?? [0, 0],
+        textureRotation: patch.rotation ?? obj.material?.textureRotation ?? 0,
+      },
+    })
+    if ((patch.wrap ?? obj.material?.textureWrap) !== 'clamp' || patch.repeat) {
+      setUvEditorTilePreview(true)
+    }
+  }
+
+  const beginImageLayerGesture = (
+    event: React.PointerEvent,
+    kind: 'move' | 'resize'
+  ) => {
+    if (!objectId || !obj || !imageLayerEdit) return
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startY = event.clientY
+    const startRepeat = [...(obj.material?.textureRepeat ?? [1, 1])] as [number, number]
+    const startOffset = [...(obj.material?.textureOffset ?? [0, 0])] as [number, number]
+    const startUvs = ensured?.uvs.map((uv) => ({ ...uv })) ?? []
+    const view = getViewPanZoom()
+    captureUndoPoint('Edit image layer')
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const dx = moveEvent.clientX - startX
+      const dy = moveEvent.clientY - startY
+      if (kind === 'move') {
+        setTextureTransform({
+          offset: [
+            startOffset[0] + dx / Math.max(1, texW * view.zoom),
+            startOffset[1] - dy / Math.max(1, texH * view.zoom),
+          ],
+        })
+        return
+      }
+
+      const startWidth = Math.max(20, (texW * view.zoom) / startRepeat[0])
+      const startHeight = Math.max(20, (texH * view.zoom) / startRepeat[1])
+      const scaleX = Math.max(0.05, (startWidth + dx) / startWidth)
+      const scaleY = Math.max(0.05, (startHeight + dy) / startHeight)
+      const nextRepeat: [number, number] = [
+        Math.max(0.01, startRepeat[0] / scaleX),
+        Math.max(0.01, startRepeat[1] / scaleY),
+      ]
+      setTextureTransform({ repeat: nextRepeat })
+
+      if (autoResizeUvsWithImage && startUvs.length > 0) {
+        const updates = startUvs.map((uv, uvIndex) => ({
+          uvIndex,
+          u: 0.5 + (uv.u - 0.5) * scaleX,
+          v: 0.5 + (uv.v - 0.5) * scaleY,
+        }))
+        setObjectUvPoints(objectId, updates, false)
+      }
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      replaceHistoryHead('Edit image layer')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   const updatePointField = (axis: 'x' | 'y', value: number) => {
@@ -3268,6 +3380,13 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
           onSetSnapMode={setUvEditorSnapMode}
           onSetTilePreview={setUvEditorTilePreview}
           onSetGridDivisions={setUvEditorGridDivisions}
+          onSetTextureTransform={setTextureTransform}
+          onSelectConnected={selectConnectedIsland}
+          canSelectConnected={uvEditorMode === 'faces' && uvEditorSelectedFaces.length > 0}
+          imageLayerEdit={imageLayerEdit}
+          autoResizeUvsWithImage={autoResizeUvsWithImage}
+          onSetImageLayerEdit={setImageLayerEdit}
+          onSetAutoResizeUvsWithImage={setAutoResizeUvsWithImage}
         />
 
         <div className="uv-editor-main">
@@ -3283,7 +3402,7 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
                   ? 'Full atlas view'
                   : 'Face island edit'
                 : 'Point edit'}
-              {' · Scroll zoom · Middle drag pan · Space pan · F frame'}
+              {' · Shift-click multi-select · Ctrl-drag box · Scroll zoom · Middle drag pan · F frame'}
             </span>
           </div>
 
@@ -3306,11 +3425,47 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
             }}
             onAuxClick={(e) => e.preventDefault()}
           >
+            <div className="uv-canvas-nav" onPointerDown={(event) => event.stopPropagation()}>
+              <button type="button" onClick={() => zoomCanvasFromCenter('out')} aria-label="Zoom out">−</button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button type="button" onClick={() => zoomCanvasFromCenter('in')} aria-label="Zoom in">+</button>
+              <button type="button" onClick={frameSelection}>Frame</button>
+              <button type="button" onClick={fitCanvasToCamera}>Fit canvas</button>
+              <button
+                type="button"
+                className={textureWrap !== 'clamp' ? 'active' : ''}
+                onClick={cycleTextureWrap}
+                title="Texture edge behavior: Clamp → Repeat → Mirror"
+              >
+                {textureWrap === 'clamp' ? 'Clamp' : textureWrap === 'repeat' ? 'Repeat' : 'Mirror'}
+              </button>
+            </div>
             <div ref={viewLayerRef} className="uv-editor-camera">
               <canvas ref={canvasRef} className="uv-editor-canvas" />
               <canvas ref={selectionOverlayRef} className="uv-editor-selection-overlay" aria-hidden />
             </div>
             <canvas ref={screenOverlayRef} className="uv-editor-screen-overlay" aria-hidden />
+            {imageLayerEdit && obj && activeTextureId && (
+              <div
+                className="uv-image-layer-frame"
+                style={{
+                  left: `${pan.x - (obj.material?.textureOffset?.[0] ?? 0) * texW * zoom}px`,
+                  top: `${pan.y + (obj.material?.textureOffset?.[1] ?? 0) * texH * zoom}px`,
+                  width: `${Math.max(24, texW * zoom / Math.max(0.01, obj.material?.textureRepeat?.[0] ?? 1))}px`,
+                  height: `${Math.max(24, texH * zoom / Math.max(0.01, obj.material?.textureRepeat?.[1] ?? 1))}px`,
+                  transform: `rotate(${obj.material?.textureRotation ?? 0}deg)`,
+                }}
+                onPointerDown={(event) => beginImageLayerGesture(event, 'move')}
+              >
+                <span>IMAGE LAYER</span>
+                <button
+                  type="button"
+                  className="uv-image-layer-resize"
+                  title="Drag to resize image layer"
+                  onPointerDown={(event) => beginImageLayerGesture(event, 'resize')}
+                />
+              </div>
+            )}
             {!obj && <div className="uv-editor-empty">Select an object to edit UVs</div>}
 
             {showScrollH && (

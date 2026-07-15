@@ -9,6 +9,10 @@ export interface Material {
   textureId?: string
   /** Sampling used when UVs leave the 0–1 texture bounds. */
   textureWrap?: 'clamp' | 'repeat' | 'mirror'
+  /** Independent texture transform, applied live without rewriting mesh UVs. */
+  textureRepeat?: [number, number]
+  textureOffset?: [number, number]
+  textureRotation?: number
   /** Multiplied with texture RGB; white preserves the original image. */
   textureTint?: Rgba4
   /** 0 keeps original texture colour; 1 applies the full multiplicative tint. */
@@ -98,6 +102,8 @@ export function cloneMaterial(m: Material): Material {
     ...m,
     solidColor: m.solidColor ? [...m.solidColor] as Rgba4 : undefined,
     textureTint: m.textureTint ? [...m.textureTint] as Rgba4 : undefined,
+    textureRepeat: m.textureRepeat ? [...m.textureRepeat] as [number, number] : undefined,
+    textureOffset: m.textureOffset ? [...m.textureOffset] as [number, number] : undefined,
     textureGradient: m.textureGradient
       ? { start: [...m.textureGradient.start] as Rgba4, end: [...m.textureGradient.end] as Rgba4, angle: m.textureGradient.angle }
       : undefined,

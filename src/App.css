@@ -3589,6 +3589,29 @@ html[data-theme-contrast='light'] .theme-select {
   outline-offset: -1px;
 }
 
+.viewport-panel.image-drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.viewport-panel.image-drag-over::after {
+  content: 'Drop on an object to texture it · Drop on empty space to place the image';
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 30;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  background: var(--bg-dark);
+  color: var(--text);
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .reference-image-layer {
   position: absolute;
   inset: 0;
@@ -4326,6 +4349,45 @@ html[data-theme-contrast='light'] .theme-select {
   margin-left: auto;
 }
 
+.uv-tiling-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.uv-tiling-grid label {
+  display: grid;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.uv-tiling-grid input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 10px;
+}
+
+.uv-tiling-wide {
+  grid-column: 1 / -1;
+}
+
+.uv-sidebar-help {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
 /* Portal dropdown (not clipped by floating panel) */
 .uv-dropdown {
   position: relative;
@@ -4602,6 +4664,52 @@ html[data-theme-contrast='light'] .theme-select {
   user-select: none;
 }
 
+.uv-canvas-nav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 24;
+  display: flex;
+  align-items: stretch;
+  height: 26px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-dark) 92%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 24%);
+}
+
+.uv-canvas-nav button,
+.uv-canvas-nav span {
+  min-width: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: 600 10px/24px system-ui, sans-serif;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.uv-canvas-nav button {
+  cursor: pointer;
+}
+
+.uv-canvas-nav button:last-child,
+.uv-canvas-nav span:last-child {
+  border-right: 0;
+}
+
+.uv-canvas-nav button:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.uv-canvas-nav button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .uv-editor-camera {
   position: absolute;
   inset: 0;
@@ -4634,6 +4742,45 @@ html[data-theme-contrast='light'] .theme-select {
   height: 100%;
   pointer-events: none;
   z-index: 3;
+}
+
+.uv-image-layer-frame {
+  position: absolute;
+  z-index: 18;
+  box-sizing: border-box;
+  min-width: 24px;
+  min-height: 24px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  transform-origin: center;
+  cursor: move;
+  pointer-events: auto;
+}
+
+.uv-image-layer-frame > span {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  padding: 2px 4px;
+  background: var(--bg-dark);
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.uv-image-layer-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid var(--bg-dark);
+  border-radius: 0;
+  background: var(--accent);
+  cursor: nwse-resize;
 }
 
 
@@ -4699,6 +4846,150 @@ html[data-theme-contrast='light'] .theme-select {
   background: var(--bg-dark);
   color: var(--text);
   font-size: 11px;
+}
+
+/* Compact Adobe-style UV workspace chrome. Keep this scoped so editor tools
+   remain square and consistent across every application theme. */
+.uv-workspace-header button,
+.uv-preview-chrome,
+.uv-sidebar,
+.uv-sidebar-section,
+.uv-sidebar .uv-dropdown-trigger,
+.uv-dropdown-trigger,
+.uv-dropdown-menu,
+.uv-dropdown-item,
+.uv-segment,
+.uv-segment-btn,
+.uv-btn,
+.uv-toggle-block,
+.uv-num-input,
+.uv-tiling-grid input,
+.uv-editor-precision input,
+.uv-canvas-nav,
+.uv-scrollbar,
+.uv-scrollbar-thumb {
+  border-radius: 0 !important;
+}
+
+.uv-editor,
+.uv-editor-workspace {
+  font-family: var(--font-ui, "Segoe UI", Arial, sans-serif);
+}
+
+.uv-sidebar {
+  flex-basis: 196px;
+  width: 196px;
+  background: color-mix(in srgb, var(--bg-dark) 96%, #000);
+  scrollbar-width: thin;
+}
+
+.uv-sidebar::-webkit-scrollbar {
+  width: 9px;
+}
+
+.uv-sidebar::-webkit-scrollbar-thumb {
+  border: 1px solid var(--scrollbar-track, var(--bg-panel));
+  border-radius: 0;
+}
+
+.uv-sidebar-section {
+  padding: 9px 8px 10px;
+  border-bottom-color: var(--border);
+}
+
+.uv-sidebar-section-head {
+  margin-bottom: 7px;
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--text));
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+}
+
+.uv-sidebar-stack {
+  gap: 4px;
+}
+
+.uv-btn-grid,
+.uv-tiling-grid {
+  gap: 3px;
+}
+
+.uv-btn,
+.uv-segment-btn {
+  min-height: 25px;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.uv-btn:hover,
+.uv-dropdown-trigger:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.uv-btn.active,
+.uv-segment-btn.active,
+.uv-btn-primary {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.uv-dropdown-trigger,
+.uv-sidebar .uv-dropdown-trigger {
+  min-height: 31px;
+  padding: 4px 6px;
+  background: var(--bg-panel);
+}
+
+.uv-dropdown-menu {
+  padding: 2px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 42%);
+}
+
+.uv-dropdown-item {
+  min-height: 25px;
+  padding: 5px 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  font-size: 10px;
+}
+
+.uv-toggle-block {
+  min-height: 24px;
+  box-sizing: border-box;
+  padding: 3px 5px;
+}
+
+.uv-toggle,
+.uv-field {
+  font-size: 10px;
+}
+
+.uv-num-input,
+.uv-tiling-grid input,
+.uv-editor-precision input {
+  min-height: 24px;
+  padding: 3px 5px;
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 10px;
+}
+
+.uv-editor-status {
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  background: var(--bg-panel);
+}
+
+.uv-editor-precision {
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--bg-panel);
+  font-size: 10px;
+}
+
+.uv-preview-chrome {
+  padding: 5px 7px;
+  background: color-mix(in srgb, var(--bg-dark) 90%, transparent);
+  backdrop-filter: none;
 }
 
 .material-editor-panel {

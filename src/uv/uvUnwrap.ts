@@ -17,6 +17,9 @@ import {
 import { packCubeBucketsBlockbench, packFaceIslandsShelf, packPartialUnwrapIslands, splitUvIslandsForPacking } from './uvPack'
 import type { Uv2 } from './uvTypes'
 import { cloneUv2 } from './uvTypes'
+import { fitUVsToUnitSquare } from './uvEditing'
+import { worldPointFromObject } from '../mesh/objectTransform'
+import type { Vec3 } from '../utils/math'
 
 /** Blender-style default: edges sharper than this become automatic seams. */
 export const AUTO_SEAM_ANGLE_DEG = 66
@@ -29,12 +32,18 @@ export type UvUnwrapMethod =
   | 'box'
   | 'blockbench'
   | 'lightmap'
+  | 'view'
 
 export const UV_UNWRAP_METHODS: { id: UvUnwrapMethod; label: string; hint: string }[] = [
   {
     id: 'auto',
-    label: 'Auto Unwrap',
+    label: 'Auto UV · Best Fit',
     hint: 'No seams needed — auto-detects sharp edges (66°) and picks the best layout',
+  },
+  {
+    id: 'view',
+    label: 'Project From View',
+    hint: 'Projects selected faces exactly from the active 3D viewport',
   },
   {
     id: 'smart',
@@ -74,6 +83,34 @@ export interface UnwrapOptions {
   /** Repack every island in the atlas after projecting the selection. */
   repackAll?: boolean
   markPacked?: boolean
+  projectionAxes?: { right: Vec3; up: Vec3 }
+}
+
+function projectFacesFromView(
+  obj: SceneObjectWithUVs,
+  uvs: Uv2[],
+  faceUvIndices: number[][],
+  faces: number[],
+  axes: { right: Vec3; up: Vec3 }
+): void {
+  const touched = new Set<number>()
+  for (const fi of faces) {
+    const face = obj.faces[fi]
+    const uvIdx = faceUvIndices[fi]
+    if (!face || !uvIdx) continue
+    for (let corner = 0; corner < face.length; corner++) {
+      const ui = uvIdx[corner]
+      const local = obj.positions[face[corner]!]
+      if (ui === undefined || !local) continue
+      const point = worldPointFromObject(obj, local)
+      uvs[ui] = {
+        u: point.x * axes.right.x + point.y * axes.right.y + point.z * axes.right.z,
+        v: -(point.x * axes.up.x + point.y * axes.up.y + point.z * axes.up.z),
+      }
+      touched.add(ui)
+    }
+  }
+  if (touched.size > 0) fitUVsToUnitSquare(uvs, [...touched])
 }
 
 function buildEdgeAdjacency(obj: SceneObject): {
@@ -430,6 +467,20 @@ export function unwrapSelectedFaces(
   }
 
   const fullMesh = faces.length >= allFaceCount
+  if (method === 'view') {
+    const axes = options.projectionAxes
+    if (!axes) {
+      return {
+        uvs: obj.uvs.map(cloneUv2),
+        faceUvIndices: obj.faceUvIndices.map((face) => [...face]),
+      }
+    }
+    const source = fullMesh ? obj : detachFacesUvTopology(obj, faces)
+    const uvs = source.uvs.map(cloneUv2)
+    const faceUvIndices = source.faceUvIndices.map((face) => [...face])
+    projectFacesFromView({ ...obj, uvs, faceUvIndices }, uvs, faceUvIndices, faces, axes)
+    return { uvs, faceUvIndices, uvAutoPacked: false }
+  }
   let resolved: UvUnwrapMethod =
     method === 'auto' ? resolveAutoUnwrapMethod(obj, fullMesh ? undefined : faces) : method
   const angleLimit =
@@ -505,6 +556,8 @@ export function unwrapSelectedFaces(
       }
       break
     }
+    case 'view':
+      break
   }
 
   if (options.repackAll !== false && selectionIslands.length > 0) {

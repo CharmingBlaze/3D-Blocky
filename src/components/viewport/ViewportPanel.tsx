@@ -163,7 +163,9 @@ export function ViewportPanel({
     handlePointerUp,
     handlePointerLeave,
     handleDragOver,
+    handleDragLeave,
     handleDrop,
+    imageDragOver,
     perspectivePrimitiveScrollHeight,
     roundedBoxParamWheel,
   } = useViewportPointerHandlers({
@@ -301,7 +303,7 @@ export function ViewportPanel({
   return (
     <div
       ref={bindContainerRef}
-      className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}`}
+      className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}${imageDragOver ? ' image-drag-over' : ''}`}
       onClick={viewportGizmoActive ? undefined : onActivate}
       onPointerDown={viewportGizmoActive ? undefined : handleViewportPointerDown}
       onPointerMove={viewportGizmoActive ? undefined : handleViewportPointerMove}
@@ -309,6 +311,7 @@ export function ViewportPanel({
       onPointerLeave={viewportGizmoActive ? undefined : handleViewportPointerLeave}
       onWheelCapture={!isActive ? onActivate : undefined}
       onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onContextMenu={view === 'perspective' ? (e) => e.preventDefault() : undefined}
       title={

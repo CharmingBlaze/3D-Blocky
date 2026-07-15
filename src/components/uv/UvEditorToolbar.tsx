@@ -43,6 +43,18 @@ interface UvEditorToolbarProps {
   onSetSnapMode: (mode: UvSnapMode) => void
   onSetTilePreview: (on: boolean) => void
   onSetGridDivisions: (n: number) => void
+  onSetTextureTransform: (patch: {
+    repeat?: [number, number]
+    offset?: [number, number]
+    rotation?: number
+    wrap?: 'clamp' | 'repeat' | 'mirror'
+  }) => void
+  onSelectConnected: () => void
+  canSelectConnected: boolean
+  imageLayerEdit: boolean
+  autoResizeUvsWithImage: boolean
+  onSetImageLayerEdit: (on: boolean) => void
+  onSetAutoResizeUvsWithImage: (on: boolean) => void
 }
 
 function UvSegment<T extends string>({
@@ -126,6 +138,13 @@ export function UvEditorToolbar({
   onSetSnapMode,
   onSetTilePreview,
   onSetGridDivisions,
+  onSetTextureTransform,
+  onSelectConnected,
+  canSelectConnected,
+  imageLayerEdit,
+  autoResizeUvsWithImage,
+  onSetImageLayerEdit,
+  onSetAutoResizeUvsWithImage,
 }: UvEditorToolbarProps) {
   const textureOptions: UvDropdownOption[] =
     sceneTextures.length === 0
@@ -150,6 +169,10 @@ export function UvEditorToolbar({
 
   const mappingMode = obj ? resolveUvMappingMode(obj) : 'perFace'
   const showSmartAngle = unwrapMethod === 'smart' || unwrapMethod === 'auto'
+  const repeat = obj?.material?.textureRepeat ?? [1, 1]
+  const offset = obj?.material?.textureOffset ?? [0, 0]
+  const rotation = obj?.material?.textureRotation ?? 0
+  const wrap = obj?.material?.textureWrap ?? 'clamp'
 
   return (
     <nav className="uv-sidebar" aria-label="UV editor tools">
@@ -175,6 +198,49 @@ export function UvEditorToolbar({
         </div>
       </section>
 
+      {obj && activeTextureId && (
+        <section className="uv-sidebar-section uv-tiling-section">
+          <div className="uv-sidebar-section-head">Texture tiling</div>
+          <button
+            type="button"
+            className={`uv-btn uv-btn-block ${imageLayerEdit ? 'active' : ''}`}
+            onClick={() => onSetImageLayerEdit(!imageLayerEdit)}
+            title="Temporarily edit the texture layer instead of UV faces"
+          >
+            {imageLayerEdit ? 'Finish image layer' : 'Edit image layer'}
+          </button>
+          <UvToggle
+            label="Auto-resize UVs"
+            checked={autoResizeUvsWithImage}
+            onChange={onSetAutoResizeUvsWithImage}
+            title="Scale the UV layout together with image-layer resizing"
+          />
+          <UvSegment
+            title="Texture edge behavior"
+            value={wrap}
+            onChange={(value) => onSetTextureTransform({ wrap: value })}
+            options={[
+              { id: 'clamp', label: 'Clamp' },
+              { id: 'repeat', label: 'Repeat' },
+              { id: 'mirror', label: 'Mirror' },
+            ]}
+          />
+          <div className="uv-tiling-grid">
+            <label><span>Repeat X</span><input type="number" min="0.01" max="100" step="0.1" value={repeat[0]} onChange={(e) => onSetTextureTransform({ repeat: [Math.max(0.01, Number(e.target.value)), repeat[1]] })} /></label>
+            <label><span>Repeat Y</span><input type="number" min="0.01" max="100" step="0.1" value={repeat[1]} onChange={(e) => onSetTextureTransform({ repeat: [repeat[0], Math.max(0.01, Number(e.target.value))] })} /></label>
+            <label><span>Offset X</span><input type="number" min="-10" max="10" step="0.01" value={offset[0]} onChange={(e) => onSetTextureTransform({ offset: [Number(e.target.value), offset[1]] })} /></label>
+            <label><span>Offset Y</span><input type="number" min="-10" max="10" step="0.01" value={offset[1]} onChange={(e) => onSetTextureTransform({ offset: [offset[0], Number(e.target.value)] })} /></label>
+            <label className="uv-tiling-wide"><span>Rotation</span><input type="number" min="-360" max="360" step="1" value={rotation} onChange={(e) => onSetTextureTransform({ rotation: Number(e.target.value) })} /></label>
+          </div>
+          <div className="uv-btn-grid uv-sidebar-stack-spaced">
+            <button type="button" className="uv-btn" onClick={() => onSetTextureTransform({ wrap: 'repeat', repeat: [2, 2] })}>2 × 2</button>
+            <button type="button" className="uv-btn" onClick={() => onSetTextureTransform({ wrap: 'repeat', repeat: [4, 4] })}>4 × 4</button>
+            <button type="button" className="uv-btn uv-tiling-wide" onClick={() => onSetTextureTransform({ wrap: 'clamp', repeat: [1, 1], offset: [0, 0], rotation: 0 })}>Reset tiling</button>
+          </div>
+          <p className="uv-sidebar-help">Updates the UV canvas and 3D preview live.</p>
+        </section>
+      )}
+
       <section className="uv-sidebar-section">
         <div className="uv-sidebar-section-head">Selection</div>
         <div className="uv-sidebar-stack">
@@ -198,6 +264,15 @@ export function UvEditorToolbar({
               ]}
             />
           )}
+          <button
+            type="button"
+            className="uv-btn uv-btn-block"
+            disabled={!canSelectConnected}
+            onClick={onSelectConnected}
+            title="Select every face in the connected UV island"
+          >
+            Select connected island
+          </button>
         </div>
       </section>
 

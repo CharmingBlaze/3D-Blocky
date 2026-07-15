@@ -25,6 +25,9 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../mesh/meshSelection'
 import type { SelectionMode } from './selectionSlice'
 import type { ActiveTool, ToolCategory } from './toolActivationSlice'
+import type { ViewType } from '../scene/viewTypes'
+import type { ViewMoveBasis } from '../utils/viewNavigation'
+import { viewScreenAxes } from '../mesh/selectionPlaneTransform'
 
 export type UvEditorMode = 'points' | 'faces'
 
@@ -142,6 +145,8 @@ type UvStore = UvEditorLayoutState & {
   pixelTextureRevision: number
   updateObject: (id: string, updates: Partial<SceneObject>) => void
   commitHistory: (label?: string) => boolean
+  activeView: ViewType
+  viewMoveBasis: ViewMoveBasis | null
 }
 
 export function createUvEditorSlice<T extends UvEditorLayoutState>(
@@ -479,6 +484,8 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         uvEditorSelectedFaces,
         uvEditorSmartUvAngle,
         uvEditorSticky,
+        activeView,
+        viewMoveBasis,
       } = store()
       const objectId = selectedObjectId ?? meshSelection?.objectId
       if (!objectId) return
@@ -500,6 +507,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
 
       const fullMesh = faceIndices.length >= obj.faces.length
       const ensured = ensureObjectUVs(obj)
+      const viewAxes = method === 'view' ? viewScreenAxes(activeView, viewMoveBasis) : null
       const { uvs, faceUvIndices, uvAutoPacked } = unwrapSelectedFaces(
         ensured as import('../uv/uvObject').SceneObjectWithUVs,
         faceIndices,
@@ -508,6 +516,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
           angleLimitDeg: uvEditorSmartUvAngle,
           repackAll: true,
           markPacked: fullMesh,
+          projectionAxes: viewAxes ? { right: viewAxes.right, up: viewAxes.up } : undefined,
         }
       )
       setPartial((s) => {

@@ -99,6 +99,15 @@ export function createTexturedPlaneObject(
     smoothShading: false,
     facetExaggeration: 0,
     color,
+    material: {
+      mode: 'texture',
+      textureId: '',
+      textureWrap: 'clamp',
+      textureTint: [1, 1, 1, 1],
+      textureTintStrength: 0,
+      opacity: 1,
+      doubleSided: true,
+    },
     transform: {
       position: { ...center },
       rotation: { x: 0, y: 0, z: 0 },

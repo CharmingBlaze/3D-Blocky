@@ -1,12 +1,68 @@
-/**
- * UV editor camera helpers — pan is CSS translate over a frozen viewport paint;
- * zoom / content changes repaint the viewport-sized atlas.
- */
+/** Pure UV viewport math. The editor keeps one camera value and commits pan,
+ * zoom and framing atomically so rendering and hit-testing always agree. */
 
 export type UvEditorView = {
   panX: number
   panY: number
   zoom: number
+}
+
+export type UvEditorRect = {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+export function clampUvEditorZoom(zoom: number, min = 0.06, max = 32): number {
+  if (!Number.isFinite(zoom)) return 1
+  return Math.min(max, Math.max(min, zoom))
+}
+
+export function uvEditorScreenToWorld(
+  view: UvEditorView,
+  screenX: number,
+  screenY: number
+): { x: number; y: number } {
+  const zoom = Math.max(view.zoom, 1e-6)
+  return { x: (screenX - view.panX) / zoom, y: (screenY - view.panY) / zoom }
+}
+
+export function uvEditorFitRect(
+  rect: UvEditorRect,
+  viewportWidth: number,
+  viewportHeight: number,
+  padding = 32,
+  minZoom = 0.06,
+  maxZoom = 32
+): UvEditorView {
+  const width = Math.max(1, rect.maxX - rect.minX)
+  const height = Math.max(1, rect.maxY - rect.minY)
+  const availableWidth = Math.max(1, viewportWidth - padding * 2)
+  const availableHeight = Math.max(1, viewportHeight - padding * 2)
+  const zoom = clampUvEditorZoom(
+    Math.min(availableWidth / width, availableHeight / height),
+    minZoom,
+    maxZoom
+  )
+  return {
+    zoom,
+    panX: (viewportWidth - (rect.minX + rect.maxX) * zoom) / 2,
+    panY: (viewportHeight - (rect.minY + rect.maxY) * zoom) / 2,
+  }
+}
+
+/** Smooth across mouse wheels and high-resolution trackpads. */
+export function uvEditorWheelZoom(
+  view: UvEditorView,
+  screenX: number,
+  screenY: number,
+  deltaY: number,
+  minZoom = 0.06,
+  maxZoom = 32
+): UvEditorView {
+  const nextZoom = clampUvEditorZoom(view.zoom * Math.exp(-deltaY * 0.0015), minZoom, maxZoom)
+  return uvEditorZoomAtScreenPoint(view, screenX, screenY, nextZoom)
 }
 
 /** CSS pan delta from the last painted camera to the live camera (same zoom). */
@@ -28,7 +84,7 @@ export function uvEditorZoomAtScreenPoint(
   nextZoom: number
 ): UvEditorView {
   const z0 = Math.max(view.zoom, 1e-6)
-  const z1 = Math.max(nextZoom, 1e-6)
+  const z1 = clampUvEditorZoom(nextZoom)
   const u = (screenX - view.panX) / z0
   const v = (screenY - view.panY) / z0
   return {
