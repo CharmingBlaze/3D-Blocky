@@ -1214,6 +1214,36 @@
   background: color-mix(in srgb, var(--border) 75%, transparent);
 }
 
+.side-panel .side-create-label-with-action::after {
+  display: none;
+}
+
+.side-panel .side-create-label-with-action {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--inspector-soft-line, var(--border));
+}
+
+.side-panel .side-mini-action {
+  min-height: 17px;
+  padding: 1px 5px;
+  border: 1px solid var(--inspector-line, var(--border));
+  border-radius: 0;
+  background: var(--inspector-control, var(--bg-panel));
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.side-panel .side-mini-action:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--bg-panel));
+  background: var(--inspector-control-hover, var(--bg-hover));
+  color: var(--text);
+}
+
 .side-panel .side-section-body > .side-create-label:first-child {
   margin-top: 0;
 }
@@ -3018,6 +3048,27 @@ html[data-theme-contrast='light'] .theme-select {
   gap: 6px;
 }
 
+.hair-uv-shape-controls {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.hair-uv-shape-controls > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+}
+
+.hair-uv-shape-controls .side-btn {
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 0;
+}
+
 .hair-uv-size-controls label { display: grid; gap: 4px; color: var(--text-muted); font-size: 10px; }
 .hair-uv-size-controls input { width: 100%; }
 
@@ -3234,6 +3285,235 @@ html[data-theme-contrast='light'] .theme-select {
 
 .hair-draw-options-heading .muted { font-weight: 400; }
 .hair-draw-options .side-color-hint { margin: 0; }
+
+/* Inspector contextual submenus: flat Adobe-style groups, never floating cards. */
+.side-panel .hair-draw-options,
+.side-panel .hair-texture-controls,
+.side-panel .hair-texture-alpha-check,
+.side-panel .palette-texture-tint {
+  gap: 5px;
+  margin: 1px 0;
+  padding: 6px;
+  border: 1px solid var(--inspector-line, var(--border));
+  border-radius: 0;
+  background: color-mix(in srgb, var(--text) 2.5%, var(--bg-panel));
+  box-shadow: none;
+}
+
+.side-panel .hair-draw-options {
+  grid-column: 1 / -1;
+}
+
+.side-panel .hair-draw-options-heading,
+.side-panel .hair-texture-control-heading {
+  min-height: 18px;
+  padding: 0 0 4px;
+  border-bottom: 1px solid var(--inspector-soft-line, var(--border));
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.side-panel .hair-draw-options-heading .muted,
+.side-panel .hair-texture-control-heading .muted {
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.side-panel .hair-texture-btn {
+  min-height: 25px;
+  margin: 0;
+  border-radius: 0;
+  background: var(--inspector-control, var(--bg-panel));
+}
+
+.side-panel .hair-draw-options .side-checkbox-row {
+  gap: 3px;
+}
+
+.side-panel .hair-draw-options .side-checkbox {
+  min-width: 0;
+  padding: 2px 3px;
+  border: 1px solid transparent;
+}
+
+.side-panel .hair-draw-options .side-checkbox:hover {
+  border-color: var(--inspector-soft-line, var(--border));
+  background: var(--inspector-control-hover, var(--bg-hover));
+}
+
+.side-panel .hair-draw-options input[type='radio'] {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.side-panel .hair-draw-options .side-color-hint {
+  padding-top: 4px;
+  border-top: 1px solid var(--inspector-soft-line, var(--border));
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.side-panel .hair-color-mode-tabs,
+.side-panel .hair-texture-repeat-grid,
+.side-panel .hair-uv-size-controls,
+.side-panel .hair-uv-view-toolbar,
+.side-panel .hair-uv-toolbar {
+  gap: 3px;
+}
+
+.side-panel .hair-texture-controls button,
+.side-panel .hair-texture-controls input,
+.side-panel .hair-texture-controls select,
+.side-panel .hair-texture-controls .side-btn,
+.side-panel .hair-texture-alpha-check,
+.side-panel .hair-gradient-summary > span {
+  border-radius: 0;
+}
+
+/* Full Hair Properties editor uses the same square professional language. */
+.hair-texture-dialog,
+.hair-texture-dialog .hair-preview-section,
+.hair-texture-dialog .hair-texture-library,
+.hair-texture-dialog .hair-preview-3d,
+.hair-texture-dialog .hair-preview-orbit-hint,
+.hair-texture-dialog .hair-uv-editor,
+.hair-texture-dialog .hair-uv-canvas,
+.hair-texture-dialog .hair-uv-canvas-wrap,
+.hair-texture-dialog .hair-uv-view-controls button,
+.hair-texture-dialog .hair-texture-controls,
+.hair-texture-dialog .hair-texture-alpha-check,
+.hair-texture-dialog .hair-gradient-summary,
+.hair-texture-dialog .hair-gradient-summary > span,
+.hair-texture-dialog .hair-gradient-editor,
+.hair-texture-dialog .hair-gradient-preview,
+.hair-texture-dialog .hair-gradient-preview input,
+.hair-texture-dialog .hair-texture-list,
+.hair-texture-dialog .hair-texture-item,
+.hair-texture-dialog button,
+.hair-texture-dialog input,
+.hair-texture-dialog select {
+  border-radius: 0;
+}
+
+.hair-texture-dialog {
+  font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+  border-color: color-mix(in srgb, var(--text) 18%, var(--bg-panel));
+}
+
+.hair-texture-dialog .hair-preview-section,
+.hair-texture-dialog .hair-texture-library,
+.hair-texture-dialog .hair-uv-editor,
+.hair-texture-dialog .hair-texture-controls {
+  border-color: color-mix(in srgb, var(--text) 15%, var(--bg-panel));
+  background: color-mix(in srgb, var(--text) 3%, var(--bg-panel));
+  box-shadow: none;
+}
+
+.hair-texture-dialog .hair-preview-heading,
+.hair-texture-dialog .hair-texture-library-heading,
+.hair-texture-dialog .hair-texture-control-heading,
+.hair-texture-dialog .hair-uv-editor-label {
+  min-height: 22px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 12%, var(--bg-panel));
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+}
+
+.hair-texture-dialog .hair-live-badge {
+  border-radius: 0;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-green) 40%, var(--border));
+  background: transparent;
+}
+
+.hair-texture-dialog .hair-live-badge i {
+  border-radius: 0;
+}
+
+.hair-texture-dialog .hair-preview-orbit-hint {
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background: color-mix(in srgb, var(--bg-dark) 88%, transparent);
+}
+
+.hair-texture-dialog .hair-preview-choice-row,
+.hair-texture-dialog .hair-color-mode-tabs,
+.hair-texture-dialog .hair-gradient-actions,
+.hair-texture-dialog .hair-uv-view-toolbar,
+.hair-texture-dialog .hair-uv-toolbar {
+  gap: 3px;
+}
+
+.hair-texture-dialog .hair-texture-item {
+  border-color: transparent;
+  border-left: 3px solid transparent;
+  background: transparent;
+}
+
+.hair-texture-dialog .hair-texture-item:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text) 14%, var(--bg-panel));
+  border-left-color: color-mix(in srgb, var(--text) 30%, var(--bg-panel));
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
+}
+
+.hair-texture-dialog .hair-texture-item.active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+.hair-texture-dialog .hair-gradient-editor {
+  border-color: color-mix(in srgb, var(--text) 15%, var(--bg-panel));
+  background: var(--bg-panel);
+  box-shadow: none;
+}
+
+.hair-texture-dialog .hair-texture-list,
+.hair-texture-dialog .hair-texture-body {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 32%, var(--bg-panel)) var(--bg-panel);
+}
+
+.hair-texture-dialog .hair-texture-list::-webkit-scrollbar,
+.hair-texture-dialog .hair-texture-body::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.hair-texture-dialog .hair-texture-list::-webkit-scrollbar-track,
+.hair-texture-dialog .hair-texture-body::-webkit-scrollbar-track,
+.hair-texture-dialog .hair-texture-list::-webkit-scrollbar-thumb,
+.hair-texture-dialog .hair-texture-body::-webkit-scrollbar-thumb {
+  border-radius: 0;
+}
+
+.hair-texture-dialog .hair-texture-list::-webkit-scrollbar-track,
+.hair-texture-dialog .hair-texture-body::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+}
+
+.hair-texture-dialog .hair-texture-list::-webkit-scrollbar-thumb,
+.hair-texture-dialog .hair-texture-body::-webkit-scrollbar-thumb {
+  border: 1px solid var(--bg-panel);
+  background: color-mix(in srgb, var(--text) 32%, var(--bg-panel));
+}
+
+.hair-texture-dialog .hair-texture-actions {
+  gap: 3px;
+  padding: 8px 12px 10px;
+  border-top-color: color-mix(in srgb, var(--text) 15%, var(--bg-panel));
+}
 
 .import-export-status {
   font-size: 12px;

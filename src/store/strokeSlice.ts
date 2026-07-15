@@ -66,6 +66,8 @@ export interface StrokeLayoutState {
   sketchLatheCaps: boolean
   penLatheCaps: boolean
   extrudeAmount: number
+  /** Default fullness for newly drawn Blob strokes. */
+  blobInflation: number
   extrudeDragAnchor: ExtrudeDragAnchor | null
   currentStroke: { x: number; y: number }[]
   currentStrokeView: ViewType | null
@@ -91,6 +93,7 @@ export interface StrokeLayoutActions {
   setLatheCaps: (on: boolean) => void
   toggleLatheCaps: () => void
   setExtrudeAmount: (amount: number) => void
+  setBlobInflation: (inflation: number) => void
   commitExtrudeDepth: () => void
   beginExtrudeDrag: (clientX: number, clientY: number) => void
   updateExtrudeFromPointer: (clientX: number, clientY: number) => void
@@ -135,6 +138,7 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   sketchLatheCaps: false,
   penLatheCaps: false,
   extrudeAmount: 16,
+  blobInflation: 0.65,
   extrudeDragAnchor: null,
   currentStroke: [],
   currentStrokeView: null,
@@ -274,6 +278,9 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
       }
       set({ extrudeAmount: amount } as unknown as Partial<T>)
     },
+
+    setBlobInflation: (inflation) =>
+      set({ blobInflation: Math.max(0, Math.min(1, inflation)) } as unknown as Partial<T>),
 
     commitExtrudeDepth: () => {
       store().pushHistory('Extrude depth')
@@ -427,6 +434,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         sketchLatheMode,
         sketchLatheCaps,
         extrudeAmount,
+        blobInflation,
         smoothDrawing,
         hairTextureId,
         hairUvTransform,
@@ -469,6 +477,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         latheMode: sketchLatheMode,
         latheCaps: sketchLatheCaps,
         extrudeAmount,
+        blobInflation,
         hairTipStyle,
         planeFrame: currentStrokePlane,
       }

@@ -7,6 +7,7 @@ import type { PixelDocument } from '../pixel/pixelTypes'
 import type { HairUvTransform } from '../stroke/hairUvTransform'
 import { transformHairUv } from '../stroke/hairUvTransform'
 import type { HairTextureSettings } from '../stroke/hairTextureSettings'
+import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 
 type PreviewKind = 'hair-paths' | 'hair-strips' | 'hair-round'
 
@@ -17,6 +18,41 @@ interface Props {
   settings: HairTextureSettings
   kind: PreviewKind
   pointed: boolean
+  object?: SceneObject | null
+}
+
+function createObjectGeometry(object: SceneObject): THREE.BufferGeometry {
+  const data = HalfEdgeMesh.fromObject(object).toMeshData(false)
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3))
+  if (data.uvs?.length) geo.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2))
+  if (data.normals?.length) geo.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3))
+  geo.setIndex(new THREE.BufferAttribute(data.indices, 1))
+  if (!data.normals?.length) geo.computeVertexNormals()
+  if (object.transform) {
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        object.transform.rotation.x,
+        object.transform.rotation.y,
+        object.transform.rotation.z
+      )),
+      new THREE.Vector3(
+        object.transform.scale.x,
+        object.transform.scale.y,
+        object.transform.scale.z
+      )
+    )
+    geo.applyMatrix4(matrix)
+  }
+  geo.computeBoundingBox()
+  geo.center()
+  geo.computeBoundingSphere()
+  const radius = geo.boundingSphere?.radius ?? 1
+  const fitScale = 2.35 / Math.max(radius, 0.001)
+  geo.scale(fitScale, fitScale, fitScale)
+  geo.computeBoundingSphere()
+  return geo
 }
 
 function createRibbonGeometry(transform: HairUvTransform, pointed: boolean, strip: boolean): THREE.BufferGeometry {
@@ -49,8 +85,9 @@ function createRibbonGeometry(transform: HairUvTransform, pointed: boolean, stri
   return geo
 }
 
-function PreviewMesh({ textureDoc, textureUrl, transform, settings, kind, pointed }: Props) {
+function PreviewMesh({ textureDoc, textureUrl, transform, settings, kind, pointed, object }: Props) {
   const geometry = useMemo(() => {
+    if (object) return createObjectGeometry(object)
     if (kind !== 'hair-round') return createRibbonGeometry(transform, pointed, kind === 'hair-strips')
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(-2.4, -0.55, 0),
@@ -80,7 +117,7 @@ function PreviewMesh({ textureDoc, textureUrl, transform, settings, kind, pointe
     uv.needsUpdate = true
     geo.computeVertexNormals()
     return geo
-  }, [kind, pointed, transform])
+  }, [kind, pointed, transform, object])
 
   const texture = useMemo(() => {
     let tex: THREE.Texture | null = null
@@ -143,11 +180,18 @@ function PreviewMesh({ textureDoc, textureUrl, transform, settings, kind, pointe
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => texture?.dispose(), [texture])
 
+  const objectColor = object ? `#${object.color.toString(16).padStart(6, '0')}` : '#ffffff'
+  const previewColor = settings.colorMode === 'tint' || settings.tintEnabled
+    ? settings.tint
+    : texture
+      ? '#ffffff'
+      : objectColor
+
   return (
     <mesh geometry={geometry} rotation={[-0.18, -0.12, -0.08]}>
       <meshStandardMaterial
         map={texture ?? undefined}
-        color={settings.colorMode === 'tint' || settings.tintEnabled ? settings.tint : '#ffffff'}
+        color={previewColor}
         opacity={settings.opacity}
         transparent={settings.opacity < 1 || Boolean(texture)}
         alphaTest={settings.removeDarkBackground ? 0.08 : 0.02}

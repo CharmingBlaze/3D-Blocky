@@ -93,6 +93,8 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
   const pixelDocuments = useAppStore((s) => s.pixelDocuments)
   const objectTextures = useAppStore((s) => s.objectTextures)
   const objects = useAppStore((s) => s.objects)
+  const selectedObjectId = useAppStore((s) => s.selectedObjectId)
+  const selectionObjectIds = useAppStore((s) => s.selectionObjectIds)
   const hairTextureId = useAppStore((s) => s.hairTextureId)
   const hairUvTransform = useAppStore((s) => s.hairUvTransform)
   const hairTextureSettings = useAppStore((s) => s.hairTextureSettings)
@@ -117,6 +119,15 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
   )
 
   const activeLabel = textures.find((t) => t.id === hairTextureId)?.label ?? null
+  const selectedPreviewObject = useMemo(() => {
+    const id = selectedObjectId ?? (selectionObjectIds.length === 1 ? selectionObjectIds[0] : null)
+    const object = id ? objects.find((candidate) => candidate.id === id) ?? null : null
+    const kind = object?.sketchSource?.kind
+    return kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round' ||
+      kind === 'ribbon' || kind === 'tapered-tube'
+      ? object
+      : null
+  }, [objects, selectedObjectId, selectionObjectIds])
   const textureDoc = hairTextureId ? pixelDocuments[hairTextureId] ?? null : null
   const textureUrl = hairTextureId ? objectTextures[hairTextureId]?.url ?? null : null
   const previewKind = strokeMode === 'hair-strips' || strokeMode === 'hair-round' ? strokeMode : 'hair-paths'
@@ -155,8 +166,11 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
       shadowDetail: atlasCrop ? 0.08 : verticalFibers ? 0.52 : darkBackdrop ? 0.3 : 0.18,
     })
     setHairTipStyle('pointed')
-    if (atlasCrop) setStrokeMode('hair-strips')
-    else if (darkBackdrop) setStrokeMode('hair-paths')
+    // Smart texture analysis may choose a better hair preview shape, but must
+    // not replace a general Ribbon or Tapered Tube tool the user selected.
+    const isHairTool = strokeMode === 'hair-paths' || strokeMode === 'hair-strips' || strokeMode === 'hair-round'
+    if (isHairTool && atlasCrop) setStrokeMode('hair-strips')
+    else if (isHairTool && darkBackdrop) setStrokeMode('hair-paths')
   }
 
   const chooseTexture = (id: string) => {
@@ -216,7 +230,7 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
             <div className="hair-preview-heading">
               <div>
                 <strong>Live preview</strong>
-                <span className="muted">Updates as you edit</span>
+                <span className="muted">{selectedPreviewObject ? selectedPreviewObject.name : 'Sample strand'} · updates as you edit</span>
               </div>
               <span className="hair-live-badge"><i /> Live</span>
             </div>
@@ -227,6 +241,7 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
               settings={hairTextureSettings}
               kind={previewKind}
               pointed={hairTipStyle === 'pointed'}
+              object={selectedPreviewObject}
             />
             <div className="hair-preview-choice-row" aria-label="Hair shape">
               {([
@@ -241,7 +256,7 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
             </div>
             <div className="hair-preview-choice-row" aria-label="Hair tips">
               <button type="button" className={`side-btn ${hairTipStyle === 'pointed' ? 'active' : ''}`} onClick={() => setHairTipStyle('pointed')}>Pointed tips</button>
-              <button type="button" className={`side-btn ${hairTipStyle === 'square' ? 'active' : ''}`} onClick={() => setHairTipStyle('square')}>Blunt tips</button>
+              <button type="button" className={`side-btn ${hairTipStyle === 'square' ? 'active' : ''}`} onClick={() => setHairTipStyle('square')}>Square tips</button>
             </div>
           </section>
 
@@ -288,13 +303,24 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
                   onChange={(e) => setHairUvTransform({ ...hairUvTransform, scaleV: Math.max(0.1, Math.min(12, Number(e.target.value) || 1)) })}
                 />
               </label>
-              <button type="button" className="side-btn" onClick={() => setHairUvTransform({ ...hairUvTransform, scaleU: 1, scaleV: 1 })}>
+              <button type="button" className="side-btn" onClick={resetHairUvTransform}>
                 Fit once
               </button>
             </div>
 
             <div className="hair-color-mode-tabs" aria-label="Texture color mode">
-              <button type="button" className={`side-btn ${hairTextureSettings.colorMode === 'image' ? 'active' : ''}`} onClick={() => setHairTextureSettings({ colorMode: 'image', tintEnabled: false })}>Image</button>
+              <button
+                type="button"
+                className={`side-btn ${hairTextureSettings.colorMode === 'image' ? 'active' : ''}`}
+                disabled={busy}
+                title={hairTextureId ? 'Use the selected image without a color tint' : 'Import an image texture'}
+                onClick={() => {
+                  setHairTextureSettings({ colorMode: 'image', tintEnabled: false })
+                  if (!hairTextureId) void runImport()
+                }}
+              >
+                {hairTextureId ? 'Image' : 'Import image…'}
+              </button>
               <button type="button" className={`side-btn ${hairTextureSettings.colorMode === 'tint' ? 'active' : ''}`} onClick={() => setHairTextureSettings({ colorMode: 'tint', tintEnabled: true })}>Color</button>
               <button type="button" className={`side-btn ${hairTextureSettings.colorMode === 'gradient' ? 'active' : ''}`} onClick={() => { setHairTextureSettings({ colorMode: 'gradient', tintEnabled: false }); setShowGradientEditor(true) }}>Gradient</button>
             </div>
@@ -399,6 +425,8 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
             onChange={(next: HairUvTransform) => setHairUvTransform(next)}
             onReset={resetHairUvTransform}
             textureDoc={textureDoc}
+            shape={hairTipStyle}
+            onShapeChange={setHairTipStyle}
           />
           </div>
 

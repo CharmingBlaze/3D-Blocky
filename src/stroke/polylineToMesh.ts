@@ -65,6 +65,8 @@ export interface PolylineInput {
   latheCaps?: boolean
   /** Thickness of flat silhouette extrusion along the view axis. */
   extrudeAmount?: number
+  /** Fullness for newly drawn Blob shoulders, 0–1. */
+  blobInflation?: number
   name?: string
   /** Explicit closed flag from vector pen (overrides endpoint distance check). */
   pathClosed?: boolean

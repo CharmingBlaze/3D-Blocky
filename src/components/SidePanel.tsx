@@ -299,6 +299,8 @@ export function SidePanel() {
     setLatheCaps,
     extrudeAmount,
     setExtrudeAmount,
+    blobInflation,
+    setBlobInflation,
     commitExtrudeDepth,
     editingSketchObjectId,
     setEditingSketchObject,
@@ -429,6 +431,8 @@ export function SidePanel() {
       setLatheCaps: s.setLatheCaps,
       extrudeAmount: s.extrudeAmount,
       setExtrudeAmount: s.setExtrudeAmount,
+      blobInflation: s.blobInflation,
+      setBlobInflation: s.setBlobInflation,
       commitExtrudeDepth: s.commitExtrudeDepth,
       editingSketchObjectId: s.editingSketchObjectId,
       setEditingSketchObject: s.setEditingSketchObject,
@@ -993,8 +997,8 @@ export function SidePanel() {
             {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || strokeMode === 'tapered-tube') && (
               <div className="hair-draw-options">
                 <div className="hair-draw-options-heading">
-                  <span>Stroke appearance</span>
-                  <span className="muted">for new strokes</span>
+                  <span>Appearance</span>
+                  <span className="muted">New strokes</span>
                 </div>
                 <button
                   type="button"
@@ -1017,7 +1021,7 @@ export function SidePanel() {
                   </label>
                   <label className="side-checkbox" title="Keep full width/radius to blunt ends">
                     <input type="radio" name="hair-tip" checked={hairTipStyle === 'square'} onChange={() => setHairTipStyle('square')} />
-                    <span>Blunt tips</span>
+                    <span>Square tips</span>
                   </label>
                 </div>
                 <p className="side-color-hint muted">
@@ -1101,7 +1105,31 @@ export function SidePanel() {
                   </SideBtnGroup>
                 </>
               )}
-              <div className="side-create-label">Shape</div>
+              <div className="side-create-label side-create-label-with-action">
+                <span>Shape</span>
+                <button
+                  type="button"
+                  className="side-mini-action"
+                  title="Restore shape defaults for this and future strokes"
+                  onClick={() => {
+                    setExtrudeAmount(16)
+                    setPolyBudget(128)
+                    setBrushDensity(12)
+                    setBlobInflation(0.65)
+                    if (selectedSketchSource) {
+                      updateSelectedSketchSource({
+                        extrudeDepth: 16,
+                        polyBudget: 128,
+                        brushDensity: 12,
+                        ...(selectedSketchSource.kind === 'soft' ? { inflation: 0.65 } : {}),
+                      })
+                      commitSketchSourceEdit()
+                    }
+                  }}
+                >
+                  Default
+                </button>
+              </div>
               <SideSlider
                 label="Extrude depth"
                 value={selectedSketchSource?.extrudeDepth ?? extrudeAmount}
@@ -1110,8 +1138,8 @@ export function SidePanel() {
                 max={256}
                 step={1}
                 onChange={(value) => {
+                  setExtrudeAmount(value)
                   if (selectedSketchSource) updateSelectedSketchSource({ extrudeDepth: value })
-                  else setExtrudeAmount(value)
                 }}
                 onCommit={
                   selectedSketchSource
@@ -1126,16 +1154,20 @@ export function SidePanel() {
                   Adjust depth for the selected doodle in real time.
                 </p>
               )}
-              {selectedSketchSource?.kind === 'soft' && selectedSketchSource.isClosed && (
+              {((selectedSketchSource?.kind === 'soft' && selectedSketchSource.isClosed) ||
+                (!selectedSketchSource && strokeMode === 'blob')) && (
                 <SideSlider
                   label="Inflation"
-                  value={selectedSketchSource.inflation ?? 0.65}
-                  display={`${Math.round((selectedSketchSource.inflation ?? 0.65) * 100)}%`}
+                  value={selectedSketchSource?.inflation ?? blobInflation}
+                  display={`${Math.round((selectedSketchSource?.inflation ?? blobInflation) * 100)}%`}
                   min={0}
                   max={1}
                   step={0.05}
-                  onChange={(value) => updateSelectedSketchSource({ inflation: value })}
-                  onCommit={commitSketchSourceEdit}
+                  onChange={(value) => {
+                    setBlobInflation(value)
+                    if (selectedSketchSource) updateSelectedSketchSource({ inflation: value })
+                  }}
+                  onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
                 />
               )}
               {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
@@ -1156,9 +1188,10 @@ export function SidePanel() {
                 max={selectedSketchSource ? 512 : 256}
                 step={4}
                 warn={!!overBudget}
-                onChange={selectedSketchSource
-                  ? (value) => updateSelectedSketchSource({ polyBudget: value })
-                  : setPolyBudget}
+                onChange={(value) => {
+                  setPolyBudget(value)
+                  if (selectedSketchSource) updateSelectedSketchSource({ polyBudget: value })
+                }}
                 onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
               />
               <SideSlider
@@ -1168,9 +1201,10 @@ export function SidePanel() {
                 min={2}
                 max={selectedSketchSource ? 48 : 24}
                 step={1}
-                onChange={selectedSketchSource
-                  ? (value) => updateSelectedSketchSource({ brushDensity: value })
-                  : setBrushDensity}
+                onChange={(value) => {
+                  setBrushDensity(value)
+                  if (selectedSketchSource) updateSelectedSketchSource({ brushDensity: value })
+                }}
                 onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
               />
               <p className="side-color-hint muted">

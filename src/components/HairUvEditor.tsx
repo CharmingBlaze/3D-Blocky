@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { compositeLayers } from '../pixel/compositeLayers'
 import type { PixelDocument } from '../pixel/pixelTypes'
 import { type HairUvTransform, transformHairUv } from '../stroke/hairUvTransform'
+import type { HairTipStyle } from '../mesh/hairRibbon'
 
 const SIZE = 220
 const HANDLE = 8
@@ -17,6 +18,8 @@ interface HairUvEditorProps {
   onChange: (next: HairUvTransform) => void
   onReset: () => void
   textureDoc: PixelDocument | null
+  shape: HairTipStyle
+  onShapeChange: (shape: HairTipStyle) => void
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -30,24 +33,24 @@ function rectCorners(t: HairUvTransform) {
   }
 }
 
-function hairOutlinePoints(steps = 24): { u: number; v: number }[] {
+function hairOutlinePoints(steps = 24, shape: HairTipStyle = 'pointed'): { u: number; v: number }[] {
   const pts: { u: number; v: number }[] = []
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
-    const taper = t < 0.35 ? (t / 0.35) ** 2 : t > 0.65 ? ((1 - t) / 0.35) ** 2 : 1
+    const taper = shape === 'square' ? 1 : t < 0.35 ? (t / 0.35) ** 2 : t > 0.65 ? ((1 - t) / 0.35) ** 2 : 1
     const half = 0.5 * Math.max(0.04, taper)
     pts.push({ u: t, v: 0.5 - half })
   }
   for (let i = steps; i >= 0; i--) {
     const t = i / steps
-    const taper = t < 0.35 ? (t / 0.35) ** 2 : t > 0.65 ? ((1 - t) / 0.35) ** 2 : 1
+    const taper = shape === 'square' ? 1 : t < 0.35 ? (t / 0.35) ** 2 : t > 0.65 ? ((1 - t) / 0.35) ** 2 : 1
     const half = 0.5 * Math.max(0.04, taper)
     pts.push({ u: t, v: 0.5 + half })
   }
   return pts
 }
 
-export function HairUvEditor({ transform, onChange, onReset, textureDoc }: HairUvEditorProps) {
+export function HairUvEditor({ transform, onChange, onReset, textureDoc, shape, onShapeChange }: HairUvEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dragRef = useRef<{
     mode: DragMode
@@ -72,14 +75,14 @@ export function HairUvEditor({ transform, onChange, onReset, textureDoc }: HairU
   const fitTexture = useCallback(() => setView({ centerU: 0.5, centerV: 0.5, zoom: 0.9 }), [])
 
   const fitUv = useCallback(() => {
-    const mapped = hairOutlinePoints(36).map((p) => transformHairUv(p.u, p.v, transform))
+    const mapped = hairOutlinePoints(36, shape).map((p) => transformHairUv(p.u, p.v, transform))
     const minU = Math.min(...mapped.map((p) => p.u))
     const maxU = Math.max(...mapped.map((p) => p.u))
     const minV = Math.min(...mapped.map((p) => p.v))
     const maxV = Math.max(...mapped.map((p) => p.v))
     const span = Math.max(maxU - minU, maxV - minV, 0.05)
     setView({ centerU: (minU + maxU) / 2, centerV: (minV + maxV) / 2, zoom: clamp(0.78 / span, MIN_ZOOM, MAX_ZOOM) })
-  }, [transform])
+  }, [transform, shape])
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current
@@ -136,7 +139,7 @@ export function HairUvEditor({ transform, onChange, onReset, textureDoc }: HairU
     ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y))
     ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y))
 
-    const outline = hairOutlinePoints()
+    const outline = hairOutlinePoints(24, shape)
     ctx.beginPath()
     outline.forEach((p, i) => {
       const mapped = transformHairUv(p.u, p.v, transform)
@@ -163,7 +166,7 @@ export function HairUvEditor({ transform, onChange, onReset, textureDoc }: HairU
     ctx.fillStyle = 'rgba(255,255,255,0.55)'
     ctx.textAlign = 'left'; ctx.fillText('U →', 6, SIZE - 6)
     ctx.textAlign = 'right'; ctx.fillText(`${Math.round(view.zoom * 100)}%`, SIZE - 6, 14)
-  }, [textureDoc, transform, hoverHandle, view, uvToCanvas, canvasToUv])
+  }, [textureDoc, transform, shape, hoverHandle, view, uvToCanvas, canvasToUv])
 
   useEffect(() => { paint() }, [paint])
 
@@ -281,6 +284,13 @@ export function HairUvEditor({ transform, onChange, onReset, textureDoc }: HairU
       <div className="hair-uv-view-toolbar">
         <button type="button" className="side-btn" onClick={fitUv} title="Center and fit the complete hair UV">Fit UV</button>
         <button type="button" className="side-btn" onClick={fitTexture} title="Return camera to the full 0–1 texture">View texture</button>
+      </div>
+      <div className="hair-uv-shape-controls" aria-label="Hair UV shape">
+        <span>Shape</span>
+        <div>
+          <button type="button" className={`side-btn ${shape === 'pointed' ? 'active' : ''}`} onClick={() => onShapeChange('pointed')}>Pointed</button>
+          <button type="button" className={`side-btn ${shape === 'square' ? 'active' : ''}`} onClick={() => onShapeChange('square')}>Square</button>
+        </div>
       </div>
       <div className="hair-uv-size-controls">
         <label>

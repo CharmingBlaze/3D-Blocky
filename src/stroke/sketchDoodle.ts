@@ -318,6 +318,7 @@ function buildClosedSoftBlob(
   relative: Vec2[],
   polyBudget: number,
   extrudeDepth: number,
+  inflation = 0.65,
   preserveDetail = false
 ): HalfEdgeMesh {
   const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
@@ -332,7 +333,7 @@ function buildClosedSoftBlob(
   return generateSoftInflateDome(boundary, {
     depth: Math.max(4, Math.abs(extrudeDepth)),
     rings,
-    inflation: 0.65,
+    inflation,
     color: 0,
   })
 }
@@ -458,7 +459,7 @@ function makeSketchSource(
     isClosed: prepared.isClosed,
     kind,
     extrudeDepth,
-    ...(kind === 'soft' ? { inflation: 0.65 } : {}),
+    ...(kind === 'soft' ? { inflation: input.blobInflation ?? 0.65 } : {}),
     planeFrame: input.planeFrame ?? null,
     ...(hairKind ? { tipStyle } : {}),
   }
@@ -491,7 +492,7 @@ export function softSketchDoodleToObject(input: PolylineInput): SceneObject | nu
   const kind: SketchDoodleKind = isClosed ? 'soft' : 'path'
 
   const mesh = isClosed
-    ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth, !!input.preserveDetail)
+    ? buildClosedSoftBlob(relative, polyBudget, extrudeDepth, input.blobInflation ?? 0.65, !!input.preserveDetail)
     : buildOpenSoftTube(relative, brushDensity, polyBudget)
 
   if (!mesh || mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
