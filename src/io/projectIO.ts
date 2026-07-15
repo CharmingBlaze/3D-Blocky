@@ -9,6 +9,7 @@ import {
 import { downloadJSON, PROJECT_FILE_FILTERS } from './download'
 import {
   APP_PROJECT_FORMAT,
+  BLOCKY_PROJECT_FORMAT,
   DEFAULT_PROJECT_FILENAME,
   LEGACY_PROJECT_FORMAT,
 } from '../app/branding'
@@ -59,7 +60,7 @@ export interface ProjectPreferences {
 
 export interface SerializedProjectFile {
   version: 1 | typeof PROJECT_FILE_VERSION
-  format: typeof APP_PROJECT_FORMAT | typeof LEGACY_PROJECT_FORMAT
+  format: typeof APP_PROJECT_FORMAT | typeof BLOCKY_PROJECT_FORMAT | typeof LEGACY_PROJECT_FORMAT
   savedAt: string
   objects: SceneSnapshot['objects']
   objectTextures: Record<
@@ -330,7 +331,11 @@ export function parseProjectFile(text: string): SerializedProjectFile {
   if (parsed.version !== 1 && parsed.version !== PROJECT_FILE_VERSION) {
     throw new Error('Unsupported project file version.')
   }
-  if (parsed.format !== APP_PROJECT_FORMAT && parsed.format !== LEGACY_PROJECT_FORMAT) {
+  if (
+    parsed.format !== APP_PROJECT_FORMAT &&
+    parsed.format !== BLOCKY_PROJECT_FORMAT &&
+    parsed.format !== LEGACY_PROJECT_FORMAT
+  ) {
     throw new Error('Unsupported project file format.')
   }
   if (!Array.isArray(parsed.objects)) {

@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { APP_NAME } from '../app/branding'
+import { AppBrandMark } from './AppBrandMark'
 
 interface AppErrorBoundaryProps {
   children: ReactNode
@@ -18,7 +20,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     if (import.meta.env.DEV) {
-      console.error('Blocky encountered an unexpected error.', error, info)
+      console.error(`${APP_NAME} encountered an unexpected error.`, error, info)
     }
   }
 
@@ -28,7 +30,8 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     return (
       <main className="app-recovery" role="alert">
         <div className="app-recovery-card">
-          <p className="app-recovery-kicker">Blocky needs to restart</p>
+          <AppBrandMark className="app-recovery-brand" />
+          <p className="app-recovery-kicker">{APP_NAME} needs to restart</p>
           <h1>Something went wrong in the workspace.</h1>
           <p>
             Reload the app to return to a clean state. If you have an open project file, you can

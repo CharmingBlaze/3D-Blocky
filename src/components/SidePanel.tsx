@@ -17,6 +17,7 @@ import {
 import { PaletteBar } from './PaletteBar'
 import { ThemePicker } from './ThemeBar'
 import { SidePanelFileMenu } from './SidePanelFileMenu'
+import { AppBrandMark } from './AppBrandMark'
 import { SidePanelPrimitivesMenu, PRIMITIVE_KINDS } from './SidePanelPrimitivesMenu'
 import { SidePanelVectorShapesMenu } from './SidePanelVectorShapesMenu'
 import { TransformToolbarToggle } from './TransformToolbar'
@@ -716,6 +717,7 @@ export function SidePanel() {
       <PanelResizeHandle onResize={setSidePanelWidth} width={sidePanelWidth} />
       <aside className="side-panel" style={{ width: sidePanelWidth }}>
         <div className="side-panel-header">
+          <AppBrandMark />
           <SidePanelFileMenu />
           <span className={`tool-badge ${activeTool}`}>{activeLabel}</span>
           <div className="side-history-actions">

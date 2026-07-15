@@ -1,8 +1,10 @@
 {
-  "name": "3d-blocky",
+  "name": "quadlo",
   "private": true,
   "version": "1.0.0",
+  "description": "Quadlo — 3D modeling and pixel art tool",
   "type": "module",
+  "productName": "Quadlo",
   "scripts": {
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",

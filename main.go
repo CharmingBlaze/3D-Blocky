@@ -23,7 +23,7 @@ func main() {
 	app := NewApp()
 
 	err = wails.Run(&options.App{
-		Title:     "3D Blocky",
+		Title:     "Quadlo",
 		Width:     1440,
 		Height:    900,
 		MinWidth:  1024,

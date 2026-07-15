@@ -3,7 +3,8 @@ import { saveBlob, saveJson, saveText, type FileFilter, type SaveFileOptions } f
 export type { FileFilter, SaveFileOptions }
 
 export const PROJECT_FILE_FILTERS: FileFilter[] = [
-  { name: '3D Blocky project', extensions: ['blocky.json'] },
+  { name: 'Quadlo project', extensions: ['quadlo.json'] },
+  { name: 'Legacy Blocky project', extensions: ['blocky.json'] },
   { name: 'Legacy project', extensions: ['lpo.json'] },
   { name: 'JSON', extensions: ['json'] },
 ]
@@ -17,7 +18,8 @@ export const IMAGE_IMPORT_FILTERS: FileFilter[] = [
 ]
 
 export const PIXEL_PROJECT_FILTERS: FileFilter[] = [
-  { name: 'Pixel texture project', extensions: ['blocky-texture.json'] },
+  { name: 'Quadlo texture project', extensions: ['quadlo-texture.json'] },
+  { name: 'Legacy Blocky texture project', extensions: ['blocky-texture.json'] },
   { name: 'Legacy texture project', extensions: ['lpo-texture.json'] },
   { name: 'JSON', extensions: ['json'] },
 ]
