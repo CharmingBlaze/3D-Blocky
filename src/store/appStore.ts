@@ -569,6 +569,17 @@ function runDocumentPaint(
   })
 }
 
+let materialColorPaintRaf = 0
+let materialColorPaintPending: Rgba4 | null = null
+
+function cancelMaterialColorPaintRaf() {
+  if (materialColorPaintRaf) {
+    cancelAnimationFrame(materialColorPaintRaf)
+    materialColorPaintRaf = 0
+  }
+  materialColorPaintPending = null
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   ...viewportLayoutInitialState,
   ...createViewportSlice<AppState>(set),
@@ -686,28 +697,36 @@ export const useAppStore = create<AppState>((set, get) => ({
   setMaterialEditorColorLive: (color) => {
     const state = get()
     const ids = resolveTargetObjectIds(state.selectedObjectId, state.selectionObjectIds)
-    if (ids.length === 0) {
-      set({ materialEditorColor: color, activeColor: rgbaToActiveColorNumber(color) })
-      return
-    }
+    set({ materialEditorColor: color, activeColor: rgbaToActiveColorNumber(color) })
+    if (ids.length === 0) return
     if (!state.materialPaintHistoryPending) {
       set({ materialPaintHistoryPending: true })
     }
-    set({
-      materialEditorColor: color,
-      activeColor: rgbaToActiveColorNumber(color),
-      objects: paintColorOnObjects(
-        state.objects,
-        ids,
-        state.selectionMode,
-        state.meshSelection,
-        state.materialEditorApplyToSelection,
-        color
-      ),
+    materialColorPaintPending = color
+    if (materialColorPaintRaf) return
+    materialColorPaintRaf = requestAnimationFrame(() => {
+      materialColorPaintRaf = 0
+      const pending = materialColorPaintPending
+      materialColorPaintPending = null
+      if (!pending) return
+      const live = get()
+      const liveIds = resolveTargetObjectIds(live.selectedObjectId, live.selectionObjectIds)
+      if (liveIds.length === 0) return
+      set({
+        objects: paintColorOnObjects(
+          live.objects,
+          liveIds,
+          live.selectionMode,
+          live.meshSelection,
+          live.materialEditorApplyToSelection,
+          pending
+        ),
+      })
     })
   },
 
   commitMaterialEditorColor: (color) => {
+    cancelMaterialColorPaintRaf()
     const state = get()
     const ids = resolveTargetObjectIds(state.selectedObjectId, state.selectionObjectIds)
     if (ids.length === 0) {

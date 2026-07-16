@@ -10,6 +10,10 @@ interface ColorWheelPickerProps {
   showAlpha?: boolean
 }
 
+const WHEEL_SIZE = 148
+const SV_WIDTH = 148
+const SV_HEIGHT = 110
+
 function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)
@@ -54,138 +58,102 @@ function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
   }
 }
 
+function hsvToRgba4(h: number, s: number, v: number, alpha: number): Rgba4 {
+  const [r, g, b] = hsvToRgb(((h % 1) + 1) % 1, s, v)
+  return [r, g, b, alpha]
+}
+
 export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }: ColorWheelPickerProps) {
   const { bgPanel, text, bgDark } = useTheme()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const svRef = useRef<HTMLCanvasElement>(null)
+  const wheelRef = useRef<HTMLDivElement>(null)
+  const svRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<'hue' | 'sv' | null>(null)
-  const [h, s, v] = rgbToHsv(color[0], color[1], color[2])
+  const changeRafRef = useRef(0)
+  const pendingColorRef = useRef<Rgba4 | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const [hsv, setHsv] = useState<[number, number, number]>(() => rgbToHsv(color[0], color[1], color[2]))
   const [hexInput, setHexInput] = useState(rgba4ToHex(color))
 
-  useEffect(() => {
-    setHexInput(rgba4ToHex(color))
-  }, [color])
+  const [h, s, v] = hsv
+  const displayColor = hsvToRgba4(h, s, v, color[3])
 
-  const emit = useCallback(
-    (nh: number, ns: number, nv: number, alpha: number, commit: boolean) => {
-      const [r, g, b] = hsvToRgb(((nh % 1) + 1) % 1, ns, nv)
-      const next: Rgba4 = [r, g, b, alpha]
-      onChange(next)
-      if (commit) onCommit(next)
+  useEffect(() => {
+    if (!dragging) {
+      setHsv(rgbToHsv(color[0], color[1], color[2]))
+      setHexInput(rgba4ToHex(color))
+    }
+  }, [color, dragging])
+
+  const scheduleChange = useCallback(
+    (next: Rgba4) => {
+      pendingColorRef.current = next
+      if (changeRafRef.current) return
+      changeRafRef.current = requestAnimationFrame(() => {
+        changeRafRef.current = 0
+        const pending = pendingColorRef.current
+        if (pending) onChange(pending)
+      })
     },
-    [onChange, onCommit]
+    [onChange]
   )
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const size = canvas.width
-    const cx = size / 2
-    const cy = size / 2
-    const outer = size / 2 - 1
-    const inner = outer - 16
-    ctx.clearRect(0, 0, size, size)
-    // Hue 0° (red) at 12 o'clock — match pick/marker math (not canvas default 3 o'clock).
-    for (let hueDeg = 0; hueDeg < 360; hueDeg++) {
-      const start = ((hueDeg - 90 - 1) * Math.PI) / 180
-      const end = ((hueDeg - 90 + 1) * Math.PI) / 180
-      ctx.beginPath()
-      ctx.moveTo(cx, cy)
-      ctx.arc(cx, cy, outer, start, end)
-      ctx.closePath()
-      ctx.fillStyle = `hsl(${hueDeg}, 100%, 50%)`
-      ctx.fill()
-    }
-    ctx.beginPath()
-    ctx.arc(cx, cy, inner, 0, Math.PI * 2)
-    ctx.fillStyle = bgPanel
-    ctx.fill()
-    // Soft ring edge
-    ctx.beginPath()
-    ctx.arc(cx, cy, outer, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(cx, cy, inner, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-    const markerAngle = h * Math.PI * 2 - Math.PI / 2
-    const mx = cx + Math.cos(markerAngle) * ((inner + outer) / 2)
-    const my = cy + Math.sin(markerAngle) * ((inner + outer) / 2)
-    ctx.beginPath()
-    ctx.arc(mx, my, 6, 0, Math.PI * 2)
-    ctx.fillStyle = text
-    ctx.fill()
-    ctx.strokeStyle = bgDark
-    ctx.lineWidth = 2
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(mx, my, 6.5, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }, [h, bgPanel, text, bgDark])
+  useEffect(
+    () => () => {
+      if (changeRafRef.current) cancelAnimationFrame(changeRafRef.current)
+    },
+    []
+  )
 
-  useEffect(() => {
-    const canvas = svRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const w = canvas.width
-    const hPx = canvas.height
-    const [hr, hg, hb] = hsvToRgb(((h % 1) + 1) % 1, 1, 1)
-    ctx.fillStyle = `rgb(${Math.round(hr * 255)}, ${Math.round(hg * 255)}, ${Math.round(hb * 255)})`
-    ctx.fillRect(0, 0, w, hPx)
-    const white = ctx.createLinearGradient(0, 0, w, 0)
-    white.addColorStop(0, '#fff')
-    white.addColorStop(1, 'rgba(255,255,255,0)')
-    ctx.fillStyle = white
-    ctx.fillRect(0, 0, w, hPx)
-    const black = ctx.createLinearGradient(0, 0, 0, hPx)
-    black.addColorStop(0, 'rgba(0,0,0,0)')
-    black.addColorStop(1, '#000')
-    ctx.fillStyle = black
-    ctx.fillRect(0, 0, w, hPx)
-    ctx.beginPath()
-    ctx.arc(s * w, (1 - v) * hPx, 6, 0, Math.PI * 2)
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(s * w, (1 - v) * hPx, 6, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(0,0,0,0.75)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }, [h, s, v, text, bgDark])
+  const applyHsv = useCallback(
+    (nh: number, ns: number, nv: number, alpha: number, commit: boolean) => {
+      const next = hsvToRgba4(nh, ns, nv, alpha)
+      setHsv([((nh % 1) + 1) % 1, ns, nv])
+      setHexInput(rgba4ToHex(next))
+      if (commit) {
+        if (changeRafRef.current) {
+          cancelAnimationFrame(changeRafRef.current)
+          changeRafRef.current = 0
+        }
+        pendingColorRef.current = null
+        onChange(next)
+        onCommit(next)
+        return
+      }
+      scheduleChange(next)
+    },
+    [onChange, onCommit, scheduleChange]
+  )
 
   const pickHue = useCallback(
     (clientX: number, clientY: number, commit: boolean) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
+      const el = wheelRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
       const cx = rect.left + rect.width / 2
       const cy = rect.top + rect.height / 2
-      const ang = Math.atan2(clientY - cy, clientX - cx) + Math.PI / 2
+      const dx = clientX - cx
+      const dy = clientY - cy
+      const dist = Math.hypot(dx, dy)
+      const outer = rect.width / 2
+      const inner = outer - 16
+      if (dist < inner * 0.85 || dist > outer) return
+      const ang = Math.atan2(dy, dx) + Math.PI / 2
       const nh = ((ang / (Math.PI * 2)) % 1 + 1) % 1
-      emit(nh, s, v, color[3], commit)
+      applyHsv(nh, s, v, color[3], commit)
     },
-    [color, emit, s, v]
+    [applyHsv, color, s, v]
   )
 
   const pickSv = useCallback(
     (clientX: number, clientY: number, commit: boolean) => {
-      const canvas = svRef.current
-      if (!canvas) return
-      const rect = canvas.getBoundingClientRect()
+      const el = svRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
       const ns = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
       const nv = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height))
-      emit(h, ns, nv, color[3], commit)
+      applyHsv(h, ns, nv, color[3], commit)
     },
-    [color, emit, h]
+    [applyHsv, color, h]
   )
 
   useEffect(() => {
@@ -197,6 +165,7 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
       if (draggingRef.current === 'hue') pickHue(e.clientX, e.clientY, true)
       if (draggingRef.current === 'sv') pickSv(e.clientX, e.clientY, true)
       draggingRef.current = null
+      setDragging(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -206,30 +175,66 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     }
   }, [pickHue, pickSv])
 
+  const hueDeg = Math.round(h * 360)
+
   return (
     <div className="mat-color-picker">
-      <div className="mat-color-wheel-wrap">
-        <canvas
-          ref={canvasRef}
-          width={148}
-          height={148}
-          className="mat-color-wheel"
-          onPointerDown={(e) => {
-            draggingRef.current = 'hue'
-            pickHue(e.clientX, e.clientY, false)
+      <div
+        ref={wheelRef}
+        className="mat-color-wheel-wrap"
+        style={{ width: WHEEL_SIZE, height: WHEEL_SIZE }}
+        onPointerDown={(e) => {
+          draggingRef.current = 'hue'
+          setDragging(true)
+          pickHue(e.clientX, e.clientY, false)
+        }}
+      >
+        <div
+          className="mat-color-wheel-ring"
+          style={{
+            background:
+              'conic-gradient(from -90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)',
           }}
         />
+        <div className="mat-color-wheel-hole" style={{ background: bgPanel }} />
+        <div
+          className="mat-color-wheel-marker"
+          style={{ transform: `rotate(${hueDeg}deg)` }}
+          aria-hidden
+        >
+          <span
+            className="mat-color-picker-marker mat-color-wheel-marker-dot"
+            style={{
+              background: text,
+              boxShadow: `0 0 0 2px ${bgDark}, 0 0 0 3px rgba(255,255,255,0.55)`,
+            }}
+          />
+        </div>
       </div>
       <div className="mat-color-sv-wrap">
-        <canvas
+        <div
           ref={svRef}
-          width={148}
-          height={110}
           className="mat-color-sv"
+          style={{
+            width: SV_WIDTH,
+            height: SV_HEIGHT,
+            background: `linear-gradient(to top, rgb(0 0 0), transparent),
+              linear-gradient(to right, rgb(255 255 255), transparent),
+              hsl(${hueDeg} 100% 50%)`,
+          }}
           onPointerDown={(e) => {
             draggingRef.current = 'sv'
+            setDragging(true)
             pickSv(e.clientX, e.clientY, false)
           }}
+        />
+        <span
+          className="mat-color-picker-marker mat-color-sv-marker"
+          style={{
+            left: `${s * 100}%`,
+            top: `${(1 - v) * 100}%`,
+          }}
+          aria-hidden
         />
       </div>
       <div className="mat-color-fields">
@@ -241,11 +246,13 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
             onChange={(e) => setHexInput(e.target.value)}
             onBlur={() => {
               const parsed = hexToRgba4(hexInput.startsWith('#') ? hexInput : `#${hexInput}`, color[3])
+              onChange(parsed)
               onCommit(parsed)
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 const parsed = hexToRgba4(hexInput.startsWith('#') ? hexInput : `#${hexInput}`, color[3])
+                onChange(parsed)
                 onCommit(parsed)
               }
             }}
@@ -254,13 +261,14 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
         <label className="mat-field">
           <span>RGB</span>
           <span className="mat-field-readout">
-            {Math.round(color[0] * 255)}, {Math.round(color[1] * 255)}, {Math.round(color[2] * 255)}
+            {Math.round(displayColor[0] * 255)}, {Math.round(displayColor[1] * 255)},{' '}
+            {Math.round(displayColor[2] * 255)}
           </span>
         </label>
         <label className="mat-field">
           <span>HSV</span>
           <span className="mat-field-readout">
-            {Math.round(h * 360)}°, {Math.round(s * 100)}%, {Math.round(v * 100)}%
+            {hueDeg}°, {Math.round(s * 100)}%, {Math.round(v * 100)}%
           </span>
         </label>
         {showAlpha && (
@@ -271,8 +279,10 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
               min={0}
               max={100}
               value={Math.round(color[3] * 100)}
-              onChange={(e) => emit(h, s, v, Number(e.target.value) / 100, false)}
-              onPointerUp={(e) => emit(h, s, v, Number((e.target as HTMLInputElement).value) / 100, true)}
+              onChange={(e) => applyHsv(h, s, v, Number(e.target.value) / 100, false)}
+              onPointerUp={(e) =>
+                applyHsv(h, s, v, Number((e.target as HTMLInputElement).value) / 100, true)
+              }
             />
             <span className="mat-field-readout">{Math.round(color[3] * 100)}%</span>
           </label>
@@ -284,7 +294,7 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
           style={{
             background: `linear-gradient(45deg, #80808040 25%, transparent 25%) 0 0 / 10px 10px,
               linear-gradient(-45deg, #80808040 25%, transparent 25%) 0 0 / 10px 10px,
-              rgba(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)}, ${color[3]})`,
+              rgba(${Math.round(displayColor[0] * 255)}, ${Math.round(displayColor[1] * 255)}, ${Math.round(displayColor[2] * 255)}, ${color[3]})`,
           }}
           title="Active color with alpha"
         />

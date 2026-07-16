@@ -791,16 +791,6 @@ export function SidePanel() {
             <PaletteBar variant="side" />
             <div className="side-create-label">Editors</div>
             <div className="side-editor-grid">
-              <SidePanelPixelEditorMenu
-                open={pixelEditorOpen}
-                minimized={pixelEditorPanel.minimized}
-                canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
-                onOpen={() => openPixelEditor()}
-                onClose={togglePixelEditor}
-                onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
-                onNewDocument={(width, height) => openPixelEditor({ width, height })}
-                onShowCanvas={togglePixelEditor}
-              />
               <button
                 className={`side-btn ${uvEditorOpen ? 'active' : ''}`}
                 onClick={toggleUvEditor}
@@ -825,6 +815,16 @@ export function SidePanel() {
               >
                 Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
               </button>
+              <SidePanelPixelEditorMenu
+                open={pixelEditorOpen}
+                minimized={pixelEditorPanel.minimized}
+                canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
+                onOpen={() => openPixelEditor()}
+                onClose={togglePixelEditor}
+                onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
+                onNewDocument={(width, height) => openPixelEditor({ width, height })}
+                onShowCanvas={togglePixelEditor}
+              />
             </div>
             <div className="side-create-label">Viewport display</div>
             <SideButtonDropdown
