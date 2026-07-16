@@ -88,174 +88,1529 @@ html[data-theme='nes'] .tool-ring-branch-item {
   letter-spacing: 0.04em;
 }
 
-/* Game Boy — green LCD bezel */
+/* Game Boy (DMG) — gray plastic shell, green LCD, purple accent */
 html[data-theme='gameboy'] {
-  background: #0f380f;
+  background: #8bac0f;
+  --scrollbar-track: #306230;
+  --scrollbar-thumb: #0f380f;
+  --scrollbar-thumb-hover: #9bbc0f;
+  --scrollbar-radius: 0px;
 }
 
-html[data-theme='gameboy'] .side-panel,
-html[data-theme='gameboy'] .transform-toolbar {
-  background: #306230;
-  border-color: #0f380f;
-  box-shadow: inset 0 0 0 2px #8bac0f;
+html[data-theme='gameboy'] .app-header {
+  background: linear-gradient(180deg, #d0ccc4 0%, #c0bcb4 72%, #6b4c8a 72%, #4a3068 100%);
+  border-bottom: 4px solid #0f380f;
+  box-shadow: inset 0 1px 0 #e8e4dc;
 }
 
-html[data-theme='gameboy'] .toolbar-btn.active,
-html[data-theme='gameboy'] .tool-ring-branch-item.active {
-  background: #9bbc0f;
-  color: #0f380f;
-}
-
-/* NES — chunky gray plastic + red accent */
-html[data-theme='nes'] .side-panel-header,
-html[data-theme='nes'] .toolbar-btn.active {
-  background: var(--accent);
-  color: #fff;
+html[data-theme='gameboy'] .side-panel {
+  background: linear-gradient(180deg, #c8c4bc 0%, #b8b4ac 18%, #306230 18%, #306230 88%, #6b4c8a 88%, #4a3068 100%);
+  border: 4px solid #0f380f;
   border-radius: 0;
+  box-shadow:
+    inset 0 0 0 3px #9bbc0f,
+    0 4px 0 #0f380f;
 }
 
-html[data-theme='nes'] .side-panel {
-  border: 4px solid #1c1c1c;
-  box-shadow: 4px 4px 0 #000;
-}
-
-/* SNES — purple shell with soft buttons */
-html[data-theme='snes'] .toolbar-btn,
-html[data-theme='snes'] .tool-ring-branch-item {
-  border-radius: 999px;
-  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-
-html[data-theme='snes'] .toolbar-btn.active {
-  background: var(--accent);
-  color: #3a2860;
+html[data-theme='gameboy'] .side-panel-header {
+  background: #306230;
+  color: #9bbc0f;
+  border-bottom: 2px solid #0f380f;
+  letter-spacing: 0.08em;
   font-weight: 700;
 }
 
-/* Genesis — black + sharp red */
+html[data-theme='gameboy'] .side-panel .side-btn,
+html[data-theme='gameboy'] .toolbar-btn,
+html[data-theme='gameboy'] .tool-ring-branch-item,
+html[data-theme='gameboy'] .transform-toolbar-btn {
+  border-radius: 0;
+  background: #8bac0f;
+  color: #0f380f;
+  border: 2px solid #0f380f;
+  box-shadow: inset 0 2px 0 #9bbc0f;
+}
+
+html[data-theme='gameboy'] .toolbar-btn:hover,
+html[data-theme='gameboy'] .side-panel .side-btn:hover,
+html[data-theme='gameboy'] .transform-toolbar-btn:hover {
+  background: #9bbc0f;
+}
+
+html[data-theme='gameboy'] .toolbar-btn.active,
+html[data-theme='gameboy'] .tool-ring-branch-item.active,
+html[data-theme='gameboy'] .transform-toolbar-btn.active,
+html[data-theme='gameboy'] .side-panel .side-btn.active {
+  background: #9bbc0f;
+  color: #0f380f;
+  border-color: #6b4c8a;
+  box-shadow:
+    inset 0 2px 0 #c8d80f,
+    0 0 0 2px #6b4c8a;
+  font-weight: 700;
+}
+
+html[data-theme='gameboy'] .transform-toolbar {
+  background: #306230;
+  border: 4px solid #0f380f;
+  box-shadow: inset 0 0 0 2px #9bbc0f;
+}
+
+html[data-theme='gameboy'] .viewport-panel {
+  border: 4px solid #0f380f;
+  outline: none;
+  box-shadow: inset 0 0 0 3px #8bac0f;
+}
+
+html[data-theme='gameboy'] .viewport-panel.hovered:not(.active) {
+  outline: 2px solid #8bac0f;
+  outline-offset: -2px;
+}
+
+html[data-theme='gameboy'] .viewport-panel.active {
+  border-color: #9bbc0f;
+  outline: 2px solid #9bbc0f;
+  outline-offset: -2px;
+  box-shadow:
+    inset 0 0 0 3px #8bac0f,
+    inset 0 0 0 5px #0f380f;
+}
+
+html[data-theme='gameboy'] .theme-trigger-swatch {
+  border: 2px solid #0f380f;
+  box-shadow: 0 0 0 2px #6b4c8a;
+}
+
+/* NES (US) — light gray plastic shell, black front stripe, Nintendo red buttons */
+html[data-theme='nes'] {
+  background: #b0b0b0;
+  --scrollbar-track: #c8c8c8;
+  --scrollbar-thumb: #9a9a9a;
+  --scrollbar-thumb-hover: #e60012;
+}
+
+html[data-theme='nes'] .app-header {
+  background: linear-gradient(180deg, #d8d8d8 0%, #c8c8c8 72%, #1a1a1a 72%, #1a1a1a 100%);
+  border-bottom: 4px solid #1a1a1a;
+  box-shadow: inset 0 1px 0 #ececec;
+}
+
+html[data-theme='nes'] .side-panel {
+  background: linear-gradient(180deg, #d4d4d4 0%, #c4c4c4 88%, #1a1a1a 88%, #1a1a1a 100%);
+  border: 4px solid #1a1a1a;
+  box-shadow:
+    inset 2px 2px 0 #ececec,
+    inset -2px -2px 0 #8a8a8a,
+    5px 5px 0 #1a1a1a;
+}
+
+html[data-theme='nes'] .side-panel-header {
+  background: #c8c8c8;
+  color: #1a1a1a;
+  border-bottom: 3px solid #1a1a1a;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  box-shadow: inset 0 1px 0 #e8e8e8;
+}
+
+html[data-theme='nes'] .side-panel .side-btn,
+html[data-theme='nes'] .toolbar-btn,
+html[data-theme='nes'] .tool-ring-branch-item,
+html[data-theme='nes'] .transform-toolbar-btn {
+  background: linear-gradient(180deg, #d0d0d0 0%, #b0b0b0 100%);
+  color: #1a1a1a;
+  border: 2px solid #1a1a1a;
+  box-shadow:
+    inset 1px 1px 0 #ececec,
+    inset -1px -1px 0 #707070;
+}
+
+html[data-theme='nes'] .toolbar-btn:hover,
+html[data-theme='nes'] .side-panel .side-btn:hover,
+html[data-theme='nes'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #dcdcdc 0%, #b8b8b8 100%);
+}
+
+html[data-theme='nes'] .toolbar-btn.active,
+html[data-theme='nes'] .tool-ring-branch-item.active,
+html[data-theme='nes'] .transform-toolbar-btn.active,
+html[data-theme='nes'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #ff3048 0%, #e60012 55%, #9a0010 100%);
+  color: #ffffff;
+  border-color: #1a1a1a;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 25%),
+    inset 0 -3px 0 #6a0008,
+    0 0 0 1px #1a1a1a;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 35%);
+}
+
+html[data-theme='nes'] .transform-toolbar {
+  background: #c8c8c8;
+  border: 3px solid #1a1a1a;
+  box-shadow: 4px 4px 0 #1a1a1a;
+}
+
+html[data-theme='nes'] .viewport-panel {
+  border: 4px solid #1a1a1a;
+  box-shadow:
+    inset 0 0 0 3px #686868,
+    inset 0 0 24px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='nes'] .viewport-panel.active {
+  border-color: #1a1a1a;
+  box-shadow:
+    inset 0 0 0 3px #686868,
+    inset 0 0 24px rgb(0 0 0 / 35%),
+    0 0 0 2px #e60012;
+}
+
+html[data-theme='nes'] .theme-trigger-swatch {
+  border: 2px solid #1a1a1a;
+  box-shadow: 0 0 6px #e60012;
+}
+
+/* SNES (US) — cool gray shell, purple power buttons, lavender face buttons */
+html[data-theme='snes'] {
+  background: #b8b8c4;
+  --scrollbar-track: #d0d0d8;
+  --scrollbar-thumb: #b0b0bc;
+  --scrollbar-thumb-hover: #7b5eb8;
+  --scrollbar-radius: 8px;
+}
+
+html[data-theme='snes'] .app-header {
+  background: linear-gradient(180deg, #e4e4ec 0%, #d4d4dc 78%, #7b5eb8 78%, #6b4e9a 100%);
+  border-bottom: 3px solid #484858;
+  box-shadow: inset 0 1px 0 #f4f4f8;
+}
+
+html[data-theme='snes'] .side-panel {
+  background: linear-gradient(180deg, #e0e0e8 0%, #d0d0d8 82%, #7b5eb8 82%, #6b4e9a 100%);
+  border: 3px solid #484858;
+  border-radius: 16px;
+  box-shadow:
+    inset 2px 2px 0 #f0f0f4,
+    inset -2px -2px 0 #a8a8b4,
+    0 6px 18px rgb(72 72 88 / 28%);
+}
+
+html[data-theme='snes'] .side-panel-header {
+  background: transparent;
+  color: #282830;
+  border-bottom: 2px solid rgb(72 72 88 / 20%);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+html[data-theme='snes'] .side-panel .side-btn,
+html[data-theme='snes'] .toolbar-btn,
+html[data-theme='snes'] .tool-ring-branch-item,
+html[data-theme='snes'] .transform-toolbar-btn {
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ececf4 0%, #c8c8d4 100%);
+  color: #282830;
+  border: 2px solid #787888;
+  box-shadow:
+    inset 0 2px 0 #f8f8fc,
+    inset 0 -2px 0 #a0a0ac,
+    0 2px 0 #686878;
+}
+
+html[data-theme='snes'] .toolbar-btn:hover,
+html[data-theme='snes'] .side-panel .side-btn:hover,
+html[data-theme='snes'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #f4f4f8 0%, #d0d0dc 100%);
+  border-color: #7b5eb8;
+}
+
+html[data-theme='snes'] .toolbar-btn.active,
+html[data-theme='snes'] .tool-ring-branch-item.active,
+html[data-theme='snes'] .transform-toolbar-btn.active,
+html[data-theme='snes'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #b898d8 0%, #7b5eb8 55%, #5a4088 100%);
+  color: #ffffff;
+  border-color: #484858;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 30%),
+    inset 0 -3px 0 #4a3070,
+    0 0 0 2px #f0c020;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 25%);
+}
+
+html[data-theme='snes'] .transform-toolbar {
+  background: #d8d8e0;
+  border: 3px solid #787888;
+  border-radius: 16px;
+  box-shadow: 0 4px 14px rgb(72 72 88 / 22%);
+}
+
+html[data-theme='snes'] .viewport-panel {
+  border: 3px solid #686878;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 2px #9898a4,
+    inset 0 0 20px rgb(40 40 56 / 18%);
+}
+
+html[data-theme='snes'] .viewport-panel.active {
+  border-color: #7b5eb8;
+  box-shadow:
+    inset 0 0 0 2px #9898a4,
+    inset 0 0 20px rgb(40 40 56 / 18%),
+    0 0 0 2px #f0c020;
+}
+
+html[data-theme='snes'] .theme-trigger-swatch {
+  border: 2px solid #787888;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #f0c020;
+}
+
+/* Genesis (US) — matte black shell, Sega red ring accent */
+html[data-theme='genesis'] {
+  background: #0a0a0a;
+  --scrollbar-track: #161616;
+  --scrollbar-thumb: #303030;
+  --scrollbar-thumb-hover: #e60012;
+  --scrollbar-radius: 0px;
+}
+
+html[data-theme='genesis'] .app-header {
+  background: linear-gradient(180deg, #282828 0%, #161616 72%, #e60012 72%, #9a0010 100%);
+  border-bottom: 3px solid #000000;
+  box-shadow: inset 0 1px 0 #404040;
+}
+
 html[data-theme='genesis'] .side-panel {
-  border: 1px solid #e60012;
-  box-shadow: 0 0 0 1px #000, 0 8px 24px rgb(0 0 0 / 50%);
+  background: linear-gradient(180deg, #242424 0%, #161616 82%, #e60012 82%, #9a0010 100%);
+  border: 2px solid #000000;
+  border-radius: 2px;
+  box-shadow:
+    inset 0 1px 0 #383838,
+    0 0 0 1px #000,
+    0 8px 24px rgb(0 0 0 / 50%);
 }
 
-html[data-theme='genesis'] .toolbar-btn.active {
+html[data-theme='genesis'] .side-panel-header {
+  background: transparent;
+  color: #f0f0f0;
+  border-bottom: 2px solid #e60012;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+html[data-theme='genesis'] .side-panel .side-btn,
+html[data-theme='genesis'] .toolbar-btn,
+html[data-theme='genesis'] .tool-ring-branch-item,
+html[data-theme='genesis'] .transform-toolbar-btn {
+  border-radius: 2px;
+  background: linear-gradient(180deg, #303030 0%, #1a1a1a 100%);
+  color: #e0e0e0;
+  border: 2px solid #000000;
+  box-shadow: inset 0 1px 0 #484848;
+}
+
+html[data-theme='genesis'] .toolbar-btn:hover,
+html[data-theme='genesis'] .side-panel .side-btn:hover,
+html[data-theme='genesis'] .transform-toolbar-btn:hover {
+  border-color: #e60012;
+}
+
+html[data-theme='genesis'] .toolbar-btn.active,
+html[data-theme='genesis'] .tool-ring-branch-item.active,
+html[data-theme='genesis'] .transform-toolbar-btn.active,
+html[data-theme='genesis'] .side-panel .side-btn.active {
   background: #e60012;
-  color: #fff;
+  color: #ffffff;
+  border-color: #000000;
   box-shadow: 0 0 12px rgb(230 0 18 / 45%);
+  font-weight: 700;
 }
 
-/* Saturn — gold trim */
-html[data-theme='saturn'] .side-panel,
+html[data-theme='genesis'] .transform-toolbar {
+  background: #161616;
+  border: 2px solid #000000;
+  box-shadow: 0 0 0 1px #e60012;
+}
+
+html[data-theme='genesis'] .viewport-panel {
+  border: 3px solid #000000;
+  box-shadow: inset 0 0 24px rgb(0 0 0 / 60%);
+}
+
+html[data-theme='genesis'] .viewport-panel.active {
+  border-color: #e60012;
+  box-shadow:
+    inset 0 0 24px rgb(0 0 0 / 60%),
+    0 0 0 2px #e60012;
+}
+
+html[data-theme='genesis'] .theme-trigger-swatch {
+  border: 2px solid #000000;
+  box-shadow: 0 0 8px #e60012;
+}
+
+/* Saturn (US) — black shell, gold disc-ring trim */
+html[data-theme='saturn'] {
+  background: #0a0c14;
+  --scrollbar-track: #181c28;
+  --scrollbar-thumb: #303848;
+  --scrollbar-thumb-hover: #d4b040;
+  --scrollbar-radius: 4px;
+}
+
+html[data-theme='saturn'] .app-header {
+  background: linear-gradient(180deg, #282c3c 0%, #181c28 74%, #d4b040 74%, #a08020 100%);
+  border-bottom: 2px solid #d4b040;
+  box-shadow: inset 0 1px 0 rgb(212 176 64 / 20%);
+}
+
+html[data-theme='saturn'] .side-panel {
+  background: linear-gradient(180deg, #242838 0%, #181c28 84%, #d4b040 84%, #a08020 100%);
+  border: 2px solid #d4b040;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(212 176 64 / 18%),
+    0 6px 20px rgb(0 0 0 / 45%);
+}
+
+html[data-theme='saturn'] .side-panel-header {
+  background: transparent;
+  color: #f0ece0;
+  border-bottom: 1px solid rgb(212 176 64 / 35%);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+
+html[data-theme='saturn'] .side-panel .side-btn,
+html[data-theme='saturn'] .toolbar-btn,
+html[data-theme='saturn'] .tool-ring-branch-item,
+html[data-theme='saturn'] .transform-toolbar-btn {
+  border-radius: 6px;
+  background: linear-gradient(180deg, #303848 0%, #1e2230 100%);
+  color: #e8e4d8;
+  border: 1px solid #585860;
+  box-shadow: inset 0 1px 0 rgb(212 176 64 / 12%);
+}
+
+html[data-theme='saturn'] .toolbar-btn:hover,
+html[data-theme='saturn'] .side-panel .side-btn:hover,
+html[data-theme='saturn'] .transform-toolbar-btn:hover {
+  border-color: #d4b040;
+}
+
+html[data-theme='saturn'] .toolbar-btn.active,
+html[data-theme='saturn'] .tool-ring-branch-item.active,
+html[data-theme='saturn'] .transform-toolbar-btn.active,
+html[data-theme='saturn'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #e8c848 0%, #d4b040 50%, #a08020 100%);
+  color: #1a1410;
+  border-color: #f0e0a0;
+  box-shadow: 0 0 14px rgb(212 176 64 / 40%);
+  font-weight: 700;
+}
+
 html[data-theme='saturn'] .transform-toolbar {
-  border-color: #c8a840;
-  box-shadow: inset 0 1px 0 rgb(200 168 64 / 25%);
+  background: linear-gradient(180deg, #242838 0%, #181c28 100%);
+  border: 2px solid #d4b040;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgb(212 176 64 / 15%);
 }
 
-/* PSX — four-button vibe */
-html[data-theme='psx'] .toolbar-btn.active {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+html[data-theme='saturn'] .viewport-panel {
+  border: 2px solid #383c50;
+  border-radius: 6px;
+  box-shadow: inset 0 0 28px rgb(0 0 0 / 50%);
+}
+
+html[data-theme='saturn'] .viewport-panel.active {
+  border-color: #d4b040;
+  box-shadow:
+    inset 0 0 28px rgb(0 0 0 / 50%),
+    0 0 0 2px #d4b040;
+}
+
+html[data-theme='saturn'] .theme-trigger-swatch {
+  border: 2px solid #d4b040;
+  box-shadow: 0 0 10px rgb(212 176 64 / 35%);
+}
+
+/* PSX (US) — gray console shell, Sony blue stripe, four-button accents */
+html[data-theme='psx'] {
+  background: #a8a8a8;
+  --scrollbar-track: #c8c8c8;
+  --scrollbar-thumb: #a0a0a0;
+  --scrollbar-thumb-hover: #003791;
+  --scrollbar-radius: 4px;
+}
+
+html[data-theme='psx'] .app-header {
+  background: linear-gradient(180deg, #ececec 0%, #d8d8d8 72%, #003791 72%, #001848 100%);
+  border-bottom: 3px solid #2a2a2a;
+  box-shadow: inset 0 1px 0 #f8f8f8;
 }
 
 html[data-theme='psx'] .side-panel {
-  border: 2px solid #003791;
+  background: linear-gradient(180deg, #e4e4e4 0%, #d0d0d0 84%, #003791 84%, #001848 100%);
+  border: 3px solid #2a2a2a;
+  border-radius: 6px;
   box-shadow:
-    inset 0 3px 0 #3d7eff,
-    inset 3px 0 0 #2dd4a8,
-    inset -3px 0 0 #f5a623,
-    inset 0 -3px 0 #e85a9b;
+    inset 2px 2px 0 #f4f4f4,
+    inset -2px -2px 0 #a0a0a0,
+    inset 0 3px 0 #00a878,
+    inset 3px 0 0 #0070d1,
+    inset -3px 0 0 #df0078,
+    0 6px 18px rgb(0 0 0 / 24%);
 }
 
-/* PS2 / PS3 */
+html[data-theme='psx'] .side-panel-header {
+  background: transparent;
+  color: #1a1a1a;
+  border-bottom: 2px solid rgb(42 42 42 / 18%);
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+html[data-theme='psx'] .side-panel .side-btn,
+html[data-theme='psx'] .toolbar-btn,
+html[data-theme='psx'] .tool-ring-branch-item,
+html[data-theme='psx'] .transform-toolbar-btn {
+  border-radius: 4px;
+  background: linear-gradient(180deg, #ececec 0%, #c4c4c4 100%);
+  color: #1a1a1a;
+  border: 2px solid #686868;
+  box-shadow:
+    inset 0 2px 0 #f8f8f8,
+    inset 0 -2px 0 #a0a0a0,
+    0 2px 0 #585858;
+}
+
+html[data-theme='psx'] .toolbar-btn:hover,
+html[data-theme='psx'] .side-panel .side-btn:hover,
+html[data-theme='psx'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #f4f4f4 0%, #cccccc 100%);
+  border-color: #003791;
+}
+
+html[data-theme='psx'] .toolbar-btn.active,
+html[data-theme='psx'] .tool-ring-branch-item.active,
+html[data-theme='psx'] .transform-toolbar-btn.active,
+html[data-theme='psx'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #3a8ae8 0%, #003791 55%, #002060 100%);
+  color: #ffffff;
+  border-color: #1a1a1a;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 28%),
+    inset 0 -3px 0 #001848,
+    0 0 0 2px #00a878;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 30%);
+}
+
+html[data-theme='psx'] .transform-toolbar {
+  background: #d0d0d0;
+  border: 3px solid #2a2a2a;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 3px 0 #00a878,
+    inset 3px 0 0 #0070d1,
+    inset -3px 0 0 #df0078,
+    0 4px 14px rgb(0 0 0 / 20%);
+}
+
+html[data-theme='psx'] .viewport-panel {
+  border: 4px solid #484848;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 2px #686868,
+    inset 0 0 28px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='psx'] .viewport-panel.active {
+  border-color: #2a2a2a;
+  box-shadow:
+    inset 0 0 0 2px #686868,
+    inset 0 0 28px rgb(0 0 0 / 35%),
+    0 0 0 2px #0070d1,
+    0 0 0 4px #e41e26;
+}
+
+html[data-theme='psx'] .theme-trigger-swatch {
+  border: 2px solid #2a2a2a;
+  box-shadow: 0 0 0 2px #003791;
+}
+
+/* PS2 — midnight blue shell, ether glow, silver highlights */
+html[data-theme='ps2'] {
+  background: #040818;
+  --scrollbar-track: #0c1430;
+  --scrollbar-thumb: #1e3058;
+  --scrollbar-thumb-hover: #5080d0;
+  --scrollbar-radius: 4px;
+}
+
+html[data-theme='ps2'] .app-header {
+  background: linear-gradient(180deg, #283868 0%, #141c40 48%, #0a1028 74%, #3060b0 74%, #183878 100%);
+  border-bottom: 2px solid #5080d0;
+  box-shadow: 0 2px 20px rgb(48 96 176 / 32%);
+}
+
 html[data-theme='ps2'] .side-panel {
-  background: linear-gradient(180deg, #1a2848 0%, #0c1428 100%);
-  border-color: #3a60a0;
+  background: linear-gradient(180deg, #1c2850 0%, #101830 58%, #080c1c 84%, #2040a0 84%, #102060 100%);
+  border: 2px solid #4068b0;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(200 220 255 / 12%),
+    0 0 24px rgb(48 96 176 / 18%),
+    0 6px 20px rgb(0 0 0 / 45%);
+}
+
+html[data-theme='ps2'] .side-panel-header {
+  background: transparent;
+  color: #d8e8ff;
+  border-bottom: 1px solid rgb(96 144 224 / 28%);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  text-shadow: 0 0 12px rgb(128 192 255 / 22%);
+}
+
+html[data-theme='ps2'] .side-panel .side-btn,
+html[data-theme='ps2'] .toolbar-btn,
+html[data-theme='ps2'] .tool-ring-branch-item,
+html[data-theme='ps2'] .transform-toolbar-btn {
+  border-radius: 4px;
+  background: linear-gradient(180deg, #243060 0%, #141c38 100%);
+  color: #c8d8f0;
+  border: 1px solid #4868a8;
+  box-shadow:
+    inset 0 1px 0 rgb(200 220 255 / 10%),
+    0 2px 6px rgb(0 0 0 / 30%);
+}
+
+html[data-theme='ps2'] .toolbar-btn:hover,
+html[data-theme='ps2'] .side-panel .side-btn:hover,
+html[data-theme='ps2'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #304078 0%, #1c2850 100%);
+  border-color: #70a0e0;
+  box-shadow: 0 0 12px rgb(80 128 208 / 28%);
+}
+
+html[data-theme='ps2'] .toolbar-btn.active,
+html[data-theme='ps2'] .tool-ring-branch-item.active,
+html[data-theme='ps2'] .transform-toolbar-btn.active,
+html[data-theme='ps2'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #5088e8 0%, #3060c0 50%, #2040a0 100%);
+  color: #ffffff;
+  border-color: #80b0f0;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 22%),
+    0 0 16px rgb(80 144 240 / 50%),
+    0 0 0 1px #30d898;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgb(128 192 255 / 45%);
+}
+
+html[data-theme='ps2'] .transform-toolbar {
+  background: linear-gradient(180deg, #1a2850 0%, #0c1428 100%);
+  border: 2px solid #4068b0;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(200 220 255 / 8%),
+    0 0 18px rgb(48 96 176 / 16%);
+}
+
+html[data-theme='ps2'] .viewport-panel {
+  border: 2px solid #304878;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 40px rgb(4 8 24 / 80%),
+    0 0 8px rgb(48 80 160 / 18%);
+}
+
+html[data-theme='ps2'] .viewport-panel.active {
+  border-color: #6090e0;
+  box-shadow:
+    inset 0 0 40px rgb(4 8 24 / 80%),
+    0 0 16px rgb(80 144 240 / 42%),
+    0 0 0 2px #e85050;
+}
+
+html[data-theme='ps2'] .theme-trigger-swatch {
+  border: 1px solid #5080d0;
+  box-shadow: 0 0 10px rgb(80 128 224 / 45%);
+}
+
+/* PS3 — glossy piano black, XMB cyan glow, silver chrome */
+html[data-theme='ps3'] {
+  background: #060606;
+  --scrollbar-track: #141418;
+  --scrollbar-thumb: #303038;
+  --scrollbar-thumb-hover: #00a8e8;
+  --scrollbar-radius: 4px;
+}
+
+html[data-theme='ps3'] .app-header {
+  background: linear-gradient(180deg, #484850 0%, #282830 20%, #101014 58%, #080808 82%, #00a8e8 82%, #006888 100%);
+  border-bottom: 1px solid #606068;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 10%),
+    0 2px 24px rgb(0 168 232 / 14%);
 }
 
 html[data-theme='ps3'] .side-panel {
-  background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 100%);
-  border-color: #0090ff;
-  box-shadow: 0 0 24px rgb(0 144 255 / 12%);
+  background: linear-gradient(180deg, #303038 0%, #1c1c22 24%, #101014 62%, #080808 85%, #00a8e8 85%, #006888 100%);
+  border: 1px solid #585860;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 8%),
+    inset 0 -1px 0 rgb(0 0 0 / 45%),
+    0 0 28px rgb(0 168 232 / 10%),
+    0 8px 24px rgb(0 0 0 / 55%);
 }
 
-/* Dreamcast — orange swirl accent bar */
+html[data-theme='ps3'] .side-panel-header {
+  background: transparent;
+  color: #e8e8ec;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  text-shadow: 0 0 16px rgb(0 168 232 / 18%);
+}
+
+html[data-theme='ps3'] .side-panel .side-btn,
+html[data-theme='ps3'] .toolbar-btn,
+html[data-theme='ps3'] .tool-ring-branch-item,
+html[data-theme='ps3'] .transform-toolbar-btn {
+  border-radius: 6px;
+  background: linear-gradient(180deg, #2a2a32 0%, #141418 100%);
+  color: #d8d8dc;
+  border: 1px solid #505058;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 10%),
+    inset 0 -1px 0 rgb(0 0 0 / 30%),
+    0 2px 4px rgb(0 0 0 / 40%);
+}
+
+html[data-theme='ps3'] .toolbar-btn:hover,
+html[data-theme='ps3'] .side-panel .side-btn:hover,
+html[data-theme='ps3'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #383840 0%, #1e1e24 100%);
+  border-color: #808088;
+  box-shadow: 0 0 12px rgb(0 168 232 / 18%);
+}
+
+html[data-theme='ps3'] .toolbar-btn.active,
+html[data-theme='ps3'] .tool-ring-branch-item.active,
+html[data-theme='ps3'] .transform-toolbar-btn.active,
+html[data-theme='ps3'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #40c8f8 0%, #00a8e8 45%, #0078a8 100%);
+  color: #ffffff;
+  border-color: #80e0ff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 35%),
+    0 0 20px rgb(0 168 232 / 50%),
+    0 0 0 1px #40c878;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgb(255 255 255 / 28%);
+}
+
+html[data-theme='ps3'] .transform-toolbar {
+  background: linear-gradient(180deg, #282830 0%, #101014 100%);
+  border: 1px solid #585860;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    0 0 20px rgb(0 168 232 / 10%);
+}
+
+html[data-theme='ps3'] .viewport-panel {
+  border: 1px solid #404048;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    inset 0 0 48px rgb(0 0 0 / 92%);
+}
+
+html[data-theme='ps3'] .viewport-panel.active {
+  border-color: #00a8e8;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    inset 0 0 48px rgb(0 0 0 / 92%),
+    0 0 18px rgb(0 168 232 / 38%),
+    inset 0 -3px 0 #00a8e8;
+}
+
+html[data-theme='ps3'] .theme-trigger-swatch {
+  border: 1px solid #606068;
+  box-shadow: 0 0 12px rgb(0 168 232 / 40%);
+}
+
+/* Dreamcast — white plastic shell, orange swirl accent */
+html[data-theme='dreamcast'] {
+  background: #d8d8dc;
+  --scrollbar-track: #e8e8ec;
+  --scrollbar-thumb: #c0c0c8;
+  --scrollbar-thumb-hover: #ff6600;
+  --scrollbar-radius: 8px;
+}
+
+html[data-theme='dreamcast'] .app-header {
+  background: linear-gradient(180deg, #f4f4f8 0%, #e8e8ec 72%, #ff6600 72%, #c04800 100%);
+  border-bottom: 2px solid #a0a0a8;
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+html[data-theme='dreamcast'] .side-panel {
+  background: linear-gradient(180deg, #f0f0f4 0%, #e4e4e8 82%, #ff6600 82%, #c04800 100%);
+  border: 2px solid #b0b0b8;
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 6px 20px rgb(0 0 0 / 12%);
+}
+
 html[data-theme='dreamcast'] .side-panel-header {
+  background: transparent;
+  color: #1a1a22;
   border-bottom: 3px solid #ff6600;
+  letter-spacing: 0.06em;
+  font-weight: 700;
 }
 
-html[data-theme='dreamcast'] .toolbar-btn.active {
-  background: #ff6600;
-  color: #111;
+html[data-theme='dreamcast'] .side-panel .side-btn,
+html[data-theme='dreamcast'] .toolbar-btn,
+html[data-theme='dreamcast'] .tool-ring-branch-item,
+html[data-theme='dreamcast'] .transform-toolbar-btn {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8f8fc 0%, #d8d8dc 100%);
+  color: #1a1a22;
+  border: 2px solid #b0b0b8;
+  box-shadow: inset 0 1px 0 #ffffff;
 }
 
-/* N64 — controller-color accents on active tools */
-html[data-theme='n64'] .toolbar-btn.active {
-  background: #c41e3a;
-  box-shadow: 2px 2px 0 #1e90ff;
+html[data-theme='dreamcast'] .toolbar-btn:hover,
+html[data-theme='dreamcast'] .side-panel .side-btn:hover,
+html[data-theme='dreamcast'] .transform-toolbar-btn:hover {
+  border-color: #ff6600;
 }
 
-/* GameCube — indigo shell */
+html[data-theme='dreamcast'] .toolbar-btn.active,
+html[data-theme='dreamcast'] .tool-ring-branch-item.active,
+html[data-theme='dreamcast'] .transform-toolbar-btn.active,
+html[data-theme='dreamcast'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #ff8830 0%, #ff6600 55%, #c04800 100%);
+  color: #ffffff;
+  border-color: #a04000;
+  box-shadow: 0 0 14px rgb(255 102 0 / 35%);
+  font-weight: 700;
+}
+
+html[data-theme='dreamcast'] .transform-toolbar {
+  background: #e8e8ec;
+  border: 2px solid #b0b0b8;
+  border-radius: 16px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 10%);
+}
+
+html[data-theme='dreamcast'] .viewport-panel {
+  border: 3px solid #686870;
+  border-radius: 12px;
+  box-shadow: inset 0 0 28px rgb(0 0 0 / 45%);
+}
+
+html[data-theme='dreamcast'] .viewport-panel.active {
+  border-color: #ff6600;
+  box-shadow:
+    inset 0 0 28px rgb(0 0 0 / 45%),
+    0 0 0 2px #ff6600;
+}
+
+html[data-theme='dreamcast'] .theme-trigger-swatch {
+  border: 2px solid #b0b0b8;
+  box-shadow: 0 0 0 2px #ff6600;
+}
+
+/* N64 (US) — charcoal plastic shell, 3D logo colors */
+html[data-theme='n64'] {
+  background: #505050;
+  --scrollbar-track: #686868;
+  --scrollbar-thumb: #585858;
+  --scrollbar-thumb-hover: #e31e24;
+  --scrollbar-radius: 6px;
+}
+
+html[data-theme='n64'] .app-header {
+  background: linear-gradient(
+    180deg,
+    #7a7a7a 0%,
+    #686868 78%,
+    #e31e24 78%,
+    #e31e24 81%,
+    #00a651 81%,
+    #00a651 84%,
+    #ffcb05 84%,
+    #ffcb05 87%,
+    #006cb7 87%,
+    #006cb7 90%,
+    #303030 90%,
+    #282828 100%
+  );
+  border-bottom: 3px solid #282828;
+  box-shadow: inset 0 1px 0 #909090;
+}
+
+html[data-theme='n64'] .side-panel {
+  background: linear-gradient(
+    180deg,
+    #747474 0%,
+    #626262 80%,
+    #e31e24 80%,
+    #e31e24 83%,
+    #00a651 83%,
+    #00a651 86%,
+    #ffcb05 86%,
+    #ffcb05 89%,
+    #006cb7 89%,
+    #006cb7 92%,
+    #303030 92%,
+    #282828 100%
+  );
+  border: 3px solid #383838;
+  border-radius: 12px;
+  box-shadow:
+    inset 2px 2px 0 #888888,
+    inset -2px -2px 0 #484848,
+    0 6px 18px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='n64'] .side-panel-header {
+  background: transparent;
+  color: #f0f0f0;
+  border-bottom: 2px solid rgb(40 40 40 / 35%);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 40%);
+}
+
+html[data-theme='n64'] .side-panel .side-btn,
+html[data-theme='n64'] .toolbar-btn,
+html[data-theme='n64'] .tool-ring-branch-item,
+html[data-theme='n64'] .transform-toolbar-btn {
+  border-radius: 8px;
+  background: linear-gradient(180deg, #7a7a7a 0%, #585858 100%);
+  color: #f0f0f0;
+  border: 2px solid #404040;
+  box-shadow:
+    inset 0 2px 0 #909090,
+    inset 0 -2px 0 #484848,
+    0 2px 0 #303030;
+}
+
+html[data-theme='n64'] .toolbar-btn:hover,
+html[data-theme='n64'] .side-panel .side-btn:hover,
+html[data-theme='n64'] .transform-toolbar-btn:hover {
+  background: linear-gradient(180deg, #888888 0%, #626262 100%);
+  border-color: #006cb7;
+}
+
+html[data-theme='n64'] .toolbar-btn.active,
+html[data-theme='n64'] .tool-ring-branch-item.active,
+html[data-theme='n64'] .transform-toolbar-btn.active,
+html[data-theme='n64'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #f04048 0%, #e31e24 50%, #a81820 100%);
+  color: #ffffff;
+  border-color: #282828;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 28%),
+    inset 0 -2px 0 #801018,
+    0 2px 0 #303030;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgb(0 0 0 / 30%);
+}
+
+html[data-theme='n64'] .transform-toolbar {
+  background: #626262;
+  border: 3px solid #383838;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
+}
+
+html[data-theme='n64'] .viewport-panel {
+  border: 4px solid #484848;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 2px #585858,
+    inset 0 0 24px rgb(0 0 0 / 40%);
+}
+
+html[data-theme='n64'] .viewport-panel.active {
+  border-color: #383838;
+  box-shadow:
+    inset 0 0 0 2px #585858,
+    inset 0 0 24px rgb(0 0 0 / 40%),
+    0 0 0 2px #e31e24,
+    0 0 0 4px #ffcb05;
+}
+
+html[data-theme='n64'] .theme-trigger-swatch {
+  border: 2px solid #383838;
+}
+
+/* GameCube — indigo cube shell, lavender highlights */
+html[data-theme='gamecube'] {
+  background: #1a1040;
+  --scrollbar-track: #2a1c60;
+  --scrollbar-thumb: #4a3a90;
+  --scrollbar-thumb-hover: #8b7cc8;
+  --scrollbar-radius: 8px;
+}
+
+html[data-theme='gamecube'] .app-header {
+  background: linear-gradient(180deg, #8b7cc8 0%, #6b5cad 40%, #4a3d8a 74%, #3a2f70 100%);
+  border-bottom: 3px solid #2a1c60;
+  box-shadow: inset 0 2px 0 rgb(200 190 255 / 25%);
+}
+
 html[data-theme='gamecube'] .side-panel {
-  background: linear-gradient(160deg, #6b5cad 0%, #4a3d8a 55%, #3a2f70 100%);
-  border: 2px solid #8b7cc8;
+  background: linear-gradient(160deg, #7b6cc0 0%, #5b4ca8 35%, #4a3d8a 70%, #3a2f70 100%);
+  border: 3px solid #8b7cc8;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 2px 0 rgb(200 190 255 / 20%),
+    0 8px 24px rgb(26 16 64 / 45%);
 }
 
-html[data-theme='gamecube'] .toolbar-btn {
+html[data-theme='gamecube'] .side-panel-header {
+  background: transparent;
+  color: #f0e8ff;
+  border-bottom: 2px solid rgb(200 190 255 / 25%);
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+html[data-theme='gamecube'] .side-panel .side-btn,
+html[data-theme='gamecube'] .toolbar-btn,
+html[data-theme='gamecube'] .tool-ring-branch-item,
+html[data-theme='gamecube'] .transform-toolbar-btn {
   border-radius: 10px;
+  background: linear-gradient(180deg, #7060b8 0%, #4a3d8a 100%);
+  color: #f0e8ff;
+  border: 2px solid #3a2f70;
+  box-shadow: inset 0 1px 0 rgb(200 190 255 / 18%);
 }
 
-/* Xbox — green glow */
-html[data-theme='xbox'] .toolbar-btn.active,
-html[data-theme='xbox'] .tool-ring-branch-item.active {
-  background: #107c10;
-  box-shadow: 0 0 14px rgb(16 124 16 / 45%);
+html[data-theme='gamecube'] .toolbar-btn:hover,
+html[data-theme='gamecube'] .side-panel .side-btn:hover,
+html[data-theme='gamecube'] .transform-toolbar-btn:hover {
+  border-color: #c0b0ff;
+}
+
+html[data-theme='gamecube'] .toolbar-btn.active,
+html[data-theme='gamecube'] .tool-ring-branch-item.active,
+html[data-theme='gamecube'] .transform-toolbar-btn.active,
+html[data-theme='gamecube'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #a090e8 0%, #6b4fc8 55%, #4a38a0 100%);
+  color: #ffffff;
+  border-color: #c0b0ff;
+  box-shadow: 0 0 16px rgb(144 128 224 / 45%);
+  font-weight: 700;
+}
+
+html[data-theme='gamecube'] .transform-toolbar {
+  background: linear-gradient(160deg, #6b5cad 0%, #4a3d8a 100%);
+  border: 3px solid #8b7cc8;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgb(26 16 64 / 35%);
+}
+
+html[data-theme='gamecube'] .viewport-panel {
+  border: 3px solid #3a2f70;
+  border-radius: 10px;
+  box-shadow: inset 0 0 32px rgb(18 12 48 / 60%);
+}
+
+html[data-theme='gamecube'] .viewport-panel.active {
+  border-color: #8b7cc8;
+  box-shadow:
+    inset 0 0 32px rgb(18 12 48 / 60%),
+    0 0 0 2px #50b870;
+}
+
+html[data-theme='gamecube'] .theme-trigger-swatch {
+  border: 2px solid #8b7cc8;
+  border-radius: 6px;
+}
+
+/* Xbox (original) — black box, green X glow */
+html[data-theme='xbox'] {
+  background: #060c06;
+  --scrollbar-track: #101c10;
+  --scrollbar-thumb: #284028;
+  --scrollbar-thumb-hover: #107c10;
+  --scrollbar-radius: 4px;
+}
+
+html[data-theme='xbox'] .app-header {
+  background: linear-gradient(180deg, #1a2c1a 0%, #101c10 74%, #107c10 74%, #0a500a 100%);
+  border-bottom: 2px solid #107c10;
+  box-shadow: 0 0 20px rgb(16 124 16 / 20%);
 }
 
 html[data-theme='xbox'] .side-panel {
-  border-color: #107c10;
+  background: linear-gradient(180deg, #1a2c1a 0%, #101c10 84%, #107c10 84%, #0a500a 100%);
+  border: 2px solid #107c10;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgb(32 176 32 / 12%),
+    0 0 24px rgb(16 124 16 / 15%);
 }
 
-/* Neo Geo — arcade gold */
+html[data-theme='xbox'] .side-panel-header {
+  background: transparent;
+  color: #e8f4e8;
+  border-bottom: 1px solid rgb(16 124 16 / 35%);
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+
+html[data-theme='xbox'] .side-panel .side-btn,
+html[data-theme='xbox'] .toolbar-btn,
+html[data-theme='xbox'] .tool-ring-branch-item,
+html[data-theme='xbox'] .transform-toolbar-btn {
+  border-radius: 4px;
+  background: linear-gradient(180deg, #243824 0%, #142014 100%);
+  color: #c8e0c8;
+  border: 1px solid #284028;
+  box-shadow: inset 0 1px 0 rgb(32 176 32 / 8%);
+}
+
+html[data-theme='xbox'] .toolbar-btn:hover,
+html[data-theme='xbox'] .side-panel .side-btn:hover,
+html[data-theme='xbox'] .transform-toolbar-btn:hover {
+  border-color: #20b020;
+  box-shadow: 0 0 10px rgb(16 124 16 / 25%);
+}
+
+html[data-theme='xbox'] .toolbar-btn.active,
+html[data-theme='xbox'] .tool-ring-branch-item.active,
+html[data-theme='xbox'] .transform-toolbar-btn.active,
+html[data-theme='xbox'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #20a020 0%, #107c10 55%, #0a500a 100%);
+  color: #ffffff;
+  border-color: #40d040;
+  box-shadow: 0 0 14px rgb(16 124 16 / 45%);
+  font-weight: 700;
+}
+
+html[data-theme='xbox'] .transform-toolbar {
+  background: #101c10;
+  border: 2px solid #107c10;
+  border-radius: 4px;
+  box-shadow: 0 0 18px rgb(16 124 16 / 12%);
+}
+
+html[data-theme='xbox'] .viewport-panel {
+  border: 2px solid #1a2c1a;
+  box-shadow: inset 0 0 32px rgb(0 0 0 / 65%);
+}
+
+html[data-theme='xbox'] .viewport-panel.active {
+  border-color: #107c10;
+  box-shadow:
+    inset 0 0 32px rgb(0 0 0 / 65%),
+    0 0 16px rgb(16 124 16 / 35%);
+}
+
+html[data-theme='xbox'] .theme-trigger-swatch {
+  border: 2px solid #107c10;
+  box-shadow: 0 0 10px rgb(16 124 16 / 40%);
+}
+
+/* Neo Geo AES — black cabinet, gold luxury trim */
+html[data-theme='neo-geo'] {
+  background: #0c0a06;
+  --scrollbar-track: #161208;
+  --scrollbar-thumb: #3a3020;
+  --scrollbar-thumb-hover: #ffcc00;
+  --scrollbar-radius: 0px;
+}
+
+html[data-theme='neo-geo'] .app-header {
+  background: linear-gradient(180deg, #2a2014 0%, #161208 72%, #ffcc00 72%, #a08010 100%);
+  border-bottom: 3px solid #ffcc00;
+  box-shadow: inset 0 1px 0 rgb(255 220 80 / 15%);
+}
+
+html[data-theme='neo-geo'] .side-panel {
+  background: linear-gradient(180deg, #241c10 0%, #161208 84%, #ffcc00 84%, #a08010 100%);
+  border: 3px solid #d4a820;
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 rgb(255 204 0 / 12%),
+    0 8px 24px rgb(0 0 0 / 55%);
+}
+
 html[data-theme='neo-geo'] .side-panel-header {
+  background: transparent;
   color: #ffd700;
+  border-bottom: 2px solid #d4a820;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  text-transform: uppercase;
   text-shadow: 0 0 8px rgb(255 215 0 / 35%);
 }
 
-html[data-theme='neo-geo'] .toolbar-btn.active {
-  background: #ffd700;
-  color: #111;
-}
-
-/* Atari — woodgrain bar */
-html[data-theme='atari'] .side-panel-header {
-  background: linear-gradient(
-    90deg,
-    #5c3317 0%,
-    #8b5a2b 25%,
-    #5c3317 50%,
-    #8b5a2b 75%,
-    #5c3317 100%
-  );
-  color: #ff8c00;
+html[data-theme='neo-geo'] .side-panel .side-btn,
+html[data-theme='neo-geo'] .toolbar-btn,
+html[data-theme='neo-geo'] .tool-ring-branch-item,
+html[data-theme='neo-geo'] .transform-toolbar-btn {
   border-radius: 0;
+  background: linear-gradient(180deg, #3a3020 0%, #1e1810 100%);
+  color: #fff4d0;
+  border: 2px solid #d4a820;
+  box-shadow: inset 0 1px 0 rgb(255 204 0 / 10%);
 }
 
-/* Game Gear — teal handheld */
+html[data-theme='neo-geo'] .toolbar-btn:hover,
+html[data-theme='neo-geo'] .side-panel .side-btn:hover,
+html[data-theme='neo-geo'] .transform-toolbar-btn:hover {
+  border-color: #ffcc00;
+}
+
+html[data-theme='neo-geo'] .toolbar-btn.active,
+html[data-theme='neo-geo'] .tool-ring-branch-item.active,
+html[data-theme='neo-geo'] .transform-toolbar-btn.active,
+html[data-theme='neo-geo'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #ffe040 0%, #ffcc00 55%, #a08010 100%);
+  color: #111108;
+  border-color: #f0e0a0;
+  box-shadow: 0 0 14px rgb(255 204 0 / 40%);
+  font-weight: 700;
+}
+
+html[data-theme='neo-geo'] .transform-toolbar {
+  background: #161208;
+  border: 3px solid #d4a820;
+  box-shadow: inset 0 1px 0 rgb(255 204 0 / 10%);
+}
+
+html[data-theme='neo-geo'] .viewport-panel {
+  border: 3px solid #d4a820;
+  box-shadow: inset 0 0 28px rgb(0 0 0 / 55%);
+}
+
+html[data-theme='neo-geo'] .viewport-panel.active {
+  border-color: #ffcc00;
+  box-shadow:
+    inset 0 0 28px rgb(0 0 0 / 55%),
+    0 0 0 2px #ffcc00;
+}
+
+html[data-theme='neo-geo'] .theme-trigger-swatch {
+  border: 2px solid #d4a820;
+  box-shadow: 0 0 8px rgb(255 204 0 / 35%);
+}
+
+/* Atari 2600 — woodgrain fascia, black stripe, orange joystick */
+html[data-theme='atari'] {
+  background: #4e3020;
+  --scrollbar-track: #5c3828;
+  --scrollbar-thumb: #684030;
+  --scrollbar-thumb-hover: #e87820;
+  --scrollbar-radius: 0px;
+}
+
+html[data-theme='atari'] .app-header {
+  background: linear-gradient(
+      90deg,
+      #5c3317 0%,
+      #8b5a2b 25%,
+      #5c3317 50%,
+      #8b5a2b 75%,
+      #5c3317 100%
+    ),
+    linear-gradient(180deg, transparent 0%, transparent 72%, #1a1008 72%, #1a1008 100%);
+  background-size: 100% 72%, 100% 100%;
+  background-repeat: no-repeat;
+  border-bottom: 4px solid #1a1008;
+}
+
+html[data-theme='atari'] .side-panel {
+  background: linear-gradient(
+      90deg,
+      #5c3317 0%,
+      #8b5a2b 25%,
+      #5c3317 50%,
+      #8b5a2b 75%,
+      #5c3317 100%
+    ),
+    linear-gradient(180deg, transparent 0%, transparent 78%, #e87820 78%, #c05810 82%, #1a1008 82%, #1a1008 100%);
+  background-size: 100% 78%, 100% 100%;
+  background-repeat: no-repeat;
+  border: 4px solid #1a1008;
+  border-radius: 0;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='atari'] .side-panel-header {
+  background: #1a1008;
+  color: #ff8c00;
+  border-bottom: 2px solid #e87820;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+html[data-theme='atari'] .side-panel .side-btn,
+html[data-theme='atari'] .toolbar-btn,
+html[data-theme='atari'] .tool-ring-branch-item,
+html[data-theme='atari'] .transform-toolbar-btn {
+  border-radius: 0;
+  background: linear-gradient(180deg, #684030 0%, #402818 100%);
+  color: #ffe8d0;
+  border: 2px solid #1a1008;
+  box-shadow: inset 0 1px 0 #8b5a2b;
+}
+
+html[data-theme='atari'] .toolbar-btn:hover,
+html[data-theme='atari'] .side-panel .side-btn:hover,
+html[data-theme='atari'] .transform-toolbar-btn:hover {
+  border-color: #e87820;
+}
+
+html[data-theme='atari'] .toolbar-btn.active,
+html[data-theme='atari'] .tool-ring-branch-item.active,
+html[data-theme='atari'] .transform-toolbar-btn.active,
+html[data-theme='atari'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #f09830 0%, #e87820 55%, #a04810 100%);
+  color: #1a1008;
+  border-color: #1a1008;
+  box-shadow: 0 0 10px rgb(232 120 32 / 35%);
+  font-weight: 700;
+}
+
+html[data-theme='atari'] .transform-toolbar {
+  background: #3c2418;
+  border: 4px solid #1a1008;
+  box-shadow: inset 0 0 0 2px #8b5a2b;
+}
+
+html[data-theme='atari'] .viewport-panel {
+  border: 4px solid #1a1008;
+  box-shadow: inset 0 0 0 2px #684030;
+}
+
+html[data-theme='atari'] .viewport-panel.active {
+  border-color: #e87820;
+  box-shadow:
+    inset 0 0 0 2px #684030,
+    0 0 0 2px #e87820;
+}
+
+html[data-theme='atari'] .theme-trigger-swatch {
+  border: 2px solid #1a1008;
+  box-shadow: 0 0 0 2px #e87820;
+}
+
+/* Game Gear — black handheld, teal screen bezel */
+html[data-theme='game-gear'] {
+  background: #0a2830;
+  --scrollbar-track: #104048;
+  --scrollbar-thumb: #286068;
+  --scrollbar-thumb-hover: #40c0c8;
+  --scrollbar-radius: 8px;
+}
+
+html[data-theme='game-gear'] .app-header {
+  background: linear-gradient(180deg, #185860 0%, #104048 72%, #40c0c8 72%, #208890 82%, #c04048 82%, #901830 100%);
+  border-bottom: 3px solid #061c22;
+  box-shadow: inset 0 1px 0 rgb(64 192 200 / 20%);
+}
+
 html[data-theme='game-gear'] .side-panel {
+  background: linear-gradient(180deg, #144048 0%, #104048 80%, #40c0c8 80%, #208890 90%, #303038 90%, #1a1a20 100%);
+  border: 3px solid #2a8a8a;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 2px #1a5050,
+    0 6px 18px rgb(0 0 0 / 40%);
+}
+
+html[data-theme='game-gear'] .side-panel-header {
+  background: transparent;
+  color: #d0f0f4;
+  border-bottom: 2px solid rgb(64 192 200 / 30%);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+html[data-theme='game-gear'] .side-panel .side-btn,
+html[data-theme='game-gear'] .toolbar-btn,
+html[data-theme='game-gear'] .tool-ring-branch-item,
+html[data-theme='game-gear'] .transform-toolbar-btn {
+  border-radius: 8px;
+  background: linear-gradient(180deg, #247078 0%, #143840 100%);
+  color: #d0f0f4;
+  border: 2px solid #1a5050;
+  box-shadow: inset 0 1px 0 rgb(64 192 200 / 15%);
+}
+
+html[data-theme='game-gear'] .toolbar-btn:hover,
+html[data-theme='game-gear'] .side-panel .side-btn:hover,
+html[data-theme='game-gear'] .transform-toolbar-btn:hover {
+  border-color: #40c0c8;
+}
+
+html[data-theme='game-gear'] .toolbar-btn.active,
+html[data-theme='game-gear'] .tool-ring-branch-item.active,
+html[data-theme='game-gear'] .transform-toolbar-btn.active,
+html[data-theme='game-gear'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #50d0d8 0%, #20a0a8 55%, #106068 100%);
+  color: #ffffff;
+  border-color: #80e0e8;
+  box-shadow: 0 0 14px rgb(64 192 200 / 40%);
+  font-weight: 700;
+}
+
+html[data-theme='game-gear'] .transform-toolbar {
+  background: #104048;
   border: 3px solid #2a8a8a;
   border-radius: 12px;
   box-shadow: inset 0 0 0 2px #1a5050;
 }
 
-/* MSX — classic blue frame */
+html[data-theme='game-gear'] .viewport-panel {
+  border: 3px solid #1a5050;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 2px #40c0c8,
+    inset 0 0 20px rgb(0 0 0 / 35%);
+}
+
+html[data-theme='game-gear'] .viewport-panel.active {
+  border-color: #40c0c8;
+  box-shadow:
+    inset 0 0 0 2px #40c0c8,
+    inset 0 0 20px rgb(0 0 0 / 35%),
+    0 0 0 2px #e08830;
+}
+
+html[data-theme='game-gear'] .theme-trigger-swatch {
+  border: 2px solid #2a8a8a;
+  border-radius: 6px;
+}
+
+/* MSX — beige computer shell, blue logo stripe */
+html[data-theme='msx'] {
+  background: #c0b498;
+  --scrollbar-track: #dcd0b0;
+  --scrollbar-thumb: #a8a090;
+  --scrollbar-thumb-hover: #0033a0;
+  --scrollbar-radius: 0px;
+}
+
+html[data-theme='msx'] .app-header {
+  background: linear-gradient(180deg, #ece4cc 0%, #dcd0b0 72%, #0033a0 72%, #002060 100%);
+  border-bottom: 3px solid #686050;
+  box-shadow: inset 0 1px 0 #f8f4e8;
+}
+
 html[data-theme='msx'] .side-panel {
-  border: 4px solid #0033a0;
-  box-shadow: inset 0 0 0 2px #66a0ff;
+  background: linear-gradient(180deg, #ece4cc 0%, #dcd0b0 84%, #0033a0 84%, #002060 100%);
+  border: 4px solid #686050;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 2px #f8f4e8,
+    0 6px 18px rgb(0 0 0 / 15%);
+}
+
+html[data-theme='msx'] .side-panel-header {
+  background: #0033a0;
+  color: #e0f0ff;
+  border-bottom: 2px solid #002060;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+html[data-theme='msx'] .side-panel .side-btn,
+html[data-theme='msx'] .toolbar-btn,
+html[data-theme='msx'] .tool-ring-branch-item,
+html[data-theme='msx'] .transform-toolbar-btn {
+  border-radius: 0;
+  background: linear-gradient(180deg, #ece4cc 0%, #c8bc9c 100%);
+  color: #1a1828;
+  border: 2px solid #686050;
+  box-shadow: inset 0 1px 0 #f8f4e8;
+}
+
+html[data-theme='msx'] .toolbar-btn:hover,
+html[data-theme='msx'] .side-panel .side-btn:hover,
+html[data-theme='msx'] .transform-toolbar-btn:hover {
+  border-color: #0033a0;
+}
+
+html[data-theme='msx'] .toolbar-btn.active,
+html[data-theme='msx'] .tool-ring-branch-item.active,
+html[data-theme='msx'] .transform-toolbar-btn.active,
+html[data-theme='msx'] .side-panel .side-btn.active {
+  background: linear-gradient(180deg, #4080e8 0%, #0033a0 55%, #002060 100%);
+  color: #ffffff;
+  border-color: #002060;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 25%);
+  font-weight: 700;
+}
+
+html[data-theme='msx'] .transform-toolbar {
+  background: #dcd0b0;
+  border: 4px solid #686050;
+  box-shadow: inset 0 0 0 2px #f8f4e8;
+}
+
+html[data-theme='msx'] .viewport-panel {
+  border: 4px solid #686050;
+  box-shadow:
+    inset 0 0 0 2px #0033a0,
+    inset 0 0 24px rgb(0 24 72 / 50%);
+}
+
+html[data-theme='msx'] .viewport-panel.active {
+  border-color: #0033a0;
+  box-shadow:
+    inset 0 0 0 2px #66a0ff,
+    inset 0 0 24px rgb(0 24 72 / 50%),
+    0 0 0 2px #30a050;
+}
+
+html[data-theme='msx'] .theme-trigger-swatch {
+  border: 2px solid #686050;
+  box-shadow: 0 0 0 2px #0033a0;
 }
 
 /* ── Operating Systems ─────────────────────────────────────────────── */
 
-/* Windows 95 — classic 3D bevel chrome */
+/* Windows 95 — classic 3D bevel chrome (no blue button outlines) */
+html[data-theme='win95'] {
+  background: #008080;
+  --scrollbar-size: 16px;
+  --scrollbar-radius: 0px;
+  --scrollbar-track: #dfdfdf;
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-thumb-hover: #b0b0b0;
+  --inspector-line: #808080;
+  --inspector-control: #c0c0c0;
+  --inspector-control-hover: #dfdfdf;
+}
+
+html[data-theme='win95'] .app-header {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff;
+  border-radius: 0;
+}
+
 html[data-theme='win95'] .side-panel,
 html[data-theme='win95'] .transform-toolbar,
 html[data-theme='win95'] .tool-ring-branch {
@@ -274,8 +1629,12 @@ html[data-theme='win95'] .side-panel-header {
   font-weight: 700;
 }
 
+html[data-theme='win95'] .side-panel .side-btn,
+html[data-theme='win95'] .side-panel .side-btn-dropdown,
+html[data-theme='win95'] .side-panel .side-history-btn,
 html[data-theme='win95'] .toolbar-btn,
 html[data-theme='win95'] .tool-ring-branch-item,
+html[data-theme='win95'] .transform-toolbar-btn,
 html[data-theme='win95'] .theme-select {
   background: #c0c0c0;
   color: #000;
@@ -283,17 +1642,195 @@ html[data-theme='win95'] .theme-select {
   border-color: #fff #808080 #808080 #fff;
   border-radius: 0;
   box-shadow: none;
+  font-weight: 400;
 }
 
-html[data-theme='win95'] .toolbar-btn:active,
-html[data-theme='win95'] .toolbar-btn.active {
-  border-color: #808080 #fff #fff #808080;
+html[data-theme='win95'] .side-panel .side-btn:hover:not(:disabled),
+html[data-theme='win95'] .side-panel .side-btn-dropdown:hover:not(:disabled),
+html[data-theme='win95'] .side-panel .side-history-btn:hover:not(:disabled),
+html[data-theme='win95'] .toolbar-btn:hover:not(:disabled),
+html[data-theme='win95'] .tool-ring-branch-item:hover:not(:disabled),
+html[data-theme='win95'] .transform-toolbar-btn:hover:not(:disabled) {
+  background: #dfdfdf;
+  color: #000;
+  border-color: #fff #808080 #808080 #fff;
+}
+
+html[data-theme='win95'] .side-panel .side-btn.active,
+html[data-theme='win95'] .side-panel .side-btn-dropdown.active,
+html[data-theme='win95'] .toolbar-btn.active,
+html[data-theme='win95'] .tool-ring-branch-item.active,
+html[data-theme='win95'] .transform-toolbar-btn.active {
   background: #b0b0b0;
+  color: #000;
+  border-color: #808080 #fff #fff #808080;
+  box-shadow: none;
+  font-weight: 400;
+}
+
+html[data-theme='win95'] .side-panel .side-btn-primary {
+  background: #c0c0c0;
+  color: #000;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  font-weight: 700;
+}
+
+html[data-theme='win95'] .side-panel .side-btn-green.active {
+  background: #b0b0b0;
+  color: #000;
+  border-color: #808080 #fff #fff #808080;
+}
+
+html[data-theme='win95'] .side-btn:focus-visible,
+html[data-theme='win95'] .side-btn-dropdown:focus-visible,
+html[data-theme='win95'] .side-history-btn:focus-visible,
+html[data-theme='win95'] .toolbar-btn:focus-visible,
+html[data-theme='win95'] .tool-ring-branch-item:focus-visible,
+html[data-theme='win95'] .transform-toolbar-btn:focus-visible,
+html[data-theme='win95'] .side-button-dropdown-item:focus-visible {
+  outline: 1px dotted #000;
+  outline-offset: -3px;
+}
+
+html[data-theme='win95'] .side-button-dropdown-menu {
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  box-shadow: 2px 2px 0 rgb(0 0 0 / 25%);
+}
+
+html[data-theme='win95'] .side-button-dropdown-item {
+  background: #c0c0c0;
+  color: #000;
+  border-bottom: 1px solid #808080;
+}
+
+html[data-theme='win95'] .side-button-dropdown-item:hover:not(:disabled),
+html[data-theme='win95'] .side-button-dropdown-item.active {
+  background: #000080;
+  color: #fff;
+}
+
+html[data-theme='win95'] .theme-preview-stage {
+  background: #c0c0c0 !important;
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  border-radius: 0;
+}
+
+html[data-theme='win95'] .theme-preview-chip {
+  background: #c0c0c0 !important;
+  color: #000 !important;
+  border: 2px solid !important;
+  border-color: #fff #808080 #808080 #fff !important;
+  border-radius: 0;
+}
+
+html[data-theme='win95'] .theme-trigger-swatch {
+  border: 2px solid;
+  border-color: #fff #808080 #808080 #fff;
+  border-radius: 0;
+}
+
+html[data-theme='win95'] .viewport-panel {
+  border: 2px solid;
+  border-color: #dfdfdf #808080 #808080 #dfdfdf;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #fff;
+}
+
+html[data-theme='win95'] .viewport-panel.active {
+  border-color: #808080 #fff #fff #808080;
+  box-shadow: inset 1px 1px 0 #808080;
 }
 
 html[data-theme='win95'] .transform-toolbar {
   backdrop-filter: none;
   background: #c0c0c0;
+}
+
+/* Black cursors — visible on teal desktop and gray CAD viewports */
+html[data-theme='win95'],
+html[data-theme='win95'] body,
+html[data-theme='win95'] #root {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' stroke='%23fff' stroke-width='0.6' d='M1 1v12l3.5-2.5L7 14l1.5-.5L6 9h5L1 1z'/%3E%3C/svg%3E")
+    1 1,
+    default;
+}
+
+html[data-theme='win95'] button:not(:disabled),
+html[data-theme='win95'] .side-btn:not(:disabled),
+html[data-theme='win95'] .side-btn-dropdown:not(:disabled),
+html[data-theme='win95'] .side-history-btn:not(:disabled),
+html[data-theme='win95'] .toolbar-btn:not(:disabled),
+html[data-theme='win95'] .transform-toolbar-btn:not(:disabled),
+html[data-theme='win95'] .side-button-dropdown-item:not(:disabled),
+html[data-theme='win95'] label,
+html[data-theme='win95'] select,
+html[data-theme='win95'] a {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' stroke='%23fff' stroke-width='0.6' d='M1 1v12l3.5-2.5L7 14l1.5-.5L6 9h5L1 1z'/%3E%3C/svg%3E")
+    1 1,
+    pointer;
+}
+
+html[data-theme='win95'] .viewport-panel,
+html[data-theme='win95'] .viewport-panel > .viewport-canvas-root,
+html[data-theme='win95'] .viewport-canvas-root,
+html[data-theme='win95'] .viewport-canvas-root canvas {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath stroke='%23000' stroke-width='1.25' d='M8 1v14M1 8h14'/%3E%3Crect x='6.5' y='6.5' width='3' height='3' fill='%23000'/%3E%3C/svg%3E")
+    8 8,
+    crosshair;
+}
+
+html[data-theme='win95'] .viewport-panel.cursor-select,
+html[data-theme='win95'] .viewport-panel.cursor-select > .viewport-canvas-root,
+html[data-theme='win95'] .viewport-panel.cursor-select canvas,
+html[data-theme='win95'] .viewport-panel.cursor-transform,
+html[data-theme='win95'] .viewport-panel.cursor-transform > .viewport-canvas-root,
+html[data-theme='win95'] .viewport-panel.cursor-transform canvas {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' stroke='%23fff' stroke-width='0.6' d='M1 1v12l3.5-2.5L7 14l1.5-.5L6 9h5L1 1z'/%3E%3C/svg%3E")
+    1 1,
+    default;
+}
+
+html[data-theme='win95'] .viewport-panel.cursor-crosshair,
+html[data-theme='win95'] .viewport-panel.cursor-crosshair > .viewport-canvas-root,
+html[data-theme='win95'] .viewport-panel.cursor-crosshair canvas {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath stroke='%23000' stroke-width='1.25' d='M8 1v14M1 8h14'/%3E%3Crect x='6.5' y='6.5' width='3' height='3' fill='%23000'/%3E%3C/svg%3E")
+    8 8,
+    crosshair;
+}
+
+html[data-theme='win95'] .viewport-panel.cursor-sculpt,
+html[data-theme='win95'] .viewport-panel.cursor-sculpt > .viewport-canvas-root,
+html[data-theme='win95'] .viewport-panel.cursor-sculpt canvas,
+html[data-theme='win95'] .viewport-panel.tool-push,
+html[data-theme='win95'] .viewport-panel.tool-pull,
+html[data-theme='win95'] .viewport-panel.tool-inflate,
+html[data-theme='win95'] .viewport-panel.tool-deflate,
+html[data-theme='win95'] .viewport-panel.tool-relax,
+html[data-theme='win95'] .viewport-panel.tool-pinch {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' fill='none' stroke='%23000' stroke-width='1'/%3E%3Cpath stroke='%23000' stroke-width='1' d='M1 8h14M8 1v14'/%3E%3C/svg%3E")
+    8 8,
+    cell;
+}
+
+html[data-theme='win95'] .viewport-splitter,
+html[data-theme='win95'] .floating-panel-resize-e,
+html[data-theme='win95'] .floating-panel-resize-w {
+  cursor: col-resize;
+}
+
+html[data-theme='win95'] .floating-panel-resize-n,
+html[data-theme='win95'] .floating-panel-resize-s {
+  cursor: row-resize;
 }
 
 /* Windows XP — Soft Luna chrome (muted blues, warm paper, cohesive tool surfaces) */
@@ -784,11 +2321,7 @@ html[data-theme='matrix'] .themed-scroll::-webkit-scrollbar-thumb {
   box-shadow: 0 0 6px rgb(0 255 65 / 35%);
 }
 
-html[data-theme='nes'] {
-  --scrollbar-track: #5c5c5c;
-  --scrollbar-thumb: #e4000f;
-  --scrollbar-thumb-hover: #ff3030;
-}
+/* NES scrollbar colors live in the NES chrome block above */
 
 /* Soft / rounded modern themes keep thin accent-tinted thumbs */
 html[data-theme='win11'],

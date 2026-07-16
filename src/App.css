@@ -1766,7 +1766,7 @@
 }
 
 .viewport-splitter-column {
-  width: 7px;
+  width: 2px;
   cursor: col-resize;
 }
 
@@ -1779,7 +1779,7 @@
 }
 
 .viewport-splitter-row {
-  height: 7px;
+  height: 2px;
   cursor: row-resize;
 }
 
