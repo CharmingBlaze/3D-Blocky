@@ -11,6 +11,7 @@ import {
   selectionHasComponents,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
+import type { ViewType } from '../scene/viewTypes'
 import {
   applyMeshModalOp,
   cloneSceneObject,
@@ -62,6 +63,7 @@ export type MeshModalOp = MeshModalOpKind
 
 export interface MeshModalState {
   op: MeshModalOp
+  view: ViewType
   objectId: string
   baseObject: SceneObject
   selection: MeshComponentSelection
@@ -69,17 +71,24 @@ export interface MeshModalState {
   value: number
   startClientX: number
   startClientY: number
+  currentClientX: number
+  currentClientY: number
   pivotWorld: Vec3
+  axisLock?: 'x' | 'y' | 'z' | null
 }
 
 export interface ObjectTransformModalState {
   op: ObjectTransformModalOp
+  view: ViewType
   objectIds: string[]
   baseTransforms: Record<string, ObjectTransform>
   pivotWorld: Vec3
   value: number
   startClientX: number
   startClientY: number
+  currentClientX: number
+  currentClientY: number
+  axisLock?: 'x' | 'y' | 'z' | null
 }
 
 export interface ToolActivationLayoutState {
@@ -94,18 +103,19 @@ export interface ToolActivationLayoutActions {
   activateToolRingEntry: (category: ToolCategory, entry: ToolRingEntry) => boolean
   activateSelectTool: () => void
   setToolCategory: (cat: ToolCategory) => void
-  beginMeshModal: (op: MeshModalOp, clientX: number, clientY: number) => void
+  beginMeshModal: (op: MeshModalOp, clientX: number, clientY: number, view?: ViewType) => void
   updateMeshModalFromPointer: (clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   adjustMeshModalWheel: (deltaY: number) => void
   confirmMeshModal: () => void
   cancelMeshModal: () => void
   applyMeshModalPreview: () => void
-  beginObjectTransformModal: (op: ObjectTransformModalOp, clientX: number, clientY: number) => void
+  beginObjectTransformModal: (op: ObjectTransformModalOp, clientX: number, clientY: number, view?: ViewType) => void
   updateObjectTransformModalFromPointer: (clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   adjustObjectTransformModalWheel: (deltaY: number) => void
   confirmObjectTransformModal: () => void
   cancelObjectTransformModal: () => void
   applyObjectTransformModalPreview: () => void
+  setModalAxisLock: (axis: 'x' | 'y' | 'z' | null) => void
 }
 
 export type ToolActivationSlice = ToolActivationLayoutState & ToolActivationLayoutActions
@@ -368,7 +378,7 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       })
     },
 
-    beginMeshModal: (op, clientX, clientY) => {
+    beginMeshModal: (op, clientX, clientY, view = 'perspective') => {
       const { meshSelection, objects, selectionMode } = store()
       if (!meshSelection || !selectionHasComponents(meshSelection)) return
       if (store().meshModal) store().cancelMeshModal()
@@ -383,19 +393,22 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       setPartial({
         meshModal: {
           op,
+          view,
           objectId: obj.id,
           baseObject: cloneSceneObject(obj),
           selection: {
-            objectId: meshSelection.objectId,
-            vertices: [...meshSelection.vertices],
-            edges: [...meshSelection.edges],
-            faces: [...meshSelection.faces],
+            vertices: new Set(meshSelection.vertices),
+            edges: new Set(meshSelection.edges),
+            faces: new Set(meshSelection.faces),
           },
           selectionMode,
           value: op === 'scale' ? 1 : 0,
           startClientX: clientX,
           startClientY: clientY,
+          currentClientX: clientX,
+          currentClientY: clientY,
           pivotWorld,
+          axisLock: null,
         },
       })
       store().applyMeshModalPreview()
@@ -451,6 +464,9 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       const modal = store().objectTransformModal
       if (!modal) return
 
+      const dx = (modal.currentClientX - modal.startClientX) * 0.02
+      const dy = -(modal.currentClientY - modal.startClientY) * 0.02
+
       setPartial((s) => {
         const st = s as unknown as ToolStore
         return {
@@ -458,13 +474,18 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
             if (!modal.objectIds.includes(o.id)) return o
             const base = modal.baseTransforms[o.id]
             if (!base) return o
+
             return {
               ...o,
               transform: applyObjectTransformModal(
                 base,
                 modal.op,
                 modal.value,
-                modal.pivotWorld
+                modal.pivotWorld,
+                dx,
+                dy,
+                modal.axisLock,
+                modal.view
               ),
             }
           }),
@@ -472,30 +493,46 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       })
     },
 
-    beginObjectTransformModal: (op, clientX, clientY) => {
-      const { selectionObjectIds, selectionMode, objects } = store()
-      if (selectionMode !== 'object' || selectionObjectIds.length === 0) return
-      if (store().objectTransformModal) store().cancelObjectTransformModal()
-      if (store().meshModal) store().cancelMeshModal()
+    setModalAxisLock: (axis) => {
+      const state = store()
+      if (state.meshModal) {
+        setPartial({ meshModal: { ...state.meshModal, axisLock: axis } })
+        store().applyMeshModalPreview()
+      } else if (state.objectTransformModal) {
+        setPartial({ objectTransformModal: { ...state.objectTransformModal, axisLock: axis } })
+        store().applyObjectTransformModalPreview()
+      }
+    },
 
+    beginObjectTransformModal: (op, clientX, clientY, view = 'perspective') => {
+      const { selectionObjectIds, objects } = store()
+      if (selectionObjectIds.length === 0) return
+      if (store().meshModal) store().cancelMeshModal()
+      if (store().objectTransformModal) store().cancelObjectTransformModal()
+
+      store().captureUndoPoint('Transform')
+
+      const pivotWorld = selectionWorldCenter(objects, selectionObjectIds)
       const baseTransforms: Record<string, ObjectTransform> = {}
       for (const id of selectionObjectIds) {
         const obj = objects.find((o) => o.id === id)
-        if (!obj) continue
-        baseTransforms[id] = cloneTransform(ensureTransform(obj))
+        if (obj) baseTransforms[id] = cloneTransform(ensureTransform(obj))
       }
       if (Object.keys(baseTransforms).length === 0) return
 
-      store().captureUndoPoint('Transform')
       setPartial({
         objectTransformModal: {
           op,
+          view,
           objectIds: [...selectionObjectIds],
           baseTransforms,
-          pivotWorld: selectionWorldCenter(objects, selectionObjectIds),
+          pivotWorld,
           value: op === 'scale' ? 1 : 0,
           startClientX: clientX,
           startClientY: clientY,
+          currentClientX: clientX,
+          currentClientY: clientY,
+          axisLock: null,
         },
         activeTool: op === 'rotate' ? 'rotate' : 'scale',
         toolCategory: 'transform',

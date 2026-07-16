@@ -321,17 +321,27 @@ export function rotateMeshSelection(
 export function scaleMeshSelection(
   obj: SceneObject,
   selection: MeshComponentSelection,
-  factor: number,
+  factor: number | Vec3,
   pivotWorld: Vec3
 ): SceneObject {
   const verts = getAffectedVertices(selection, obj)
-  if (verts.size === 0 || Math.abs(factor - 1) < 1e-8) return cloneSceneObject(obj)
+  const isUniform = typeof factor === 'number'
+  const maxFactor = isUniform ? Math.abs((factor as number) - 1) : Math.max(Math.abs((factor as Vec3).x - 1), Math.abs((factor as Vec3).y - 1), Math.abs((factor as Vec3).z - 1))
+  if (verts.size === 0 || maxFactor < 1e-8) return cloneSceneObject(obj)
 
   const basePositions: Record<number, Vec3> = {}
   for (const vi of verts) basePositions[vi] = { ...obj.positions[vi] }
 
   _pivot.set(pivotWorld.x, pivotWorld.y, pivotWorld.z)
-  const s = Math.max(factor, 0.001)
+  
+  let scaleVec = new THREE.Vector3(1, 1, 1)
+  if (isUniform) {
+    const s = Math.max(factor as number, 0.001)
+    scaleVec.set(s, s, s)
+  } else {
+    const v = factor as Vec3
+    scaleVec.set(Math.max(v.x, 0.001), Math.max(v.y, 0.001), Math.max(v.z, 0.001))
+  }
 
   const positions = transformMeshSelectionWithGizmo(
     obj,
@@ -343,13 +353,60 @@ export function scaleMeshSelection(
     new THREE.Vector3(1, 1, 1),
     _pivot.clone(),
     new THREE.Quaternion(),
-    new THREE.Vector3(s, s, s)
+    scaleVec
   )
 
   return { ...obj, positions }
 }
 
-export type MeshModalOpKind = 'extrude' | 'rotate' | 'scale' | 'bevel'
+export type MeshModalOpKind = 'extrude' | 'rotate' | 'scale' | 'bevel' | 'move'
+
+export function moveMeshSelection(
+  obj: SceneObject,
+  selection: MeshComponentSelection,
+  _value: number,
+  deltaWorldX: number,
+  deltaWorldY: number,
+  axisLock: 'x' | 'y' | 'z' | null | undefined,
+  view: string = 'perspective'
+): SceneObject {
+  const verts = getAffectedVertices(selection, obj)
+  if (verts.size === 0) return cloneSceneObject(obj)
+
+  const positions = obj.positions.map((p) => ({ ...p }))
+  let dx = 0, dy = 0, dz = 0
+
+  if (axisLock === 'x') {
+    dx = deltaWorldX + deltaWorldY
+  } else if (axisLock === 'y') {
+    dy = deltaWorldX + deltaWorldY
+  } else if (axisLock === 'z') {
+    dz = deltaWorldX + deltaWorldY
+  } else {
+    // Smart view defaults
+    if (view === 'front') {
+      dx = deltaWorldX
+      dy = deltaWorldY
+    } else if (view === 'top') {
+      dx = deltaWorldX
+      dz = deltaWorldY
+    } else if (view === 'right') {
+      dz = deltaWorldX
+      dy = deltaWorldY
+    } else {
+      dx = deltaWorldX
+      dy = deltaWorldY
+    }
+  }
+
+  for (const vi of verts) {
+    positions[vi].x += dx
+    positions[vi].y += dy
+    positions[vi].z += dz
+  }
+
+  return { ...obj, positions }
+}
 
 export function applyMeshModalOp(
   baseObject: SceneObject,
@@ -357,17 +414,46 @@ export function applyMeshModalOp(
   selectionMode: SelectionMode,
   op: MeshModalOpKind,
   value: number,
-  pivotWorld: Vec3
+  pivotWorld: Vec3,
+  deltaWorldX: number = 0,
+  deltaWorldY: number = 0,
+  axisLock?: 'x' | 'y' | 'z' | null,
+  view: string = 'perspective'
 ): SceneObject {
   switch (op) {
     case 'extrude':
       return extrudeMeshSelection(baseObject, selection, selectionMode, value)
     case 'bevel':
       return bevelMeshSelection(baseObject, selection, selectionMode, value)
-    case 'rotate':
-      return rotateMeshSelection(baseObject, selection, value, pivotWorld)
-    case 'scale':
-      return scaleMeshSelection(baseObject, selection, value, pivotWorld)
+    case 'rotate': {
+      let ax: Vec3 = { x: 0, y: 1, z: 0 }
+      if (axisLock === 'x') ax = { x: 1, y: 0, z: 0 }
+      else if (axisLock === 'y') ax = { x: 0, y: 1, z: 0 }
+      else if (axisLock === 'z') ax = { x: 0, y: 0, z: 1 }
+      else {
+        if (view === 'front') ax = { x: 0, y: 0, z: 1 }
+        else if (view === 'right') ax = { x: 1, y: 0, z: 0 }
+        else if (view === 'top') ax = { x: 0, y: 1, z: 0 }
+      }
+      return rotateMeshSelection(baseObject, selection, value, pivotWorld, ax)
+    }
+    case 'scale': {
+      let scaleVec: Vec3 | number = value
+      if (axisLock) {
+        scaleVec = {
+          x: axisLock === 'y' || axisLock === 'z' ? 1 : value,
+          y: axisLock === 'x' || axisLock === 'z' ? 1 : value,
+          z: axisLock === 'x' || axisLock === 'y' ? 1 : value,
+        }
+      } else {
+        if (view === 'front') scaleVec = { x: value, y: value, z: 1 }
+        else if (view === 'top') scaleVec = { x: value, y: 1, z: value }
+        else if (view === 'right') scaleVec = { x: 1, y: value, z: value }
+      }
+      return scaleMeshSelection(baseObject, selection, scaleVec, pivotWorld)
+    }
+    case 'move':
+      return moveMeshSelection(baseObject, selection, value, deltaWorldX, deltaWorldY, axisLock, view)
   }
 }
 
@@ -396,6 +482,8 @@ export function modalValueFromMouseDelta(
     case 'scale':
       const dyScaled = dy * 0.015 * sensitivityScale
       return Math.max(0.01, 1 + dyScaled)
+    case 'move':
+      return 0
   }
 }
 
@@ -414,6 +502,8 @@ export function modalValueFromWheel(
       return current + step * 0.08
     case 'scale':
       return Math.max(0.01, current + step * 0.05)
+    case 'move':
+      return current + step * 0.1
   }
 }
 
@@ -426,6 +516,8 @@ export function formatModalValue(op: MeshModalOpKind, value: number): string {
     case 'rotate':
       return `${((value * 180) / Math.PI).toFixed(1)}°`
     case 'scale':
+      return value.toFixed(3)
+    case 'move':
       return value.toFixed(3)
   }
 }

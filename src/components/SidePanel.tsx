@@ -1362,7 +1362,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${selectionMode === 'object' ? 'active' : ''}`}
                 onClick={() => setSelectionMode('object')}
-                title="Select objects (1 or Q)"
+                title="Select objects (1)"
               >
                 Object
               </button>
@@ -1413,7 +1413,7 @@ export function SidePanel() {
             <button
               className={`side-btn ${viewportXRay ? 'active' : ''}`}
               onClick={() => setViewportXRay(!viewportXRay)}
-              title="Toggle X-ray (X)"
+              title="Toggle X-ray (Shift+X)"
             >
               X-ray
             </button>
@@ -1435,14 +1435,14 @@ export function SidePanel() {
               <button
                 className={`side-btn ${activeTool === 'move' ? 'active' : ''}`}
                 onClick={() => setActiveTool('move')}
-                title="Move (W)"
+                title="Move (M)"
               >
                 Move
               </button>
               <button
                 className={`side-btn ${activeTool === 'rotate' ? 'active' : ''}`}
                 onClick={() => setActiveTool('rotate')}
-                title="Rotate (R — drag mouse after pressing)"
+                title="Rotate (R)"
               >
                 Rotate
               </button>
@@ -1464,7 +1464,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${isSelectTool ? 'active' : ''}`}
                 onClick={activateSelectTool}
-                title="Select (G) · click and drag (Q for object mode)"
+                title="Select (G) · click and drag (1 for object mode)"
               >
                 Select
               </button>

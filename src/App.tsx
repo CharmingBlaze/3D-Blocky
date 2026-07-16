@@ -153,6 +153,18 @@ export default function App() {
         state.setShowSidePanel(!state.showSidePanel)
         return
       }
+      if (e.key === 'x' || e.key === 'X' || e.key === 'y' || e.key === 'Y' || e.key === 'z' || e.key === 'Z') {
+        const state = store()
+        if (state.meshModal || state.objectTransformModal) {
+          if (!e.shiftKey && !ctrlOrMeta && !e.altKey) {
+            e.preventDefault()
+            const axis = e.key.toLowerCase() as 'x' | 'y' | 'z'
+            state.setModalAxisLock(state.meshModal?.axisLock === axis || state.objectTransformModal?.axisLock === axis ? null : axis)
+            return
+          }
+        }
+      }
+
       if (e.key === 'Escape') {
         const state = store()
         if (state.meshModal) {
@@ -367,19 +379,25 @@ export default function App() {
         ) {
           if (e.key === 'r' || e.key === 'R') {
             e.preventDefault()
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
             state.beginObjectTransformModal(
               'rotate',
               lastMousePosRef.current.x,
-              lastMousePosRef.current.y
+              lastMousePosRef.current.y,
+              activeView
             )
             return
           }
           if (e.key === 's' || e.key === 'S') {
             e.preventDefault()
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
             state.beginObjectTransformModal(
               'scale',
               lastMousePosRef.current.x,
-              lastMousePosRef.current.y
+              lastMousePosRef.current.y,
+              activeView
             )
             return
           }
@@ -393,12 +411,16 @@ export default function App() {
           }
           if (e.key === 'r' || e.key === 'R') {
             e.preventDefault()
-            state.beginMeshModal('rotate', lastMousePosRef.current.x, lastMousePosRef.current.y)
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
+            state.beginMeshModal('rotate', lastMousePosRef.current.x, lastMousePosRef.current.y, activeView)
             return
           }
           if (e.key === 's' || e.key === 'S') {
             e.preventDefault()
-            state.beginMeshModal('scale', lastMousePosRef.current.x, lastMousePosRef.current.y)
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
+            state.beginMeshModal('scale', lastMousePosRef.current.x, lastMousePosRef.current.y, activeView)
             return
           }
           if (e.key === 'b' || e.key === 'B') {
@@ -417,16 +439,19 @@ export default function App() {
         }
       }
 
-      if (e.key === 'q' || e.key === 'Q') store().setSelectionMode('object')
-      if (e.key === 'w' || e.key === 'W') store().setActiveTool('move')
-      if (e.key === 'e' || e.key === 'E') store().setActiveTool('rotate')
-      if (e.key === 'r' || e.key === 'R') store().setActiveTool('rotate')
-      if (e.key === 's' || e.key === 'S') store().setActiveTool('scale')
+      if (e.key === 'm' || e.key === 'M') {
+        const mergeState = store()
+        // If in vertex mode with vertices selected, M might be used for merge (handled below).
+        // Otherwise, switch to move gizmo.
+        if (mergeState.selectionMode !== 'vertex' || !mergeState.meshSelection?.vertices.length) {
+          store().setActiveTool('move')
+        }
+      }
       if (e.key === 'v' || e.key === 'V') store().setDrawInputMode('vector-pen')
       if (e.key === 'd') store().setDrawInputMode('regular')
       if (e.key === 'l') store().toggleTopologyLock()
       if (e.key === 'g' || e.key === 'G') store().activateSelectTool()
-      if (e.key === 'x' || e.key === 'X') {
+      if (e.key === 'X' && e.shiftKey) {
         const s = store()
         s.setViewportXRay(!s.viewportXRay)
       }

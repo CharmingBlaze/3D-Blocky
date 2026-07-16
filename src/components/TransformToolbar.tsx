@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useAppStore, type SelectionMode } from '../store/appStore'
 
 const SELECTION_MODES: { id: SelectionMode; label: string; title: string }[] = [
-  { id: 'object', label: 'Object', title: 'Select objects (1 / Q)' },
+  { id: 'object', label: 'Object', title: 'Select objects (1)' },
   { id: 'vertex', label: 'Vertex', title: 'Select vertices (2)' },
   { id: 'edge', label: 'Edge', title: 'Select edges (3)' },
   { id: 'face', label: 'Face', title: 'Select faces (4)' },
@@ -90,7 +90,7 @@ export function TransformToolbar() {
         type="button"
         className={`transform-toolbar-btn ${activeTool === 'move' ? 'active' : ''}`}
         onClick={() => setActiveTool('move')}
-        title="Move (W)"
+        title="Move (M)"
       >
         Move
       </button>

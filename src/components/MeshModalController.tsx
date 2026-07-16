@@ -8,11 +8,13 @@ const MESH_OP_LABELS = {
   rotate: 'Rotate',
   scale: 'Scale',
   bevel: 'Bevel',
+  move: 'Move',
 } as const
 
 const OBJECT_OP_LABELS = {
   rotate: 'Rotate',
   scale: 'Scale',
+  move: 'Move',
 } as const
 
 export function MeshModalController() {
