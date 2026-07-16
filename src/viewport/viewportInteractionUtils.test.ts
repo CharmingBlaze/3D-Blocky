@@ -4,6 +4,7 @@ import {
   canPickComponentSelection,
   isBoxSelectInteraction,
   isComponentSelectionMode,
+  MESH_EDIT_TOOLS,
 } from './viewportInteractionUtils'
 
 describe('viewportInteractionUtils component tools', () => {
@@ -38,5 +39,9 @@ describe('viewportInteractionUtils component tools', () => {
       expect(isBoxSelectInteraction(mode, 'scale')).toBe(true)
       expect(isBoxSelectInteraction(mode, 'select-vertex')).toBe(true)
     }
+  })
+
+  it('routes hover updates for every interactive topology cutting tool', () => {
+    expect(MESH_EDIT_TOOLS).toEqual(expect.arrayContaining(['knife', 'mirror-knife', 'loop-cut']))
   })
 })

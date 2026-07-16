@@ -82,7 +82,7 @@ export function TransformToolbar() {
         type="button"
         className={`transform-toolbar-btn ${isSelectTool ? 'active' : ''}`}
         onClick={activateSelectTool}
-        title="Select (Q)"
+        title="Select (G)"
       >
         Select
       </button>

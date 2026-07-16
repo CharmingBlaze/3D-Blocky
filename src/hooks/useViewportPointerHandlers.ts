@@ -1078,7 +1078,8 @@ export function useViewportPointerHandlers({
           rect,
           camera,
           store.objects,
-          store.selectedObjectId
+          store.selectedObjectId,
+          { cullBackVertices: !store.viewportXRay }
         )
         if (hit?.edge) {
           loopCutBegin(hit.objectId, edgeKey(hit.edge[0], hit.edge[1]), true)
@@ -1576,7 +1577,8 @@ export function useViewportPointerHandlers({
             rect,
             camera,
             store.objects,
-            preferred
+            preferred,
+            { cullBackVertices: !store.viewportXRay }
           )
           if (hit?.edge) {
             loopCutBegin(hit.objectId, edgeKey(hit.edge[0], hit.edge[1]), false)

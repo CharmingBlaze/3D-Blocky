@@ -213,4 +213,48 @@ describe('BVH source face mapping', () => {
     })
     expect(hit?.face).toBe(expectedFace)
   })
+
+  it.each([
+    ['front', [0, 0, 5] as const, 1],
+    ['back', [0, 0, -5] as const, 0],
+    ['right', [5, 0, 0] as const, 3],
+    ['left', [-5, 0, 0] as const, 2],
+    ['top', [0, 5, 0] as const, 4],
+    ['bottom', [0, -5, 0] as const, 5],
+  ])('gives Knife the original %s face ID', (_name, position, expectedFace) => {
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+    camera.position.set(...position)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    const rect = {
+      left: 0, top: 0, width: 200, height: 200,
+      right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect
+    const hit = pickKnifeHit(100, 100, rect, camera, [box], box.id)
+    expect(hit?.faceIndex).toBe(expectedFace)
+    expect(hit?.snap).toBe('face')
+  })
+
+  it('gives Loop Cut a visible front edge instead of an overlapping back edge', () => {
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+    camera.position.set(0, 0, 5)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    const rect = {
+      left: 0, top: 0, width: 200, height: 200,
+      right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect
+    const edgeMid = new THREE.Vector3(0, 1, 1).project(camera)
+    const hit = pickMeshComponent(
+      'edge',
+      (edgeMid.x * 0.5 + 0.5) * 200,
+      (-edgeMid.y * 0.5 + 0.5) * 200,
+      rect,
+      camera,
+      [box],
+      box.id,
+      { cullBackVertices: true }
+    )
+    expect(hit?.edge?.slice().sort((a, b) => a - b)).toEqual([6, 7])
+  })
 })

@@ -425,10 +425,7 @@ export default function App() {
       if (e.key === 'v' || e.key === 'V') store().setDrawInputMode('vector-pen')
       if (e.key === 'd') store().setDrawInputMode('regular')
       if (e.key === 'l') store().toggleTopologyLock()
-      if (e.key === 'g') {
-        const s = store()
-        s.setShowGrid(!s.showGrid)
-      }
+      if (e.key === 'g' || e.key === 'G') store().activateSelectTool()
       if (e.key === 'x' || e.key === 'X') {
         const s = store()
         s.setViewportXRay(!s.viewportXRay)

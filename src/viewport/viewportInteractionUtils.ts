@@ -24,7 +24,7 @@ export const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate',
 export const TRANSFORM_GIZMO_TOOLS: ActiveTool[] = ['move', 'rotate', 'scale']
 export const DEFORM_TOOLS: ActiveTool[] = ['bend']
 export const MESH_SELECT_TOOLS: ActiveTool[] = ['select-vertex', 'select-edge', 'select-face']
-export const MESH_EDIT_TOOLS: ActiveTool[] = ['knife', 'loop-cut']
+export const MESH_EDIT_TOOLS: ActiveTool[] = ['knife', 'mirror-knife', 'loop-cut']
 
 export function isComponentSelectionMode(mode: SelectionMode): boolean {
   return mode === 'vertex' || mode === 'edge' || mode === 'face'

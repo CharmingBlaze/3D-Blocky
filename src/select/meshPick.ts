@@ -33,6 +33,11 @@ const _ndc = new THREE.Vector2()
 const _ray = new THREE.Raycaster()
 const _world = new THREE.Vector3()
 const _hitLocal = new THREE.Vector3()
+const _hitWorld = new THREE.Vector3()
+const _triA = new THREE.Vector3()
+const _triB = new THREE.Vector3()
+const _triC = new THREE.Vector3()
+const _rayLocal = new THREE.Ray()
 const _matrix = new THREE.Matrix4()
 const _invMatrix = new THREE.Matrix4()
 const _rotMatrix = new THREE.Matrix4()
@@ -73,6 +78,48 @@ interface FaceHit {
   pointLocal: THREE.Vector3
 }
 
+/** Correctness path for unsupported or stale BVH state. */
+function raycastObjectLinear(
+  obj: SceneObject,
+  rayWorld: THREE.Ray,
+  triData: ReturnType<typeof getFaceTriangulation>,
+  matrix: THREE.Matrix4
+): FaceHit | null {
+  _invMatrix.copy(matrix).invert()
+  _rayLocal.copy(rayWorld).applyMatrix4(_invMatrix)
+  let best: FaceHit | null = null
+
+  for (let ti = 0; ti < triData.triangleCount; ti++) {
+    const fi = triData.faceIndices[ti]
+    if (fi === undefined || fi >= obj.faces.length) continue
+    const face = obj.faces[fi]
+    if (!face) continue
+    const ca = triData.cornerIndices[ti * 3]
+    const cb = triData.cornerIndices[ti * 3 + 1]
+    const cc = triData.cornerIndices[ti * 3 + 2]
+    if (ca === undefined || cb === undefined || cc === undefined) continue
+    const a = obj.positions[face[ca]!]
+    const b = obj.positions[face[cb]!]
+    const c = obj.positions[face[cc]!]
+    if (!a || !b || !c) continue
+    _triA.set(a.x, a.y, a.z)
+    _triB.set(b.x, b.y, b.z)
+    _triC.set(c.x, c.y, c.z)
+    const local = _rayLocal.intersectTriangle(_triA, _triB, _triC, false, _hitLocal)
+    if (!local) continue
+    _hitWorld.copy(local).applyMatrix4(matrix)
+    const distance = rayWorld.origin.distanceTo(_hitWorld)
+    if (best && best.t <= distance) continue
+    best = {
+      objectId: obj.id,
+      faceIndex: fi,
+      t: distance,
+      pointLocal: local.clone(),
+    }
+  }
+  return best
+}
+
 function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
   const triData = getFaceTriangulation(obj)
   _bvhMesh.geometry = triData.geometry
@@ -82,13 +129,14 @@ function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
   _bvhRaycaster.ray.copy(rayWorld)
   const intersects = _bvhRaycaster.intersectObject(_bvhMesh)
 
-  if (intersects.length === 0) return null
+  if (intersects.length === 0) return raycastObjectLinear(obj, rayWorld, triData, _matrix)
 
   // Find the first valid face intersection
   for (const hit of intersects) {
     if (hit.faceIndex == null) continue
     const ti = hit.faceIndex as number
-    const fi = triData.faceIndices[ti]!
+    const fi = triData.faceIndices[ti]
+    if (fi === undefined || fi >= obj.faces.length) continue
 
     _invMatrix.copy(_matrix).invert()
     _hitLocal.copy(hit.point).applyMatrix4(_invMatrix)
@@ -101,7 +149,7 @@ function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
     }
   }
 
-  return null
+  return raycastObjectLinear(obj, rayWorld, triData, _matrix)
 }
 
 function rayFromPointer(
@@ -110,6 +158,10 @@ function rayFromPointer(
   rect: DOMRect,
   camera: THREE.Camera
 ): THREE.Ray {
+  camera.updateMatrixWorld(true)
+  if ('updateProjectionMatrix' in camera && typeof camera.updateProjectionMatrix === 'function') {
+    camera.updateProjectionMatrix()
+  }
   _ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1
   _ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1
   _ray.setFromCamera(_ndc, camera)

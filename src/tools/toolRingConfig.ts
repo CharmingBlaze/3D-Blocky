@@ -95,7 +95,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'tool', tool: 'rotate', label: 'Rotate (R)' },
     { kind: 'tool', tool: 'scale', label: 'Scale (S)' },
     { kind: 'tool', tool: 'bend', label: 'Bend' },
-    { kind: 'action', id: 'select-tool', label: 'Select (Q)' },
+    { kind: 'action', id: 'select-tool', label: 'Select (G)' },
   ],
   mesh: [
     { kind: 'tool', tool: 'knife', label: 'Knife (K)' },

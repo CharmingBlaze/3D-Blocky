@@ -3,6 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { THEMES, getTheme, type ThemeGroup, type ThemeId } from '../theme/themes'
 
 const THEME_GROUPS: ThemeGroup[] = [
+  'pixaCAD',
   'Classic',
   'Studio',
   'Movie Screens',

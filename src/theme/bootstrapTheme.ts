@@ -9,5 +9,6 @@ export function readStoredThemeId(): ThemeId {
   } catch {
     /* ignore */
   }
+  // Fresh installs and cleared storage always start on Studio Clay.
   return DEFAULT_THEME_ID
 }

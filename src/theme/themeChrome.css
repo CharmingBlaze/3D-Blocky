@@ -1057,6 +1057,39 @@ html[data-theme='tactical-orange'] .toolbar-btn.active {
   box-shadow: 0 0 12px rgb(255 104 16 / 40%);
 }
 
+/* pixaCAD signature — orange HUD */
+html[data-theme='pixa-orange'] .side-panel {
+  border: 1px solid #ff5a20;
+  box-shadow: inset 0 0 28px rgb(255 90 32 / 8%);
+}
 
+html[data-theme='pixa-orange'] .toolbar-btn.active,
+html[data-theme='pixa-orange'] .transform-toolbar-btn.active {
+  background: #ff5a20;
+  color: #141210;
+  box-shadow: 0 0 10px rgb(255 90 32 / 45%);
+}
 
+/* pixaCAD Arcade — synthwave neon */
+html[data-theme='pixa-arcade'] .side-panel-header {
+  border-bottom: 2px solid #ff00aa;
+  text-shadow: 0 0 8px rgb(255 0 170 / 50%);
+}
+
+html[data-theme='pixa-arcade'] .toolbar-btn.active {
+  background: #ff00aa;
+  color: #050508;
+  box-shadow: 0 0 14px rgb(255 0 170 / 55%);
+}
+
+/* pixaCAD Amiga — workbench orange bar */
+html[data-theme='pixa-amiga'] .side-panel-header {
+  background: linear-gradient(180deg, #204070 0%, #102040 100%);
+  border-bottom: 2px solid #ff8800;
+}
+
+html[data-theme='pixa-amiga'] .toolbar-btn.active {
+  background: #ff8800;
+  color: #0a1828;
+}
 

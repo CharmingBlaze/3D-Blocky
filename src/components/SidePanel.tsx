@@ -763,7 +763,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${showGrid ? 'active' : ''}`}
                 onClick={() => setShowGrid(!showGrid)}
-                title="Toggle grid (G)"
+                title="Toggle grid"
               >
                 Grid
               </button>
@@ -1464,7 +1464,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${isSelectTool ? 'active' : ''}`}
                 onClick={activateSelectTool}
-                title="Select · click and drag (Q for object mode)"
+                title="Select (G) · click and drag (Q for object mode)"
               >
                 Select
               </button>
@@ -1599,7 +1599,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${activeTool === 'knife' ? 'active' : ''}`}
                 onClick={() => setActiveTool('knife')}
-                disabled={selectionCount === 0}
+                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
                 title="Knife — click points on the mesh (snaps to verts/edges); Enter confirms cut; Esc cancels; Shift = 45° (K)"
               >
                 Knife
@@ -1607,7 +1607,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${activeTool === 'mirror-knife' ? 'active' : ''}`}
                 onClick={() => setActiveTool('mirror-knife')}
-                disabled={selectionCount === 0}
+                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
                 title="Mirror Knife — symmetrically cuts on both sides of the symmetry plane (Shift+K)"
               >
                 Mirror Knife
@@ -1618,7 +1618,7 @@ export function SidePanel() {
                   setSelectionMode('edge')
                   setActiveTool('loop-cut')
                 }}
-                disabled={selectionCount === 0}
+                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
                 title="Loop cut — click edge, scroll to slide, click to confirm (Ctrl+R)"
               >
                 Loop Cut
