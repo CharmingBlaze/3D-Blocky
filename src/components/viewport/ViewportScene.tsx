@@ -98,7 +98,7 @@ export function ViewportScene({
       <WebGLContextHandler />
       <ViewportPointerPolicy gizmoActive={canvasPointerEvents} />
 
-      <ViewportCamera view={view} isActiveViewport={isActiveViewport} />
+      <ViewportCamera view={view} isActiveViewport={isActiveViewport} objects={objects} />
 
       <color attach="background" args={[viewportBg]} />
       <ViewportLighting />

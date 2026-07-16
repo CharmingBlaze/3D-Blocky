@@ -1,12 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { Vector3 } from 'three'
+import { OrthographicCamera, PerspectiveCamera, Vector3 } from 'three'
 import type * as THREE from 'three'
 import { useAppStore, type ViewType } from '../../store/appStore'
 import { getCameraSetup } from '../../scene/viewTypes'
 import { applyViewportFit } from '../../viewport/fitViewports'
 import { invalidateViewport } from '../../rendering/viewportInvalidation'
 import { useViewportRuntime } from './ViewportRuntimeContext'
+import type { SceneObject } from '../../mesh/HalfEdgeMesh'
+import { computeSceneWorldBounds, updateAdaptiveCameraClip } from '../../viewport/adaptiveCameraClip'
 
 const _viewMoveRight = new Vector3()
 const _viewMoveUp = new Vector3()
@@ -89,10 +91,22 @@ export function ViewportFitController({ view }: { view: ViewType }) {
 export function ViewportCamera({
   view,
   isActiveViewport,
+  objects,
 }: {
   view: ViewType
   isActiveViewport: boolean
+  objects: SceneObject[]
 }) {
+  const camera = useThree((s) => s.camera)
+  const { slotIndex, layoutVisible } = useViewportRuntime()
+  const bounds = useMemo(() => computeSceneWorldBounds(objects), [objects])
+
+  useFrame(() => {
+    if (!(camera instanceof OrthographicCamera || camera instanceof PerspectiveCamera)) return
+    if (!updateAdaptiveCameraClip(camera, bounds)) return
+    if (layoutVisible) invalidateViewport(slotIndex, 'camera')
+  })
+
   return (
     <>
       <ViewMoveBasisSync enabled={isActiveViewport && view === 'perspective'} />
