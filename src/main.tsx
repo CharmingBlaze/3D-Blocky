@@ -5,6 +5,15 @@ import './index.css'
 import { APP_NAME } from './app/branding'
 import { applyTheme } from './theme/applyTheme'
 import { readStoredThemeId } from './theme/bootstrapTheme'
+import * as THREE from 'three'
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh'
+
+// @ts-ignore
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree
+// @ts-ignore
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree
+// @ts-ignore
+THREE.Mesh.prototype.raycast = acceleratedRaycast
 
 document.title = APP_NAME
 applyTheme(readStoredThemeId())

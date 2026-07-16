@@ -36,6 +36,10 @@ export interface MeshData {
    * Used for density heatmap and other per-topology attributes under flat/smooth export.
    */
   sourceVertexIndices?: Uint32Array
+  /** SceneObject face index for each generated triangle. Length = indices.length / 3 */
+  sourceFaceIndices?: Uint32Array
+  /** SceneObject tri index within the face for each generated triangle. Length = indices.length / 3 */
+  sourceTriIndices?: Uint32Array
   flatShading: boolean
 }
 
@@ -303,6 +307,8 @@ export class HalfEdgeMesh {
     const uvs: number[] = []
     const faceColors: number[] = []
     const sourceVertexIndices: number[] = []
+    const sourceFaceIndices: number[] = []
+    const sourceTriIndices: number[] = []
     const hasUv =
       this.uvs.length > 0 && this.faceUvIndices.length === this.faces.length
     const hasCornerColors =
@@ -363,8 +369,11 @@ export class HalfEdgeMesh {
         }
 
         const tris = triangulateMeshFace(this.positions, face)
+        let ti = 0
         for (const [a, b, c] of tris) {
           indices.push(baseIdx + a, baseIdx + b, baseIdx + c)
+          sourceFaceIndices.push(fi)
+          sourceTriIndices.push(ti++)
         }
       }
 
@@ -374,6 +383,8 @@ export class HalfEdgeMesh {
         uvs: uvs.length > 0 ? new Float32Array(uvs) : undefined,
         faceColors: new Float32Array(faceColors),
         sourceVertexIndices: new Uint32Array(sourceVertexIndices),
+        sourceFaceIndices: new Uint32Array(sourceFaceIndices),
+        sourceTriIndices: new Uint32Array(sourceTriIndices),
         flatShading,
       }
     }

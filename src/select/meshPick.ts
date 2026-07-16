@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { acceleratedRaycast } from 'three-mesh-bvh'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { Vec3 } from '../utils/math'
 import type { SelectionMode } from '../store/appStore'
@@ -16,8 +17,6 @@ import {
 import { objectsInScreenRect, pickObjectAt } from './objectPick'
 import {
   getFaceTriangulation,
-  getLocalAabb,
-  rayIntersectsLocalAabb,
 } from './meshPickGeometryCache'
 import { getOverlayPickData } from './overlayPickCache'
 
@@ -32,9 +31,6 @@ export interface MeshPickHit {
 
 const _ndc = new THREE.Vector2()
 const _ray = new THREE.Raycaster()
-const _v0 = new THREE.Vector3()
-const _v1 = new THREE.Vector3()
-const _v2 = new THREE.Vector3()
 const _world = new THREE.Vector3()
 const _hitLocal = new THREE.Vector3()
 const _matrix = new THREE.Matrix4()
@@ -43,8 +39,13 @@ const _rotMatrix = new THREE.Matrix4()
 const _scaleMatrix = new THREE.Matrix4()
 const _pivotMatrix = new THREE.Matrix4()
 const _euler = new THREE.Euler()
-const _rayLocal = new THREE.Ray()
-const _bestPointLocal = new THREE.Vector3()
+const _bvhRaycaster = new THREE.Raycaster()
+const _bvhMesh = new THREE.Mesh(
+  undefined,
+  new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
+)
+_bvhMesh.matrixAutoUpdate = false
+_bvhMesh.raycast = acceleratedRaycast
 
 export interface MeshPickOptions {
   /** When true, ignore back-facing verts/edges (matches overlay when X-ray is off). */
@@ -73,46 +74,34 @@ interface FaceHit {
 }
 
 function raycastObject(obj: SceneObject, rayWorld: THREE.Ray): FaceHit | null {
-  const aabb = getLocalAabb(obj)
-  if (!aabb) return null
-
+  const triData = getFaceTriangulation(obj)
+  _bvhMesh.geometry = triData.geometry
   getObjectLocalMatrix(obj, _matrix)
-  _invMatrix.copy(_matrix).invert()
-  _rayLocal.origin.copy(rayWorld.origin).applyMatrix4(_invMatrix)
-  _rayLocal.direction.copy(rayWorld.direction).transformDirection(_invMatrix).normalize()
+  _bvhMesh.matrixWorld.copy(_matrix)
 
-  if (!rayIntersectsLocalAabb(_rayLocal, aabb)) return null
+  _bvhRaycaster.ray.copy(rayWorld)
+  const intersects = _bvhRaycaster.intersectObject(_bvhMesh)
 
-  const tris = getFaceTriangulation(obj)
-  let bestT = Infinity
-  let bestFace = -1
-  let bestPoint: THREE.Vector3 | null = null
+  if (intersects.length === 0) return null
 
-  const pos = tris.positions
-  for (let ti = 0; ti < tris.triangleCount; ti++) {
-    const o = ti * 9
-    _v0.set(pos[o]!, pos[o + 1]!, pos[o + 2]!)
-    _v1.set(pos[o + 3]!, pos[o + 4]!, pos[o + 5]!)
-    _v2.set(pos[o + 6]!, pos[o + 7]!, pos[o + 8]!)
+  // Find the first valid face intersection
+  for (const hit of intersects) {
+    if (hit.faceIndex == null) continue
+    const ti = hit.faceIndex as number
+    const fi = triData.faceIndices[ti]!
 
-    const hit = _rayLocal.intersectTriangle(_v0, _v1, _v2, false, _hitLocal)
-    if (!hit) continue
+    _invMatrix.copy(_matrix).invert()
+    _hitLocal.copy(hit.point).applyMatrix4(_invMatrix)
 
-    const t = _rayLocal.origin.distanceTo(hit)
-    if (t < bestT) {
-      bestT = t
-      bestFace = tris.faceIndices[ti]!
-      bestPoint = _bestPointLocal.copy(hit)
+    return {
+      objectId: obj.id,
+      faceIndex: fi,
+      t: hit.distance,
+      pointLocal: _hitLocal.clone(),
     }
   }
 
-  if (bestFace < 0 || !bestPoint) return null
-  return {
-    objectId: obj.id,
-    faceIndex: bestFace,
-    t: bestT,
-    pointLocal: _bestPointLocal.clone(),
-  }
+  return null
 }
 
 function rayFromPointer(

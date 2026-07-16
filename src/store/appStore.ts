@@ -934,8 +934,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const objectId =
       opts?.linkObjectId ?? state.selectedObjectId ?? state.selectionObjectIds[0] ?? null
     let docId = state.pixelEditorDocId
+    const requestedNewDocument = opts?.width !== undefined || opts?.height !== undefined
 
-    if (objectId) {
+    if (requestedNewDocument) {
+      // A size chosen from the side-panel "New" menu is an explicit replace
+      // operation, not merely an editor-open request. Always create a fresh,
+      // transparent document at that resolution while preserving the linked
+      // object's existing UV layout.
+      get().createNewPixelDocument(opts?.width ?? 64, opts?.height ?? 64, objectId ?? undefined)
+      docId = get().pixelEditorDocId
+    } else if (objectId) {
       docId = get().ensureTextureDocumentForObject(objectId) ?? docId
     }
 
@@ -1277,6 +1285,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (linkObjectId) {
       const obj = get().objects.find((o) => o.id === linkObjectId)
       if (obj) {
+        // Texture resolution does not change normalized UV coordinates. Keep a
+        // complete authored/default layout exactly as it is; only initialize UVs
+        // for objects that genuinely have no usable topology.
         const withUvs =
           obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length
             ? obj

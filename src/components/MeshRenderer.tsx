@@ -1,6 +1,7 @@
 import { useMemo, useRef, useEffect, memo } from 'react'
 import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
+import { computeBoundsTree } from 'three-mesh-bvh'
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { computeVertexDensity } from '../sculpt/sculptTools'
 import {
@@ -166,6 +167,14 @@ function buildViewportMeshGeometryUncached(
   geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3))
   geo.setIndex(new THREE.BufferAttribute(data.indices, 1))
 
+  if (data.sourceFaceIndices && data.sourceTriIndices) {
+    geo.userData.sourceFaceIndices = data.sourceFaceIndices
+    geo.userData.sourceTriIndices = data.sourceTriIndices
+  }
+  if (data.sourceVertexIndices) {
+    geo.userData.sourceVertexIndices = data.sourceVertexIndices
+  }
+
   if (data.uvs && data.uvs.length > 0) {
     geo.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2))
   }
@@ -193,6 +202,11 @@ function buildViewportMeshGeometryUncached(
   } else {
     geo.computeVertexNormals()
   }
+
+  // Generate BVH for fast raycasting
+  // Preserve source triangle order used by selection and UV metadata.
+  computeBoundsTree.call(geo, { indirect: true })
+
   return geo
 }
 

@@ -29,12 +29,14 @@ import {
 } from '../select/meshPick'
 import {
   constrainPixelShape,
+  areSurfaceHitsUvContinuous,
   estimateTexelScreenSize,
   interpolateScreenPaintSamples,
   pickMeshSurfaceUv,
   pickObjectSurfaceUv,
   uvToPixelCoords,
   type MeshPickHint,
+  type MeshSurfaceUvHit,
 } from '../pixel/uvPaint'
 import { resolveEffectiveMaterial } from '../material/materials'
 import {
@@ -124,6 +126,7 @@ export function useViewportPointerHandlers({
     lastX: number
     lastY: number
     hint: MeshPickHint | null
+    lastHit: MeshSurfaceUvHit
   } | null>(null)
   const pixelShapeRef = useRef<{
     docId: string
@@ -795,6 +798,12 @@ export function useViewportPointerHandlers({
         let hit = selectedPaintObject
           ? pickObjectSurfaceUv(e.clientX, e.clientY, rect, camera, selectedPaintObject)
           : pickMeshSurfaceUv(e.clientX, e.clientY, rect, camera, objects, null)
+        // A selection in another pane must not make the rest of the scene
+        // unpaintable. Keep the selected-object fast path, then fall back to a
+        // scene raycast only when that object was not under the pointer.
+        if (!hit && selectedPaintObject) {
+          hit = pickMeshSurfaceUv(e.clientX, e.clientY, rect, camera, objects, null)
+        }
         if (hit) {
           const hitObj = objects.find((o) => o.id === hit.objectId)
           const mat = hitObj ? resolveEffectiveMaterial(hitObj) : null
@@ -847,10 +856,16 @@ export function useViewportPointerHandlers({
                 faceIndex: hit.faceIndex,
                 triIndex: hit.triIndex,
               },
+              lastHit: hit,
             }
             return
           }
         }
+        // Paint mode owns primary-button input. A missed or non-textured hit
+        // must not fall through into object/face selection and draw a marquee.
+        e.preventDefault()
+        e.stopPropagation()
+        return
       }
 
       if (
@@ -1422,10 +1437,18 @@ export function useViewportPointerHandlers({
               e.clientY,
               step
             )
-            const points: { x: number; y: number }[] = []
+            const runs: { points: { x: number; y: number }[]; restart: boolean }[] = []
+            let run = { points: [] as { x: number; y: number }[], restart: false }
+            runs.push(run)
             let hint = paint.hint
+            let previousHit: MeshSurfaceUvHit | null = paint.lastHit
             if (anchor) {
-              points.push(uvToPixelCoords(anchor.uv, doc.width, doc.height))
+              if (!areSurfaceHitsUvContinuous(obj, previousHit, anchor)) {
+                run = { points: [], restart: true }
+                runs.push(run)
+              }
+              run.points.push(uvToPixelCoords(anchor.uv, doc.width, doc.height))
+              previousHit = anchor
               hint = {
                 objectId: anchor.objectId,
                 faceIndex: anchor.faceIndex,
@@ -1437,18 +1460,25 @@ export function useViewportPointerHandlers({
               const s = samples[si]!
               const h = pickObjectSurfaceUv(s.x, s.y, rect, camera, obj, hint)
               if (!h || h.objectId !== paint.objectId) continue
-              points.push(uvToPixelCoords(h.uv, doc.width, doc.height))
+              if (!previousHit || !areSurfaceHitsUvContinuous(obj, previousHit, h)) {
+                run = { points: [], restart: true }
+                runs.push(run)
+              }
+              run.points.push(uvToPixelCoords(h.uv, doc.width, doc.height))
+              previousHit = h
               hint = {
                 objectId: h.objectId,
                 faceIndex: h.faceIndex,
                 triIndex: h.triIndex,
               }
             }
-            if (points.length > 0) {
+            for (const segment of runs) {
+              const points = segment.points
+              if (points.length === 0) continue
               // Commit texels immediately so both the Pixel Editor canvas and the
               // shared texture buffer change during this pointer event. GPU work
               // remains safely coalesced by pixelPreview.
-              if (points.length >= 2) {
+              if (points.length >= 2 && !segment.restart) {
                 store.paintDocumentStroke(paint.docId, points, { syncGpu: true })
               } else {
                 store.paintDocumentStroke(paint.docId, points, {
@@ -1462,6 +1492,7 @@ export function useViewportPointerHandlers({
               lastX: e.clientX,
               lastY: e.clientY,
               hint,
+              lastHit: previousHit ?? paint.lastHit,
             }
           }
         }

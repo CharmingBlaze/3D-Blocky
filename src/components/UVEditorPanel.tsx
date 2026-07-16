@@ -84,6 +84,8 @@ const HANDLE_SIZE = 7
 const ROTATE_HANDLE_RADIUS = 7
 const ROTATE_HANDLE_OFFSET = 28
 const RESIZE_HANDLE_SIZE = 6
+const RESIZE_HANDLE_HIT_PADDING = 1
+const MIN_RESIZE_BOUNDS_SCREEN_SIZE = 32
 const MIN_ZOOM = 0.06
 const MAX_ZOOM = 32
 const DRAG_THRESHOLD_PX = 1
@@ -607,7 +609,20 @@ export function UVEditorPanel({ workspace = false }: { workspace?: boolean }) {
     (px: number, py: number, faceIndices: number[]): ResizeHandle | null => {
       const box = getSelectionBBoxPx(faceIndices)
       if (!box) return null
-      const threshold = RESIZE_HANDLE_SIZE / zoom + 3
+      const viewZoom = zoom
+      const screenWidth = (box.maxX - box.minX) * viewZoom
+      const screenHeight = (box.maxY - box.minY) * viewZoom
+      // When an island is tiny on screen, eight resize hit zones overlap its
+      // entire interior and make moving practically impossible. At that scale,
+      // treat the island as move-only until the user zooms in.
+      if (
+        screenWidth < MIN_RESIZE_BOUNDS_SCREEN_SIZE ||
+        screenHeight < MIN_RESIZE_BOUNDS_SCREEN_SIZE
+      ) {
+        return null
+      }
+      // Match the visible handle's half-size plus a small screen-space pad.
+      const threshold = (RESIZE_HANDLE_SIZE / 2 + RESIZE_HANDLE_HIT_PADDING) / viewZoom
       const handles: { id: ResizeHandle; x: number; y: number }[] = [
         { id: 'nw', x: box.minX, y: box.minY },
         { id: 'n', x: box.cx, y: box.minY },

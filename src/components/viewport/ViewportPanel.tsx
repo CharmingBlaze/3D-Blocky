@@ -65,6 +65,8 @@ export function ViewportPanel({
     selectedBillboardImageId,
     billboardImages,
     viewportXRay,
+    pixelEditorOpen,
+    pixelEditorPaintOnModel,
     setActiveView,
     setViewportSlotView,
   } = useAppStore(
@@ -89,6 +91,8 @@ export function ViewportPanel({
       selectedBillboardImageId: s.selectedBillboardImageId,
       billboardImages: s.billboardImages,
       viewportXRay: s.viewportXRay,
+      pixelEditorOpen: s.pixelEditorOpen,
+      pixelEditorPaintOnModel: s.pixelEditorPaintOnModel,
       setActiveView: s.setActiveView,
       setViewportSlotView: s.setViewportSlotView,
     }))
@@ -96,39 +100,22 @@ export function ViewportPanel({
 
   const interaction = useViewportSlotInteraction(slotIndex)
 
-  const cadPreview = useAppStore(
-    useShallow((s) => ({
-      primitiveBoxDraft: s.primitiveBoxDraft,
-      polyDrawDraft: s.polyDrawDraft,
-      polyDrawHover: s.polyDrawHover,
-      vectorPenDraft: s.vectorPenDraft,
-      vectorIsDrawing: s.vectorIsDrawing,
-      vectorDraftLength: s.vectorDraft.length,
-      isDrawing: s.isDrawing,
-      currentStrokePreview: s.currentStrokePreview,
-      knifeDraft: s.knifeDraft,
-      bendDraft: s.bendDraft,
-      loopCutDraft: s.loopCutDraft,
-      extrudeDragAnchor: s.extrudeDragAnchor,
-      meshModal: s.meshModal,
-      objectTransformModal: s.objectTransformModal,
-    }))
+  const cadPreviewActive = useAppStore(
+    (s) =>
+      s.primitiveBoxDraft != null ||
+      s.polyDrawDraft != null ||
+      s.polyDrawHover != null ||
+      s.vectorPenDraft != null ||
+      (s.vectorIsDrawing && s.vectorDraft.length > 0) ||
+      s.isDrawing ||
+      s.currentStrokePreview != null ||
+      s.knifeDraft != null ||
+      s.bendDraft != null ||
+      s.loopCutDraft != null ||
+      s.extrudeDragAnchor != null ||
+      s.meshModal != null ||
+      s.objectTransformModal != null
   )
-
-  const cadPreviewActive =
-    cadPreview.primitiveBoxDraft != null ||
-    cadPreview.polyDrawDraft != null ||
-    cadPreview.polyDrawHover != null ||
-    cadPreview.vectorPenDraft != null ||
-    (cadPreview.vectorIsDrawing && cadPreview.vectorDraftLength > 0) ||
-    cadPreview.isDrawing ||
-    cadPreview.currentStrokePreview != null ||
-    cadPreview.knifeDraft != null ||
-    cadPreview.bendDraft != null ||
-    cadPreview.loopCutDraft != null ||
-    cadPreview.extrudeDragAnchor != null ||
-    cadPreview.meshModal != null ||
-    cadPreview.objectTransformModal != null
 
   // Camera orbit/pan/zoom: continuous only on this slot (localActive).
   // Shared mesh edits + live CAD/stroke drafts: keep every *visible* slot
@@ -151,6 +138,7 @@ export function ViewportPanel({
   )
 
   const isActiveViewport = isActive && activeView === view
+  const pixelPaintActive = pixelEditorOpen && pixelEditorPaintOnModel
   const viewportBg = getViewportBackground(themeId, viewportDisplayMode)
   // Live tool/stroke previews must appear in every visible slot so Quad View stays in sync.
   const showToolPreviews = layoutVisible
@@ -185,7 +173,7 @@ export function ViewportPanel({
     () => new Set(selectionObjectIds),
     [selectionObjectIds]
   )
-  const gizmoTargetId = isActiveViewport
+  const gizmoTargetId = isActiveViewport && !pixelPaintActive
     ? selectionHasComponents(meshSelection) && isComponentSelectionMode(selectionMode)
       ? meshSelection!.objectId
       : selectionObjectIds.length === 1
@@ -200,6 +188,7 @@ export function ViewportPanel({
 
   const objectGizmoActive =
     isActiveViewport &&
+    !pixelPaintActive &&
     selectionMode === 'object' &&
     selectionObjectIds.length === 1 &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
@@ -207,6 +196,7 @@ export function ViewportPanel({
 
   const multiObjectGizmoActive =
     isActiveViewport &&
+    !pixelPaintActive &&
     selectionMode === 'object' &&
     selectionObjectIds.length > 1 &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
@@ -214,6 +204,7 @@ export function ViewportPanel({
 
   const componentGizmoActive =
     isActiveViewport &&
+    !pixelPaintActive &&
     isComponentSelectionMode(selectionMode) &&
     componentGizmoObject != null &&
     !componentGizmoObject.topologyLocked &&
@@ -223,17 +214,21 @@ export function ViewportPanel({
 
   const billboardGizmoActive =
     isActiveViewport &&
+    !pixelPaintActive &&
     !!selectedBillboardImageId &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool)
 
   const billboardPickActive =
     isActiveViewport &&
+    !pixelPaintActive &&
     billboardImages.length > 0 &&
     selectionMode === 'object' &&
     (activeTool === 'select-object' || TRANSFORM_GIZMO_TOOLS.includes(activeTool))
 
   const viewportGizmoActive = transformGizmoActive || billboardGizmoActive
-  const canvasPointerEvents = viewportGizmoActive || billboardPickActive
+  // Painting is a viewport-wide interaction. Keep every visible canvas as a
+  // direct pointer target, including inactive orthographic panes.
+  const canvasPointerEvents = viewportGizmoActive || billboardPickActive || pixelPaintActive
 
   const cursorClass =
     selectionMode === 'object' && activeTool === 'select-object'
@@ -275,6 +270,15 @@ export function ViewportPanel({
       e.preventDefault()
       return
     }
+    // Model painting belongs to the pane under the pointer. Do not let a
+    // transform gizmo in the previously active pane consume the first stroke.
+    // The pane's own handler uses its local camera, so Front/Right/Top map the
+    // hit through their actual view direction just like Perspective does.
+    if (pixelPaintActive) {
+      onActivate()
+      handlePointerDown(e)
+      return
+    }
     // TransformControls listens on the canvas and runs first; when it claims a
     // handle, skip selection/marquee so gizmo drags are not stolen.
     if (isGizmoHandlingPointer()) return
@@ -283,7 +287,7 @@ export function ViewportPanel({
 
   const handleViewportPointerMove = (e: React.PointerEvent) => {
     if (cameraNavigationGestureRef.current) return
-    if (isGizmoHandlingPointer()) return
+    if (!pixelPaintActive && isGizmoHandlingPointer()) return
     handlePointerMove(e)
   }
 
@@ -301,15 +305,22 @@ export function ViewportPanel({
       cameraNavigationGestureRef.current = false
       return
     }
-    if (isGizmoHandlingPointer()) return
+    if (!pixelPaintActive && isGizmoHandlingPointer()) return
     handlePointerLeave(e)
+  }
+
+  const handleViewportPointerEnter = () => {
+    // In paint mode, hovering a pane selects its camera before the first pixel
+    // is placed. This makes the active paint view visibly follow the mouse.
+    if (pixelPaintActive && !isActive) onActivate()
   }
 
   return (
     <div
       ref={bindContainerRef}
-      className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${imageDropMode !== 'off' ? ' image-drop-active' : ''}${imageDragOver ? ' image-drag-over' : ''}`}
+      className={`viewport-panel ${isActive ? 'active' : ''}${isHovered ? ' hovered' : ''} tool-${activeTool} ${cursorClass}${pixelPaintActive ? ' pixel-paint-active' : ''}${imageDropMode !== 'off' ? ' image-drop-active' : ''}${imageDragOver ? ' image-drag-over' : ''}`}
       onClick={onActivate}
+      onPointerEnter={handleViewportPointerEnter}
       onPointerDown={handleViewportPointerDown}
       onPointerMove={handleViewportPointerMove}
       onPointerUp={handleViewportPointerUp}
@@ -372,7 +383,7 @@ export function ViewportPanel({
               meshSelection={meshSelection}
               selectionObjectIds={selectionObjectIds}
               activeTool={activeTool}
-              cadPreviewSignal={cadPreview}
+              cadPreviewSignal={cadPreviewActive}
               primitiveBoxDraft={primitiveBoxDraft}
               multiObjectGizmoActive={multiObjectGizmoActive}
               componentGizmoActive={componentGizmoActive}

@@ -29,10 +29,14 @@ type WebGLTextureProps = {
   __version?: number
 }
 
-let webglRenderer: THREE.WebGLRenderer | null = null
+const webglRenderers = new Set<THREE.WebGLRenderer>()
 
 export function registerWebGLRenderer(renderer: THREE.WebGLRenderer): void {
-  webglRenderer = renderer
+  webglRenderers.add(renderer)
+}
+
+export function unregisterWebGLRenderer(renderer: THREE.WebGLRenderer): void {
+  webglRenderers.delete(renderer)
 }
 
 function clampedView(data: Uint8Array): Uint8ClampedArray {
@@ -153,65 +157,71 @@ export function clearPixelCompositeCache(docId: string): void {
 }
 
 function uploadDirtyTextureRegion(tex: THREE.DataTexture, dirty: PixelDirtyRect): boolean {
-  if (!webglRenderer || dirty.w <= 0 || dirty.h <= 0) return false
-  const properties = webglRenderer.properties as {
-    get(texture: THREE.Texture): WebGLTextureProps
-  }
-  const texProps = properties.get(tex)
-  if (texProps.__webglInit === undefined || !texProps.__webglTexture) return false
+  if (webglRenderers.size === 0 || dirty.w <= 0 || dirty.h <= 0) return false
 
-  const gl = webglRenderer.getContext()
+  let allSuccess = true
   const image = tex.image as { data: Uint8Array; width: number; height: number }
   const { width, height } = image
 
-  gl.bindTexture(gl.TEXTURE_2D, texProps.__webglTexture)
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, tex.flipY ? 1 : 0)
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4)
+  for (const renderer of webglRenderers) {
+    const properties = renderer.properties as {
+      get(texture: THREE.Texture): WebGLTextureProps
+    }
+    const texProps = properties.get(tex)
+    if (texProps.__webglInit === undefined || !texProps.__webglTexture) {
+      allSuccess = false
+      continue
+    }
 
-  // WebGL2 can upload a strided rectangle directly from the shared document
-  // buffer. This replaces one texSubImage2D call per row with one call per frame.
-  if (webglRenderer.capabilities.isWebGL2) {
-    const gl2 = gl as WebGL2RenderingContext
-    gl2.pixelStorei(gl2.UNPACK_ROW_LENGTH, width)
-    gl2.pixelStorei(gl2.UNPACK_SKIP_PIXELS, dirty.x)
-    gl2.pixelStorei(gl2.UNPACK_SKIP_ROWS, dirty.y)
-    gl2.texSubImage2D(
-      gl2.TEXTURE_2D,
-      0,
-      dirty.x,
-      tex.flipY ? height - dirty.y - dirty.h : dirty.y,
-      dirty.w,
-      dirty.h,
-      gl2.RGBA,
-      gl2.UNSIGNED_BYTE,
-      image.data
-    )
-    gl2.pixelStorei(gl2.UNPACK_ROW_LENGTH, 0)
-    gl2.pixelStorei(gl2.UNPACK_SKIP_PIXELS, 0)
-    gl2.pixelStorei(gl2.UNPACK_SKIP_ROWS, 0)
-    texProps.__version = tex.version
-    return true
+    const gl = renderer.getContext()
+    gl.bindTexture(gl.TEXTURE_2D, texProps.__webglTexture)
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, tex.flipY ? 1 : 0)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4)
+
+    // WebGL2 can upload a strided rectangle directly from the shared document
+    // buffer. This replaces one texSubImage2D call per row with one call per frame.
+    if (renderer.capabilities.isWebGL2) {
+      const gl2 = gl as WebGL2RenderingContext
+      gl2.pixelStorei(gl2.UNPACK_ROW_LENGTH, width)
+      gl2.pixelStorei(gl2.UNPACK_SKIP_PIXELS, dirty.x)
+      gl2.pixelStorei(gl2.UNPACK_SKIP_ROWS, dirty.y)
+      gl2.texSubImage2D(
+        gl2.TEXTURE_2D,
+        0,
+        dirty.x,
+        tex.flipY ? height - dirty.y - dirty.h : dirty.y,
+        dirty.w,
+        dirty.h,
+        gl2.RGBA,
+        gl2.UNSIGNED_BYTE,
+        image.data
+      )
+      gl2.pixelStorei(gl2.UNPACK_ROW_LENGTH, 0)
+      gl2.pixelStorei(gl2.UNPACK_SKIP_PIXELS, 0)
+      gl2.pixelStorei(gl2.UNPACK_SKIP_ROWS, 0)
+      texProps.__version = tex.version
+    } else {
+      for (let row = 0; row < dirty.h; row++) {
+        const srcY = dirty.y + row
+        const gpuY = tex.flipY ? height - srcY - 1 : srcY
+        const start = (srcY * width + dirty.x) * 4
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          dirty.x,
+          gpuY,
+          dirty.w,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          image.data.subarray(start, start + dirty.w * 4)
+        )
+      }
+      texProps.__version = tex.version
+    }
   }
 
-  for (let row = 0; row < dirty.h; row++) {
-    const srcY = dirty.y + row
-    const gpuY = tex.flipY ? height - srcY - 1 : srcY
-    const start = (srcY * width + dirty.x) * 4
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      dirty.x,
-      gpuY,
-      dirty.w,
-      1,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      image.data.subarray(start, start + dirty.w * 4)
-    )
-  }
-
-  texProps.__version = tex.version
-  return true
+  return allSuccess
 }
 
 /** Push dirty (or full) GPU upload. Skips CPU copy when pixels are the shared buffer. */

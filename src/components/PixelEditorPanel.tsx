@@ -24,6 +24,7 @@ import { PIXEL_BRUSH_SHAPES, isPixelFreehandPaintTool, type PixelBrushShape } fr
 import { drawMarchingAnts, pointInPixelSelection } from '../pixel/pixelMarchingAnts'
 import { pointerToDocumentPixel } from '../pixel/pixelCanvasCoordinates'
 import { subscribeUvDraft, type UvDraftSnapshot } from '../uv/uvDraftRelay'
+import { appConfirm } from '../ui/appConfirm'
 import {
   clearUvPaintOverlayCaches,
   paintUvAtlasOverlay,
@@ -878,7 +879,7 @@ export function PixelEditorPanel() {
   const handleFileMenu = async (action: string) => {
     setFileMessage(null)
     try {
-      if (action === 'new') {
+      if (action === 'new' || action === 'new-custom') {
         store.createNew(customW, customH, objectId ?? undefined)
         return
       }
@@ -918,7 +919,7 @@ export function PixelEditorPanel() {
         if (file) await store.importProject(file)
         return
       }
-      if (action === 'resize' || action === 'custom') {
+      if (action === 'resize') {
         if (doc) store.resizeDoc(customW, customH)
         else store.createNew(customW, customH, objectId ?? undefined)
         return
@@ -928,8 +929,7 @@ export function PixelEditorPanel() {
         if (!preset) return
         setCustomW(preset.width)
         setCustomH(preset.height)
-        if (doc) store.resizeDoc(preset.width, preset.height)
-        else store.createNew(preset.width, preset.height, objectId ?? undefined)
+        store.createNew(preset.width, preset.height, objectId ?? undefined)
       }
     } catch (err) {
       setFileMessage(err instanceof Error ? err.message : 'File operation failed.')
@@ -938,12 +938,12 @@ export function PixelEditorPanel() {
 
   const newDocOptions = useMemo(
     () => [
-      { value: 'new', label: 'Blank document' },
+      { value: 'new', label: 'Blank material' },
       ...PIXEL_SIZE_PRESETS.map((p) => ({
         value: `preset-${p.label}`,
-        label: p.label,
+        label: `Clear Material · ${p.label}`,
       })),
-      { value: 'custom', label: `Custom ${customW}×${customH}` },
+      { value: 'new-custom', label: `Clear Material · Custom ${customW}×${customH}` },
     ],
     [customW, customH]
   )
@@ -1048,8 +1048,15 @@ export function PixelEditorPanel() {
           className="side-btn side-btn-wide"
           disabled={!doc}
           title="Delete the current pixel layers and start with a completely transparent material"
-          onClick={() => {
-            if (!window.confirm('Clear the current material and replace it with a transparent canvas? You can undo this action.')) return
+          onClick={async () => {
+            const confirmed = await appConfirm({
+              title: 'Clear material',
+              message: 'Clear the current material and replace it with a transparent canvas? You can undo this action.',
+              confirmLabel: 'Clear material',
+              cancelLabel: 'Cancel',
+              danger: true,
+            })
+            if (!confirmed) return
             store.clearMaterial()
           }}
         >

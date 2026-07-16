@@ -188,3 +188,29 @@ describe('SubD face pick', () => {
     clearOverlayPickCacheForTests([subdBox])
   })
 })
+
+describe('BVH source face mapping', () => {
+  it.each([
+    ['front', [0, 0, 5] as const, 1],
+    ['back', [0, 0, -5] as const, 0],
+    ['right', [5, 0, 0] as const, 3],
+    ['left', [-5, 0, 0] as const, 2],
+    ['top', [0, 5, 0] as const, 4],
+    ['bottom', [0, -5, 0] as const, 5],
+  ])('maps a %s ray to the original SceneObject face', (_name, position, expectedFace) => {
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+    camera.position.set(...position)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    camera.updateMatrixWorld(true)
+    const rect = {
+      left: 0, top: 0, width: 200, height: 200,
+      right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect
+
+    const hit = pickMeshComponent('face', 100, 100, rect, camera, [box], box.id, {
+      cullBackVertices: true,
+    })
+    expect(hit?.face).toBe(expectedFace)
+  })
+})
