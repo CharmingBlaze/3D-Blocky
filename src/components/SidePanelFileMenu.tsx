@@ -1,19 +1,11 @@
 import { useCallback, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { SideButtonDropdown } from './SideButtonDropdown'
-import { confirmDiscardProject } from '../ui/appConfirm'
 
 export function SidePanelFileMenu() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  const hasContent = useAppStore(
-    (s) =>
-      s.objects.length > 0 ||
-      s.referenceImages.length > 0 ||
-      s.billboardImages.length > 0 ||
-      Object.keys(s.pixelDocuments).length > 0
-  )
   const newProject = useAppStore((s) => s.newProject)
   const saveProject = useAppStore((s) => s.saveProject)
   const loadProjectFromDialog = useAppStore((s) => s.loadProjectFromDialog)
@@ -33,11 +25,9 @@ export function SidePanelFileMenu() {
   }, [saveProject])
 
   const runNew = useCallback(async () => {
-    if (hasContent && !(await confirmDiscardProject())) return
     setMessage(null)
-    newProject()
-    setMessage('New project.')
-  }, [hasContent, newProject])
+    if (await newProject()) setMessage('New project.')
+  }, [newProject])
 
   const runLoad = useCallback(async () => {
     setMessage(null)

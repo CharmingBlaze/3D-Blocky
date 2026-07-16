@@ -17,6 +17,7 @@ import { ensureObjectUVs } from '../uv/uvObject'
 import { worldPointFromObject } from '../mesh/objectTransform'
 import { rebuildObjectIndex, getObjectIndex } from './objectIndex'
 import type { UvTextureInfo } from './appStore'
+import type { MeshComponentSelection } from '../mesh/meshSelection'
 
 export type { SymmetryAxis } from '../symmetry/symmetry'
 
@@ -76,6 +77,7 @@ type SceneStore = SceneObjectsLayoutState & {
   symmetryPlane: number
   selectedObjectId: string | null
   selectionObjectIds: string[]
+  meshSelection: MeshComponentSelection | null
   objectTextures: Record<string, UvTextureInfo>
   pixelDocuments: Record<string, import('../pixel/pixelTypes').PixelDocument>
   commitHistory: (label?: string) => boolean
@@ -172,11 +174,16 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
           st.pixelDocuments
         )
         const objects = st.objects.filter((o) => o.id !== id)
+        const selectionObjectIds = st.selectionObjectIds.filter((oid) => oid !== id)
         rebuildObjectIndex(objects)
         return {
           objects,
-          selectedObjectId: st.selectedObjectId === id ? null : st.selectedObjectId,
-          selectionObjectIds: st.selectionObjectIds.filter((oid) => oid !== id),
+          selectedObjectId:
+            st.selectedObjectId === id
+              ? selectionObjectIds[selectionObjectIds.length - 1] ?? null
+              : st.selectedObjectId,
+          selectionObjectIds,
+          meshSelection: st.meshSelection?.objectId === id ? null : st.meshSelection,
           objectTextures,
           pixelDocuments,
         }

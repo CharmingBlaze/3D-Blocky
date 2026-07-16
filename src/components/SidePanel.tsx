@@ -72,6 +72,8 @@ const TOOL_LABELS: Record<string, string> = {
   relax: 'Smooth',
   pinch: 'Pinch',
   'select-object': 'Select · Object',
+  smart: 'Mesh · Select',
+  extrude: 'Mesh · Push/Pull',
   move: 'Move',
   rotate: 'Rotate',
   scale: 'Scale',
@@ -86,9 +88,9 @@ const TOOL_LABELS: Record<string, string> = {
 }
 
 const POLY_DRAW_MODES: { id: PolyDrawMode; label: string }[] = [
-  { id: 'triangle', label: 'Triangle' },
-  { id: 'quad', label: 'Quad' },
-  { id: 'poly', label: 'Poly' },
+  { id: 'poly', label: 'Line' },
+  { id: 'rectangle', label: 'Rectangle' },
+  { id: 'ngon', label: 'Polygon' },
 ]
 
 function SideBtnGroup({
@@ -665,6 +667,7 @@ export function SidePanel() {
   const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
 
   const isSelectTool =
+    activeTool === 'smart' ||
     activeTool === 'select-object' ||
     activeTool === 'select-vertex' ||
     activeTool === 'select-edge' ||
@@ -925,20 +928,48 @@ export function SidePanel() {
           </SideSection>
 
           <SideSection title="Create" columns={2} order={10}>
-            <div className="side-create-label">Mesh faces</div>
-            <SideBtnGroup cols={3}>
+            <div className="side-create-label">Mesh tools</div>
+            <SideBtnGroup cols={4}>
+              <button
+                type="button"
+                className={`side-btn ${activeTool === 'smart' ? 'active' : ''}`}
+                onClick={() => setActiveTool('smart')}
+                title="Select geometry and drag it to move"
+              >
+                Select
+              </button>
               {POLY_DRAW_MODES.map((m) => (
                 <button
                   key={m.id}
                   type="button"
                   className={`side-btn ${activeTool === 'poly-draw' && polyDrawMode === m.id ? 'active' : ''}`}
                   onClick={() => setPolyDrawMode(m.id)}
-                  title={`Keep drawing connected ${m.label.toLowerCase()} faces`}
+                  title={
+                    m.id === 'poly'
+                      ? 'Draw connected lines; close a loop to create a face'
+                      : m.id === 'rectangle'
+                        ? 'Click two opposite corners to create a rectangle face'
+                        : 'Click a centre, then click the radius to create a polygon face'
+                  }
                 >
                   {m.label}
                 </button>
               ))}
+              <button
+                type="button"
+                className={`side-btn ${activeTool === 'extrude' ? 'active' : ''}`}
+                onClick={() => {
+                  setSelectionMode('face')
+                  setActiveTool('extrude')
+                }}
+                title="Click and drag a face to push or pull it; Escape cancels"
+              >
+                Push/Pull
+              </button>
             </SideBtnGroup>
+            <p className="side-color-hint muted">
+              Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face.
+            </p>
             <div className="side-create-label">Drawing options</div>
             <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
@@ -1010,8 +1041,12 @@ export function SidePanel() {
                 </label>
                 <p className="side-color-hint muted">
                   {polyDrawMode === 'poly'
-                    ? 'Click vertices to build a face · click the first point or press Enter to finish · stays in Poly mode.'
-                    : `${polyDrawMode === 'triangle' ? 'Three' : 'Four'} clicks complete each face · snap to old vertices to grow one connected mesh · stays in ${polyDrawMode === 'triangle' ? 'Triangle' : 'Quad'} mode.`}
+                    ? 'Click connected line points · click the first point to close the loop and create a face.'
+                    : polyDrawMode === 'rectangle'
+                      ? 'Click one corner, then the opposite corner to create a rectangle.'
+                      : polyDrawMode === 'ngon'
+                        ? 'Click the centre, then click the radius to create a six-sided polygon.'
+                        : `${polyDrawMode === 'triangle' ? 'Three' : 'Four'} clicks complete each face.`}
                 </p>
               </>
             )}
@@ -1620,7 +1655,7 @@ export function SidePanel() {
           )}
 
           <SideSection title="Selection" columns={2} order={20}>
-            <div className="side-create-label">Mode</div>
+            <div className="side-create-label">Selection filters</div>
             <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${selectionMode === 'object' ? 'active' : ''}`}
@@ -1680,6 +1715,9 @@ export function SidePanel() {
             >
               X-ray
             </button>
+            <p className="side-color-hint muted">
+              Hold Shift for multi-selection. Ctrl-drag selects with a box; X-ray includes hidden components.
+            </p>
             {selectionMode === 'vertex' && (
               <p className="side-color-hint muted">
                 Click to select vertices · drag to move · Shift+click to add/remove. F: face from selection. M: merge · hold M and click a second vertex.

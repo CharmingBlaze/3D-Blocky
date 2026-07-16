@@ -22,11 +22,14 @@ import type { HairTextureSettings } from '../stroke/hairTextureSettings'
 import { DEFAULT_HAIR_TEXTURE_SETTINGS } from '../stroke/hairTextureSettings'
 import type { HairTipStyle, StrokeMode, SweepCapStyle } from '../store/strokeSlice'
 import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
+import { validateMeshStructure } from '../mesh/meshInvariants'
 
 export { PROJECT_FILE_EXTENSION, DEFAULT_PROJECT_FILENAME, LEGACY_PROJECT_FILE_EXTENSION } from '../app/branding'
 
 /** Current on-disk project schema. v1 files still load. */
 export const PROJECT_FILE_VERSION = 2 as const
+export const MAX_PROJECT_FILE_CHARACTERS = 256 * 1024 * 1024
+export const MAX_PROJECT_OBJECTS = 10_000
 
 export interface ProjectHairState {
   textureId: string | null
@@ -143,40 +146,52 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isFiniteVec3(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    Number.isFinite(value.z)
+  )
+}
+
+function isImageDataUrl(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^data:image\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(value)
+  )
+}
+
 function validateProjectObject(value: unknown, index: number): void {
   if (!isRecord(value)) throw new Error(`Invalid project file: object ${index + 1} is malformed.`)
   if (typeof value.id !== 'string' || value.id.length === 0) {
     throw new Error(`Invalid project file: object ${index + 1} has no valid id.`)
   }
-  if (!Array.isArray(value.positions) || !Array.isArray(value.faces)) {
-    throw new Error(`Invalid project file: object "${value.id}" has invalid mesh data.`)
+  const meshIssues = validateMeshStructure(value)
+  if (meshIssues.length > 0) {
+    throw new Error(
+      `Invalid project file: object "${value.id}" has invalid mesh data (${meshIssues[0]!.message})`
+    )
   }
-  const positions = value.positions
-  const faces = value.faces
-  for (const position of positions) {
-    if (
-      !isRecord(position) ||
-      !Number.isFinite(position.x) ||
-      !Number.isFinite(position.y) ||
-      !Number.isFinite(position.z)
-    ) {
-      throw new Error(`Invalid project file: object "${value.id}" contains an invalid vertex.`)
-    }
-  }
-  for (const face of faces) {
-    if (
-      !Array.isArray(face) ||
-      face.length < 3 ||
-      face.some(
-        (vertexIndex) =>
-          !Number.isInteger(vertexIndex) || vertexIndex < 0 || vertexIndex >= positions.length
-      )
-    ) {
-      throw new Error(`Invalid project file: object "${value.id}" contains an invalid face.`)
-    }
-  }
-  if (value.faceColors !== undefined && !Array.isArray(value.faceColors)) {
+  if (
+    value.faceColors !== undefined &&
+    (!Array.isArray(value.faceColors) ||
+      value.faceColors.some((color) => !Number.isFinite(color)))
+  ) {
     throw new Error(`Invalid project file: object "${value.id}" has invalid face colors.`)
+  }
+  if (value.pivot !== undefined && !isFiniteVec3(value.pivot)) {
+    throw new Error(`Invalid project file: object "${value.id}" has an invalid pivot.`)
+  }
+  if (value.transform !== undefined) {
+    if (
+      !isRecord(value.transform) ||
+      !isFiniteVec3(value.transform.position) ||
+      !isFiniteVec3(value.transform.rotation) ||
+      !isFiniteVec3(value.transform.scale)
+    ) {
+      throw new Error(`Invalid project file: object "${value.id}" has an invalid transform.`)
+    }
   }
 }
 
@@ -198,6 +213,9 @@ async function blobUrlToDataUrl(url: string): Promise<string | null> {
 }
 
 async function dataUrlToBlobUrl(dataUrl: string): Promise<string> {
+  if (!isImageDataUrl(dataUrl)) {
+    throw new Error('Invalid project file: embedded image is not an image data URL.')
+  }
   const response = await fetch(dataUrl)
   const blob = await response.blob()
   return URL.createObjectURL(blob)
@@ -388,6 +406,9 @@ export async function serializeProjectFromSnapshot(
 }
 
 export function parseProjectFile(text: string): SerializedProjectFile {
+  if (text.length > MAX_PROJECT_FILE_CHARACTERS) {
+    throw new Error('Invalid project file: file is too large.')
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -410,13 +431,94 @@ export function parseProjectFile(text: string): SerializedProjectFile {
   if (!Array.isArray(parsed.objects)) {
     throw new Error('Invalid project file: missing objects.')
   }
-  parsed.objects.forEach(validateProjectObject)
+  if (parsed.objects.length > MAX_PROJECT_OBJECTS) {
+    throw new Error(`Invalid project file: too many objects (limit ${MAX_PROJECT_OBJECTS}).`)
+  }
+  parsed.objects.forEach((object, index) => {
+    validateProjectObject(object, index)
+    const record = object as Record<string, unknown>
+    const faces = record.faces as unknown[]
+    const supplied = Array.isArray(record.faceColors) ? record.faceColors : []
+    const fallback = Number.isFinite(record.color) ? Number(record.color) : 0x6ecbf5
+    record.faceColors = faces.map((_, faceIndex) => {
+      const color = supplied[faceIndex]
+      return Number.isFinite(color) ? color : fallback
+    })
+  })
+  const objectIds = new Set<string>()
+  for (const object of parsed.objects) {
+    const id = (object as Record<string, unknown>).id as string
+    if (objectIds.has(id)) {
+      throw new Error(`Invalid project file: duplicate object id "${id}".`)
+    }
+    objectIds.add(id)
+  }
   if (parsed.objectTextures !== undefined && !isRecord(parsed.objectTextures)) {
     throw new Error('Invalid project file: invalid texture data.')
+  }
+  for (const [id, info] of Object.entries(parsed.objectTextures ?? {})) {
+    if (
+      !isRecord(info) ||
+      typeof info.name !== 'string' ||
+      typeof info.width !== 'number' ||
+      typeof info.height !== 'number' ||
+      !Number.isFinite(info.width) ||
+      !Number.isFinite(info.height) ||
+      info.width <= 0 ||
+      info.height <= 0 ||
+      (info.dataUrl !== null && !isImageDataUrl(info.dataUrl))
+    ) {
+      throw new Error(`Invalid project file: invalid texture "${id}".`)
+    }
   }
   for (const key of ['pixelDocuments', 'referenceImages', 'billboardImages'] as const) {
     if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
       throw new Error(`Invalid project file: invalid ${key}.`)
+    }
+  }
+  const pixelDocumentIds = new Set<string>()
+  const pixelDocumentEntries = Array.isArray(parsed.pixelDocuments) ? parsed.pixelDocuments : []
+  for (const [index, document] of pixelDocumentEntries.entries()) {
+    if (!isRecord(document) || typeof document.id !== 'string' || document.id.length === 0) {
+      throw new Error(`Invalid project file: invalid pixel document ${index + 1}.`)
+    }
+    if (pixelDocumentIds.has(document.id)) {
+      throw new Error(`Invalid project file: duplicate pixel document id "${document.id}".`)
+    }
+    pixelDocumentIds.add(document.id)
+  }
+  const referenceImages = Array.isArray(parsed.referenceImages)
+    ? parsed.referenceImages
+    : []
+  for (const [index, image] of referenceImages.entries()) {
+    if (
+      !isRecord(image) ||
+      typeof image.id !== 'string' ||
+      !isImageDataUrl(image.dataUrl) ||
+      !Number.isFinite(image.x) ||
+      !Number.isFinite(image.y) ||
+      !Number.isFinite(image.width) ||
+      !Number.isFinite(image.aspect) ||
+      !Number.isFinite(image.opacity)
+    ) {
+      throw new Error(`Invalid project file: invalid reference image ${index + 1}.`)
+    }
+  }
+  const billboardImages = Array.isArray(parsed.billboardImages)
+    ? parsed.billboardImages
+    : []
+  for (const [index, image] of billboardImages.entries()) {
+    if (
+      !isRecord(image) ||
+      typeof image.id !== 'string' ||
+      !isImageDataUrl(image.dataUrl) ||
+      !isFiniteVec3(image.position) ||
+      (image.rotation !== undefined && !isFiniteVec3(image.rotation)) ||
+      !Number.isFinite(image.width) ||
+      !Number.isFinite(image.height) ||
+      !Number.isFinite(image.opacity)
+    ) {
+      throw new Error(`Invalid project file: invalid billboard image ${index + 1}.`)
     }
   }
   if (parsed.selectionObjectIds !== undefined && !Array.isArray(parsed.selectionObjectIds)) {
@@ -426,6 +528,12 @@ export function parseProjectFile(text: string): SerializedProjectFile {
 }
 
 export async function snapshotFromProjectFile(file: SerializedProjectFile): Promise<SceneSnapshot> {
+  const pixelDocuments: SceneSnapshot['pixelDocuments'] = {}
+  for (const doc of file.pixelDocuments ?? []) {
+    const restored = deserializePixelDocument(doc)
+    pixelDocuments[restored.id] = restored
+  }
+
   const objectTextures: Record<string, SnapshotTextureInfo> = {}
   for (const [id, info] of Object.entries(file.objectTextures ?? {})) {
     objectTextures[id] = {
@@ -434,12 +542,6 @@ export async function snapshotFromProjectFile(file: SerializedProjectFile): Prom
       height: info.height,
       url: info.dataUrl ? await dataUrlToBlobUrl(info.dataUrl) : '',
     }
-  }
-
-  const pixelDocuments: SceneSnapshot['pixelDocuments'] = {}
-  for (const doc of file.pixelDocuments ?? []) {
-    const restored = deserializePixelDocument(doc)
-    pixelDocuments[restored.id] = restored
   }
 
   const referenceImages: ReferenceImage[] = []

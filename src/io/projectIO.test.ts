@@ -13,6 +13,7 @@ import {
 } from './projectIO'
 import { DEFAULT_HAIR_UV_TRANSFORM } from '../stroke/hairUvTransform'
 import { DEFAULT_HAIR_TEXTURE_SETTINGS } from '../stroke/hairTextureSettings'
+import { strokeLayoutInitialState } from '../store/strokeSlice'
 
 function project(objects: unknown[], extras: Record<string, unknown> = {}): string {
   return JSON.stringify({ version: 1, format: APP_PROJECT_FORMAT, objects, ...extras })
@@ -123,7 +124,132 @@ describe('parseProjectFile', () => {
           },
         ])
       )
-    ).toThrow('contains an invalid face')
+    ).toThrow('has invalid mesh data')
+  })
+
+  it('rejects faces with repeated vertex indices', () => {
+    expect(() =>
+      parseProjectFile(
+        project([
+          {
+            id: 'degenerate-ring',
+            positions: [
+              { x: 0, y: 0, z: 0 },
+              { x: 1, y: 0, z: 0 },
+              { x: 0, y: 1, z: 0 },
+            ],
+            faces: [[0, 1, 1]],
+            faceColors: [0xffffff],
+          },
+        ])
+      )
+    ).toThrow('repeats a vertex index')
+  })
+
+  it('fills missing legacy face colors from the object color', () => {
+    const parsed = parseProjectFile(
+      project([
+        {
+          id: 'legacy-colors',
+          color: 0x123456,
+          positions: [
+            { x: 0, y: 0, z: 0 },
+            { x: 1, y: 0, z: 0 },
+            { x: 0, y: 1, z: 0 },
+          ],
+          faces: [[0, 1, 2]],
+        },
+      ])
+    )
+    expect(parsed.objects[0]!.faceColors).toEqual([0x123456])
+  })
+
+  it('rejects UV rings that do not parallel face corners', () => {
+    expect(() =>
+      parseProjectFile(
+        project([
+          {
+            id: 'broken-uvs',
+            positions: [
+              { x: 0, y: 0, z: 0 },
+              { x: 1, y: 0, z: 0 },
+              { x: 0, y: 1, z: 0 },
+            ],
+            faces: [[0, 1, 2]],
+            faceColors: [0xffffff],
+            uvs: [{ u: 0, v: 0 }],
+            faceUvIndices: [[0, 1, 0]],
+          },
+        ])
+      )
+    ).toThrow('Face UV indices must parallel faces')
+  })
+
+  it('rejects duplicate object ids before they can corrupt selection maps', () => {
+    const triangle = {
+      id: 'duplicate',
+      positions: [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+      ],
+      faces: [[0, 1, 2]],
+      faceColors: [0xffffff],
+    }
+    expect(() => parseProjectFile(project([triangle, triangle]))).toThrow(
+      'duplicate object id "duplicate"'
+    )
+  })
+
+  it('rejects duplicate pixel document ids before restoration overwrites one', () => {
+    expect(() =>
+      parseProjectFile(
+        project([], {
+          pixelDocuments: [{ id: 'duplicate-doc' }, { id: 'duplicate-doc' }],
+        })
+      )
+    ).toThrow('duplicate pixel document id "duplicate-doc"')
+  })
+
+  it('rejects non-finite object transforms', () => {
+    expect(() =>
+      parseProjectFile(
+        project([
+          {
+            id: 'bad-transform',
+            positions: [
+              { x: 0, y: 0, z: 0 },
+              { x: 1, y: 0, z: 0 },
+              { x: 0, y: 1, z: 0 },
+            ],
+            faces: [[0, 1, 2]],
+            faceColors: [0xffffff],
+            transform: {
+              position: { x: 0, y: 0, z: 0 },
+              rotation: { x: 0, y: 0, z: 0 },
+              scale: { x: 1, y: Number.NaN, z: 1 },
+            },
+          },
+        ])
+      )
+    ).toThrow('invalid transform')
+  })
+
+  it('rejects remote embedded-image URLs', () => {
+    expect(() =>
+      parseProjectFile(
+        project([], {
+          objectTextures: {
+            remote: {
+              name: 'remote.png',
+              width: 1,
+              height: 1,
+              dataUrl: 'https://example.invalid/tracker.png',
+            },
+          },
+        })
+      )
+    ).toThrow('invalid texture "remote"')
   })
 
   it('accepts a structurally valid legacy-compatible mesh', () => {
@@ -225,6 +351,7 @@ describe('project serialize ↔ load round-trip', () => {
         },
       },
       stroke: {
+        ...strokeLayoutInitialState,
         strokeMode: 'hair-paths',
         blobInflation: 0.4,
         extrudeAmount: 22,

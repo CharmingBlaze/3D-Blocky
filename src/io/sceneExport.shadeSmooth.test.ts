@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { MeshStandardMaterial } from 'three'
 import { prepareSceneObject } from '../mesh/objectTransform'
 import { exportSceneOBJ } from './sceneExport'
 import { sceneObjectToThreeMesh } from './sceneMeshBridge'
@@ -51,7 +52,8 @@ describe('shade smooth export', () => {
 
   it('GLB mesh build uses smooth normals and shared verts when Shade Smooth is on', () => {
     const mesh = sceneObjectToThreeMesh(unitBox(true))
-    const mat = mesh.material as { flatShading: boolean }
+    if (Array.isArray(mesh.material)) throw new Error('Expected one export material')
+    const mat = mesh.material as MeshStandardMaterial
     expect(mat.flatShading).toBe(false)
 
     const pos = mesh.geometry.getAttribute('position')
@@ -74,7 +76,8 @@ describe('shade smooth export', () => {
 
   it('GLB mesh build stays flat-shaded when Shade Smooth is off', () => {
     const mesh = sceneObjectToThreeMesh(unitBox(false))
-    const mat = mesh.material as { flatShading: boolean }
+    if (Array.isArray(mesh.material)) throw new Error('Expected one export material')
+    const mat = mesh.material as MeshStandardMaterial
     expect(mat.flatShading).toBe(true)
     // Flat path duplicates corners per face.
     expect(mesh.geometry.getAttribute('position').count).toBeGreaterThan(8)

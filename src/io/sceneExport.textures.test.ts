@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { MeshStandardMaterial } from 'three'
 import { createPixelDocument } from '../pixel/pixelDocument'
 import { prepareSceneObject } from '../mesh/objectTransform'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
@@ -131,12 +132,8 @@ describe('GLB mesh build with textures', () => {
   it('embeds texture map and enables alphaTest when texture has transparency', () => {
     const { obj, ctx } = texturedQuad()
     const mesh = sceneObjectToThreeMesh(obj, { textures: ctx })
-    const mat = mesh.material as {
-      map: unknown
-      alphaTest: number
-      transparent: boolean
-      flatShading: boolean
-    }
+    if (Array.isArray(mesh.material)) throw new Error('Expected one export material')
+    const mat = mesh.material as MeshStandardMaterial
     expect(mat.map).toBeTruthy()
     expect(mat.alphaTest).toBeGreaterThan(0)
     expect(mat.transparent).toBe(true)

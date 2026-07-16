@@ -118,6 +118,7 @@ export function useViewportPointerHandlers({
   }, [slotIndex])
 
   const lastSculptRef = useRef(0)
+  const sculptGestureObjectRef = useRef<string | null>(null)
   const marqueeStartRef = useRef<{ x: number; y: number; additive: boolean } | null>(null)
   const boxSelectPendingRef = useRef<{ x: number; y: number; additive: boolean } | null>(null)
   const pixelPaintRef = useRef<{
@@ -180,6 +181,7 @@ export function useViewportPointerHandlers({
     applyMeshMarqueePick,
     setMeshHover,
     clearMeshSelection,
+    beginMeshModal,
     translateMeshSelection,
     flipFaceNormal,
     viewportDisplayMode,
@@ -247,6 +249,7 @@ export function useViewportPointerHandlers({
       applyMeshMarqueePick: s.applyMeshMarqueePick,
       setMeshHover: s.setMeshHover,
       clearMeshSelection: s.clearMeshSelection,
+      beginMeshModal: s.beginMeshModal,
       translateMeshSelection: s.translateMeshSelection,
       flipFaceNormal: s.flipFaceNormal,
       viewportDisplayMode: s.viewportDisplayMode,
@@ -971,6 +974,19 @@ export function useViewportPointerHandlers({
 
             applyMeshPick(hit, e.shiftKey)
 
+            // Extrude is deliberately separate from direct face movement. A face
+            // click selects the complete logical face region, then starts the
+            // cancel-safe modal extrusion from the exact pointer location.
+            if (
+              activeTool === 'extrude' &&
+              selectionMode === 'face' &&
+              hit.face !== undefined &&
+              !e.shiftKey
+            ) {
+              beginMeshModal('extrude', e.clientX, e.clientY, view)
+              return
+            }
+
             if (
               viewportDisplayMode === 'normals' &&
               e.altKey &&
@@ -1028,7 +1044,7 @@ export function useViewportPointerHandlers({
 
       if (
         selectionMode === 'object' &&
-        activeTool === 'select-object' &&
+        (activeTool === 'select-object' || activeTool === 'smart') &&
         e.button === 0 &&
         rect &&
         camera
@@ -1221,7 +1237,14 @@ export function useViewportPointerHandlers({
           }
         }
 
-        polyDrawClick(resolved.world, resolved.snap, view)
+        camera?.updateMatrixWorld()
+        const facing = camera ? camera.getWorldDirection(new Vector3()).negate() : null
+        polyDrawClick(
+          resolved.world,
+          resolved.snap,
+          view,
+          facing ? { x: facing.x, y: facing.y, z: facing.z } : undefined
+        )
         return
       }
 
@@ -1327,9 +1350,14 @@ export function useViewportPointerHandlers({
           : null
 
       if (sculptTool) {
-        applySculptAt(planeToWorld3D(pt.x, pt.y, view, defaultDepth), sculptTool, {
-          saveHistory: true,
-        })
+        const target = selectedObjectId ?? objects[objects.length - 1]?.id ?? null
+        const targetObject = target ? objects.find((object) => object.id === target) : null
+        if (target && targetObject && !targetObject.topologyLocked) {
+          applySculptAt(planeToWorld3D(pt.x, pt.y, view, defaultDepth), sculptTool, {
+            saveHistory: true,
+          })
+          sculptGestureObjectRef.current = target
+        }
       }
     },
     [
@@ -1353,6 +1381,7 @@ export function useViewportPointerHandlers({
       selectReferenceImage,
       applyMeshPick,
       clearMeshSelection,
+      beginMeshModal,
       flipFaceNormal,
       viewportDisplayMode,
       startVectorStroke,
@@ -1766,7 +1795,7 @@ export function useViewportPointerHandlers({
 
       const tool: SculptTool | ActiveTool = e.shiftKey ? 'relax' : activeTool
       if (
-        (SCULPT_TOOLS.includes(tool as ActiveTool) || e.shiftKey) &&
+        sculptGestureObjectRef.current !== null &&
         e.buttons === 1
       ) {
         const now = performance.now()
@@ -1976,6 +2005,18 @@ export function useViewportPointerHandlers({
       }
 
       const storeAtUp = useAppStore.getState()
+      const extrudeDrag = storeAtUp.meshModal
+      if (
+        e.button === 0 &&
+        storeAtUp.activeTool === 'extrude' &&
+        extrudeDrag?.op === 'extrude' &&
+        Math.hypot(
+          extrudeDrag.currentClientX - extrudeDrag.startClientX,
+          extrudeDrag.currentClientY - extrudeDrag.startClientY
+        ) > 4
+      ) {
+        storeAtUp.confirmMeshModal()
+      }
       const draftView = storeAtUp.vectorDraftView ?? vectorGestureViewRef.current
       const strokeView = storeAtUp.currentStrokeView ?? strokeGestureViewRef.current
 
@@ -2024,8 +2065,12 @@ export function useViewportPointerHandlers({
         if (componentDragRef.current?.moved) {
           commitHistory('Move components')
         }
-        if (SCULPT_TOOLS.includes(storeAtUp.activeTool)) {
-          clearSculptSession(storeAtUp.selectedObjectId ?? undefined)
+        if (sculptGestureObjectRef.current) {
+          // Pointer-down records the undo point after the first dab. Replace that
+          // head with the completed stroke so redo restores every subsequent dab.
+          storeAtUp.replaceHistoryHead('Sculpt')
+          clearSculptSession(sculptGestureObjectRef.current)
+          sculptGestureObjectRef.current = null
         }
         selectDragRef.current = null
         componentDragRef.current = null

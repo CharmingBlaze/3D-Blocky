@@ -303,7 +303,6 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
           faceUvIndices: withUvs.faceUvIndices,
         })
 
-        URL.revokeObjectURL(url)
         releaseTextureUrl(url)
 
         setPartial((s) => {
@@ -326,9 +325,9 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
         })
         deps.reconcileBlobUrls()
         if (!hadUvs) store().commitHistory('Import texture')
-      } catch {
-        URL.revokeObjectURL(url)
+      } catch (error) {
         releaseTextureUrl(url)
+        throw error instanceof Error ? error : new Error('Failed to load image')
       }
     },
 

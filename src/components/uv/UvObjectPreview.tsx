@@ -189,7 +189,12 @@ export function UvObjectPreview({ object }: { object: SceneObject | null }) {
                 hoverFace={hoverFace}
               />
               <CameraBridge cameraRef={cameraRef} />
-              <ViewportControls rootRef={rootRef} view="perspective" slotIndex={0} />
+              <ViewportControls
+                rootRef={rootRef}
+                view="perspective"
+                slotIndex={0}
+                trackViewportFrameLoop={false}
+              />
             </Canvas>
           </ViewportRenderContext.Provider>
         ) : (

@@ -15,32 +15,33 @@ import { faceNormal3D } from './uvObject'
 const TEST_BOX = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } }
 
 function makeCube() {
-  return ensureObjectUVs(
-    primitiveBoxToSceneObject('box', TEST_BOX, heightAxisForView('front'), 'test-cube')
-  )
+  const object = primitiveBoxToSceneObject('box', TEST_BOX, heightAxisForView('front'), 0x8899aa, 48)
+  if (!object) throw new Error('Failed to create test cube')
+  return ensureObjectUVs(object)
 }
 
 function makeWideBox() {
-  return ensureObjectUVs(
-    primitiveBoxToSceneObject(
-      'box',
-      { min: { x: -2, y: -0.5, z: -1 }, max: { x: 2, y: 0.5, z: 1 } },
-      heightAxisForView('front'),
-      'wide-box'
-    )
+  const object = primitiveBoxToSceneObject(
+    'box',
+    { min: { x: -2, y: -0.5, z: -1 }, max: { x: 2, y: 0.5, z: 1 } },
+    heightAxisForView('front'),
+    0x8899aa,
+    48
   )
+  if (!object) throw new Error('Failed to create wide test box')
+  return ensureObjectUVs(object)
 }
 
 function makeIcosphere() {
-  return ensureObjectUVs(
-    primitiveBoxToSceneObject(
-      'icosphere',
-      TEST_BOX,
-      heightAxisForView('front'),
-      0x8899aa,
-      48
-    )
+  const object = primitiveBoxToSceneObject(
+    'icosphere',
+    TEST_BOX,
+    heightAxisForView('front'),
+    0x8899aa,
+    48
   )
+  if (!object) throw new Error('Failed to create test icosphere')
+  return ensureObjectUVs(object)
 }
 
 function adjacentBentPair(obj: ReturnType<typeof makeIcosphere>): [number, number] {

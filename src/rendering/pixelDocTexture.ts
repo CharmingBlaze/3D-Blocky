@@ -39,6 +39,11 @@ export function unregisterWebGLRenderer(renderer: THREE.WebGLRenderer): void {
   webglRenderers.delete(renderer)
 }
 
+/** Diagnostics/test hook for renderer lifecycle ownership. */
+export function registeredWebGLRendererCount(): number {
+  return webglRenderers.size
+}
+
 function clampedView(data: Uint8Array): Uint8ClampedArray {
   return new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength)
 }

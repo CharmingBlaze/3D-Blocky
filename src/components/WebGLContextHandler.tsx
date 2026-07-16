@@ -6,6 +6,10 @@ import {
   showGraphicsContextFailure,
   showGraphicsRecoveryNotice,
 } from '../rendering/webglContextNotice'
+import {
+  registerWebGLRenderer,
+  unregisterWebGLRenderer,
+} from '../rendering/pixelDocTexture'
 
 const RESTORE_FAILURE_MS = 4000
 
@@ -16,6 +20,7 @@ export function WebGLContextHandler() {
   useEffect(() => {
     const canvas = gl.domElement
     let restoreFailedTimer: ReturnType<typeof setTimeout> | null = null
+    registerWebGLRenderer(gl)
 
     const clearFailureTimer = () => {
       if (restoreFailedTimer !== null) {
@@ -52,6 +57,7 @@ export function WebGLContextHandler() {
       const context = gl.getContext()
       const debugWindow = window as Window & {
         __blockyDebugWebGLContexts?: WebGLRenderingContext[]
+        __blockyDebugWebGLRenderers?: Array<typeof gl>
         __blockyDebugLoseWebGL?: (canvasIndex?: number) => void
         __blockyDebugRestoreWebGL?: (canvasIndex?: number) => void
       }
@@ -67,13 +73,37 @@ export function WebGLContextHandler() {
         }
       }
       debugWindow.__blockyDebugWebGLContexts.push(context)
+      if (!debugWindow.__blockyDebugWebGLRenderers) {
+        debugWindow.__blockyDebugWebGLRenderers = []
+      }
+      debugWindow.__blockyDebugWebGLRenderers.push(gl)
     }
 
     return () => {
       clearFailureTimer()
+      unregisterWebGLRenderer(gl)
       canvas.removeEventListener('webglcontextlost', onLost)
       canvas.removeEventListener('webglcontextrestored', onRestored)
       window.removeEventListener(WEBGL_RESTORED_EVENT, onPeerRestored)
+      if (import.meta.env.DEV) {
+        const contexts = (
+          window as Window & {
+            __blockyDebugWebGLContexts?: WebGLRenderingContext[]
+            __blockyDebugWebGLRenderers?: Array<typeof gl>
+          }
+        ).__blockyDebugWebGLContexts
+        const contextIndex = contexts?.indexOf(gl.getContext())
+        if (contexts && contextIndex !== undefined && contextIndex >= 0) {
+          contexts.splice(contextIndex, 1)
+        }
+        const renderers = (
+          window as Window & { __blockyDebugWebGLRenderers?: Array<typeof gl> }
+        ).__blockyDebugWebGLRenderers
+        const rendererIndex = renderers?.indexOf(gl)
+        if (renderers && rendererIndex !== undefined && rendererIndex >= 0) {
+          renderers.splice(rendererIndex, 1)
+        }
+      }
     }
   }, [gl, invalidate])
 

@@ -9,7 +9,6 @@ import { useAppStore } from './store/appStore'
 import { selectionHasComponents } from './mesh/meshSelection'
 import type { NudgeDirection } from './utils/viewNavigation'
 import { AppConfirmDialog } from './components/AppConfirmDialog'
-import { confirmDiscardProject } from './ui/appConfirm'
 import { useOutlinerUiStore } from './store/outlinerUiStore'
 
 const SidePanel = lazy(() =>
@@ -133,17 +132,7 @@ export default function App() {
       }
       if (ctrlOrMeta && e.code === 'KeyN' && !e.shiftKey) {
         e.preventDefault()
-        void (async () => {
-          const state = useAppStore.getState()
-          const hasContent =
-            state.objects.length > 0 ||
-            state.referenceImages.length > 0 ||
-            state.billboardImages.length > 0 ||
-            Object.keys(state.pixelDocuments).length > 0
-          if (!hasContent || (await confirmDiscardProject())) {
-            useAppStore.getState().newProject()
-          }
-        })()
+        void useAppStore.getState().newProject()
         return
       }
       if (e.code === 'KeyO' && !ctrlOrMeta && !e.altKey && !e.shiftKey) {
@@ -466,7 +455,30 @@ export default function App() {
       if (e.key === 'v' || e.key === 'V') store().setDrawInputMode('vector-pen')
       if (e.key === 'd') store().setDrawInputMode('regular')
       if (e.key === 'l') store().toggleTopologyLock()
-      if (e.key === 'g' || e.key === 'G') store().activateSelectTool()
+      if (e.key === 'g' || e.key === 'G') {
+        const moveState = store()
+        const hoverIndex = moveState.hoveredViewportSlot ?? 0
+        const activeView = moveState.viewportSlotViews[hoverIndex] || 'perspective'
+        if (moveState.selectionMode !== 'object' && selectionHasComponents(moveState.meshSelection)) {
+          e.preventDefault()
+          moveState.beginMeshModal(
+            'move',
+            lastMousePosRef.current.x,
+            lastMousePosRef.current.y,
+            activeView
+          )
+        } else if (moveState.selectionMode === 'object' && moveState.selectionObjectIds.length > 0) {
+          e.preventDefault()
+          moveState.beginObjectTransformModal(
+            'move',
+            lastMousePosRef.current.x,
+            lastMousePosRef.current.y,
+            activeView
+          )
+        } else {
+          moveState.activateSelectTool()
+        }
+      }
       if (e.key === 'X' && e.shiftKey) {
         const s = store()
         s.setViewportXRay(!s.viewportXRay)

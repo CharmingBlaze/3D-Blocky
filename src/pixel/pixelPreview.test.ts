@@ -14,7 +14,7 @@ describe('pixel preview scheduling', () => {
   })
 
   it('coalesces repeated live updates behind one scheduled frame', () => {
-    const doc = createPixelDocument('doc', 8, 8)
+    const doc = createPixelDocument(8, 8, 'doc')
     const docs = { doc }
     scheduleDocPreview(docs, 'doc', { x: 0, y: 0, w: 1, h: 1 })
     scheduleDocPreview(docs, 'doc', { x: 6, y: 6, w: 1, h: 1 })

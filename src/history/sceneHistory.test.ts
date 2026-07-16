@@ -25,7 +25,7 @@ function emptySnapshot(): SceneSnapshot {
 function boxObject(id: string, x = 0): SceneObject {
   return {
     id,
-    type: 'mesh',
+    name: id,
     positions: [
       { x, y: 0, z: 0 },
       { x: x + 1, y: 0, z: 0 },
@@ -54,6 +54,9 @@ function boxObject(id: string, x = 0): SceneObject {
     color: 0xff0000,
     smoothShading: false,
     topologyLocked: false,
+    polyBudget: 128,
+    polyBudgetMode: 'strict',
+    facetExaggeration: 0,
   }
 }
 
@@ -167,6 +170,71 @@ describe('sceneHistory', () => {
     const second = captureSceneSnapshot({ ...base, objects: [twin] }, first)
     expect(second.objects[0]).toBe(first.objects[0])
     expect(snapshotsEqual(first, second)).toBe(true)
+  })
+
+  it('captures visibility-only edits instead of reusing a stale object', () => {
+    const base = emptySnapshot()
+    base.objects = [boxObject('visibility')]
+    const first = captureSceneSnapshot(base)
+    const hidden = cloneSceneObject(base.objects[0])
+    hidden.visible = false
+
+    const second = captureSceneSnapshot({ ...base, objects: [hidden] }, first)
+
+    expect(second.objects[0]).not.toBe(first.objects[0])
+    expect(second.objects[0].visible).toBe(false)
+    expect(snapshotsEqual(first, second)).toBe(false)
+  })
+
+  it('captures primitive source-only edits instead of reusing stale parameters', () => {
+    const base = emptySnapshot()
+    const primitive = boxObject('primitive')
+    primitive.primitiveSource = {
+      type: 'box',
+      box: {
+        min: { x: -1, y: -1, z: -1 },
+        max: { x: 1, y: 1, z: 1 },
+      },
+      heightAxis: 1,
+      polyBudget: 48,
+    }
+    base.objects = [primitive]
+    const first = captureSceneSnapshot(base)
+    const resized = cloneSceneObject(primitive)
+    resized.primitiveSource!.box.max.x = 2
+
+    const second = captureSceneSnapshot({ ...base, objects: [resized] }, first)
+
+    expect(second.objects[0]).not.toBe(first.objects[0])
+    expect(second.objects[0].primitiveSource?.box.max.x).toBe(2)
+    expect(snapshotsEqual(first, second)).toBe(false)
+  })
+
+  it('deep-clones lathe sources and detects parameter-only edits', () => {
+    const base = emptySnapshot()
+    const lathe = boxObject('lathe')
+    lathe.latheSource = {
+      points: [{ x: 1, y: -1 }, { x: 2, y: 1 }],
+      view: 'front',
+      defaultDepth: 0,
+      caps: true,
+      radialSegments: 16,
+      profileRings: 12,
+      smoothing: 0.25,
+    }
+    base.objects = [lathe]
+    const first = captureSceneSnapshot(base)
+    const edited = cloneSceneObject(lathe)
+    edited.latheSource!.radialSegments = 24
+    edited.latheSource!.points[0].x = 99
+
+    expect(first.objects[0].latheSource?.radialSegments).toBe(16)
+    expect(first.objects[0].latheSource?.points[0].x).toBe(1)
+
+    const second = captureSceneSnapshot({ ...base, objects: [edited] }, first)
+    expect(second.objects[0]).not.toBe(first.objects[0])
+    expect(second.objects[0].latheSource?.radialSegments).toBe(24)
+    expect(snapshotsEqual(first, second)).toBe(false)
   })
 
   it('push skips duplicate snapshots unless forced', () => {

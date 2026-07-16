@@ -42,6 +42,8 @@ export type ActiveTool =
   | 'relax'
   | 'pinch'
   | 'select-object'
+  | 'smart'
+  | 'extrude'
   | 'move'
   | 'rotate'
   | 'scale'

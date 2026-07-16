@@ -48,6 +48,7 @@ export interface MaterialEditorState {
   materialEditorGradientStops: Rgba4[]
   materialEditorApplyToSelection: boolean
   materialPaintHistoryPending: boolean
+  materialColorCancelEpoch: number
 }
 
 export const materialEditorInitialState: MaterialEditorState = {
@@ -64,6 +65,7 @@ export const materialEditorInitialState: MaterialEditorState = {
   materialEditorGradientStops: [hexToRgba4('#6ecbf5'), hexToRgba4('#f5a66e')],
   materialEditorApplyToSelection: true,
   materialPaintHistoryPending: false,
+  materialColorCancelEpoch: 0,
 }
 
 export function resolveTargetObjectIds(

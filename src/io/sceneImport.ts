@@ -2,9 +2,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
+import { validateMeshStructure } from '../mesh/meshInvariants'
 import { disposeObject3D, geometryToSceneObject, object3DToSceneObjects } from './sceneMeshBridge'
 
 export type ImportFormat = 'obj' | 'gltf' | 'stl' | 'unknown'
+export const MAX_SCENE_IMPORT_BYTES = 256 * 1024 * 1024
 
 export function detectImportFormat(filename: string): ImportFormat {
   const lower = filename.toLowerCase()
@@ -18,6 +20,18 @@ function baseNameFromFile(filename: string): string {
   const parts = filename.replace(/\\/g, '/').split('/')
   const file = parts[parts.length - 1] ?? 'Imported'
   return file.replace(/\.[^.]+$/, '') || 'Imported'
+}
+
+export function validateImportedSceneObjects(objects: SceneObject[]): SceneObject[] {
+  for (const object of objects) {
+    const issues = validateMeshStructure(object)
+    if (issues.length > 0) {
+      throw new Error(
+        `Imported mesh "${object.name || object.id}" is invalid (${issues[0]!.message})`
+      )
+    }
+  }
+  return objects
 }
 
 async function readFileAsText(file: File): Promise<string> {
@@ -35,10 +49,12 @@ function importOBJFromText(text: string, name: string): SceneObject[] {
   try {
     const objects = object3DToSceneObjects(group)
     if (objects.length === 0) throw new Error('OBJ file contains no meshes')
-    return objects.map((obj, i) => ({
-      ...obj,
-      name: objects.length === 1 ? name : `${name}_${i + 1}`,
-    }))
+    return validateImportedSceneObjects(
+      objects.map((obj, i) => ({
+        ...obj,
+        name: objects.length === 1 ? name : `${name}_${i + 1}`,
+      }))
+    )
   } finally {
     disposeObject3D(group)
   }
@@ -51,7 +67,7 @@ function importSTLFromBuffer(buffer: ArrayBuffer, name: string): SceneObject[] {
   try {
     const obj = geometryToSceneObject(name, geometry)
     if (!obj) throw new Error('STL file contains no geometry')
-    return [obj]
+    return validateImportedSceneObjects([obj])
   } finally {
     geometry.dispose()
   }
@@ -72,12 +88,12 @@ function importGLTFFromBuffer(buffer: ArrayBuffer, name: string): Promise<SceneO
             reject(new Error('GLTF/GLB file contains no meshes'))
             return
           }
-          resolve(
+          resolve(validateImportedSceneObjects(
             objects.map((obj, i) => ({
               ...obj,
               name: obj.name === 'Imported' || !obj.name ? `${name}_${i + 1}` : obj.name,
             }))
-          )
+          ))
         } finally {
           disposeObject3D(root)
         }
@@ -88,6 +104,11 @@ function importGLTFFromBuffer(buffer: ArrayBuffer, name: string): Promise<SceneO
 }
 
 export async function importSceneFromFile(file: File): Promise<SceneObject[]> {
+  if (file.size > MAX_SCENE_IMPORT_BYTES) {
+    throw new Error(
+      `Import file is too large (${file.size} bytes; limit ${MAX_SCENE_IMPORT_BYTES}).`
+    )
+  }
   const format = detectImportFormat(file.name)
   const baseName = baseNameFromFile(file.name)
 

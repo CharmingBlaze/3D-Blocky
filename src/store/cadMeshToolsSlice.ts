@@ -34,8 +34,13 @@ import type { SelectionMode } from './selectionSlice'
 import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
 import type { Vec3 } from '../utils/math'
 import type { ViewType } from '../scene/viewTypes'
+import {
+  polyDrawShapeHasArea,
+  rectangleWorldPoints,
+  regularPolygonWorldPoints,
+} from '../polyDraw/polyDrawShapes'
 
-export type PolyDrawMode = 'triangle' | 'quad' | 'poly'
+export type PolyDrawMode = 'triangle' | 'quad' | 'poly' | 'rectangle' | 'ngon'
 
 export type PolyDrawPointSnap =
   | { kind: 'mesh'; objectId: string; vertexIndex: number }
@@ -49,6 +54,8 @@ export interface PolyDrawDraftPoint {
 export interface PolyDrawDraft {
   points: PolyDrawDraftPoint[]
   view: ViewType
+  /** Stable toward-camera normal captured when drawing begins. */
+  viewFacingNormal?: Vec3
   previewWorld: Vec3 | null
   snapHighlight: { world: Vec3; isDraft?: boolean } | null
 }
@@ -128,7 +135,12 @@ export interface CadMeshToolsLayoutActions {
     hoverSnap: PolyDrawPointSnap | null
   ) => void
   clearPolyDrawHover: () => void
-  polyDrawClick: (world: Vec3, snap: PolyDrawPointSnap | null, view: ViewType) => void
+  polyDrawClick: (
+    world: Vec3,
+    snap: PolyDrawPointSnap | null,
+    view: ViewType,
+    viewFacingNormal?: Vec3
+  ) => void
   polyDrawCancel: () => void
   polyDrawFinish: () => void
   flipLastPolyDrawFace: () => void
@@ -161,7 +173,7 @@ export interface CadMeshToolsLayoutActions {
 export type CadMeshToolsSlice = CadMeshToolsLayoutState & CadMeshToolsLayoutActions
 
 export const cadMeshToolsInitialState: CadMeshToolsLayoutState = {
-  polyDrawMode: 'quad',
+  polyDrawMode: 'rectangle',
   polyDrawDraft: null,
   polyDrawHover: null,
   polyDrawSnapAllScene: true,
@@ -225,13 +237,14 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
 
     clearPolyDrawHover: () => set({ polyDrawHover: null } as unknown as Partial<S>),
 
-    polyDrawClick: (world, snap, view) => {
+    polyDrawClick: (world, snap, view, viewFacingNormal) => {
       const { polyDrawDraft, polyDrawMode } = get()
       const now = performance.now()
 
       const draft: PolyDrawDraft = polyDrawDraft ?? {
         points: [],
         view,
+        viewFacingNormal: viewFacingNormal ? { ...viewFacingNormal } : undefined,
         previewWorld: null,
         snapHighlight: null,
       }
@@ -257,12 +270,37 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       }
 
       const autoCount = autoFinalizeCount(polyDrawMode)
-      const shouldAutoFinish = autoCount !== null && nextPoints.length >= autoCount
+      let shouldAutoFinish = autoCount !== null && nextPoints.length >= autoCount
+      let committedPoints = nextPoints
+      if (shouldAutoFinish && polyDrawMode === 'rectangle') {
+        const worlds = rectangleWorldPoints(nextPoints[0]!.world, nextPoints[1]!.world, view)
+        if (polyDrawShapeHasArea(worlds)) {
+          committedPoints = worlds.map((point, index) => ({
+            world: point,
+            ...(index === 0 ? { snap: nextPoints[0]!.snap } : {}),
+            ...(index === 2 ? { snap: nextPoints[1]!.snap } : {}),
+          }))
+        } else {
+          committedPoints = [nextPoints[0]!]
+          shouldAutoFinish = false
+        }
+      } else if (shouldAutoFinish && polyDrawMode === 'ngon') {
+        const worlds = regularPolygonWorldPoints(nextPoints[0]!.world, nextPoints[1]!.world, view)
+        if (polyDrawShapeHasArea(worlds)) {
+          committedPoints = worlds.map((point, index) => ({
+            world: point,
+            ...(index === 0 ? { snap: nextPoints[1]!.snap } : {}),
+          }))
+        } else {
+          committedPoints = [nextPoints[0]!]
+          shouldAutoFinish = false
+        }
+      }
 
       set({
         polyDrawDraft: {
           ...draft,
-          points: nextPoints,
+          points: committedPoints,
           view,
           previewWorld: world,
           snapHighlight: null,
@@ -293,12 +331,14 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         set({ polyDrawDraft: null } as unknown as Partial<S>)
         return
       }
-      if (polyDrawMode === 'quad' && polyDrawDraft.points.length < 4) return
+      if ((polyDrawMode === 'quad' || polyDrawMode === 'rectangle') && polyDrawDraft.points.length < 4) return
       if (polyDrawMode === 'triangle' && polyDrawDraft.points.length < 3) return
 
       const result = commitPolyDrawFace(polyDrawDraft.points, objects, {
         mode: polyDrawMode,
         color: activeColor,
+        view: polyDrawDraft.view,
+        facingNormal: polyDrawDraft.viewFacingNormal,
       })
 
       if (!result) {

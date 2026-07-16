@@ -32,7 +32,7 @@ export interface ProjectIoLayoutActions {
   reconcileGpuResources: () => void
   requestProjectLoad: () => void
   loadProjectFromDialog: () => Promise<boolean>
-  newProject: () => void
+  newProject: () => Promise<boolean>
   saveProject: () => Promise<boolean>
   loadProjectFile: (file: File) => Promise<void>
   importSceneFile: (file: File) => Promise<number>
@@ -330,8 +330,16 @@ export function createProjectIoSlice<T extends object>(
       return true
     },
 
-    newProject: () => {
+    newProject: async () => {
+      const state = store()
+      const hasContent =
+        state.objects.length > 0 ||
+        state.referenceImages.length > 0 ||
+        state.billboardImages.length > 0 ||
+        Object.keys(state.pixelDocuments).length > 0
+      if (hasContent && !(await confirmDiscardProject())) return false
       window.location.reload()
+      return true
     },
 
     saveProject: async () => {

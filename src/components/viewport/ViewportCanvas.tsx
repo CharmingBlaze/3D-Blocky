@@ -5,7 +5,6 @@ import type { ViewType } from '../../store/appStore'
 import { applyOrthoCamera } from './ViewportCamera'
 import { useViewportRuntime } from './ViewportRuntimeContext'
 import { ViewportScene } from './ViewportScene'
-import { registerWebGLRenderer } from '../../rendering/textureCache'
 import type { SceneObject } from '../../mesh/HalfEdgeMesh'
 import type { MeshComponentSelection } from '../../mesh/meshSelection'
 import type { ActiveTool, SelectionMode } from '../../store/appStore'
@@ -103,7 +102,6 @@ export function ViewportCanvas({
       }}
       onCreated={({ camera, gl }) => {
         gl.outputColorSpace = 'srgb'
-        registerWebGLRenderer(gl)
         cameraRef.current = camera
         applyOrthoCamera(view as ViewType, camera)
       }}

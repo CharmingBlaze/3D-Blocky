@@ -22,7 +22,6 @@ import {
   PROJECT_FILE_EXTENSION,
 } from '../app/branding'
 import { pickOpenFile } from '../io/fileDialogs'
-import { confirmDiscardProject } from '../ui/appConfirm'
 import {
   EXPORT_OPTIONS,
   IMPORT_OPTIONS,
@@ -218,11 +217,7 @@ export function ExportDialog({ onClose, initialTab = 'export' }: ExportDialogPro
   }
 
   const runNewProject = async () => {
-    if (objectCount > 0 || Object.keys(pixelDocuments).length > 0) {
-      if (!(await confirmDiscardProject())) return
-    }
-    newProject()
-    setStatus('New project created.')
+    if (await newProject()) setStatus('New project created.')
   }
 
   return (

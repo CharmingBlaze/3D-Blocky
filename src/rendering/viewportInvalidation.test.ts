@@ -16,6 +16,7 @@ import {
   pushViewportLocalInteraction,
   pushViewportSharedInteraction,
   popViewportSharedInteraction,
+  shouldViewportRenderContinuously,
 } from '../rendering/viewportFrameLoop'
 
 beforeEach(() => {
@@ -115,5 +116,30 @@ describe('viewport-scoped interaction', () => {
     expect(isViewportInteractionActive(0)).toBe(true)
     expect(isViewportLocalInteractionActive(1)).toBe(false)
     popViewportSharedInteraction(0)
+  })
+
+  it('keeps shared interactions continuous only in their source viewport', () => {
+    const base = {
+      layoutVisible: true,
+      isActive: false,
+      localActive: false,
+      cadPreviewActive: false,
+    }
+    expect(shouldViewportRenderContinuously({ ...base, sharedActiveHere: true })).toBe(true)
+    expect(shouldViewportRenderContinuously({ ...base, sharedActiveHere: false })).toBe(false)
+  })
+
+  it('keeps CAD previews continuous only in the active visible viewport', () => {
+    const base = {
+      layoutVisible: true,
+      localActive: false,
+      sharedActiveHere: false,
+      cadPreviewActive: true,
+    }
+    expect(shouldViewportRenderContinuously({ ...base, isActive: true })).toBe(true)
+    expect(shouldViewportRenderContinuously({ ...base, isActive: false })).toBe(false)
+    expect(
+      shouldViewportRenderContinuously({ ...base, isActive: true, layoutVisible: false })
+    ).toBe(false)
   })
 })

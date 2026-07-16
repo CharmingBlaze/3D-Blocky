@@ -9,6 +9,8 @@ import { validateMesh, indexedMeshFromFlat, computeFaceNormal, faceCentroid } fr
 import { weldSceneObjectCoincidentVertices } from '../src/mesh/subdivisionSurface'
 import { roundedBoxFromWorldBox } from '../src/mesh/roundedBox'
 import { prepareSceneObject } from '../src/mesh/objectTransform'
+import { HalfEdgeMesh } from '../src/mesh/HalfEdgeMesh'
+import { countNakedEdges, meshSignedVolume } from '../src/mesh/meshWinding'
 
 const PRIMITIVES: PrimitiveBoxType[] = [
   'box',
@@ -44,7 +46,15 @@ function inwardFromObj(positions: { x: number; y: number; z: number }[], faces: 
 
 let failures = 0
 
-const HOLLOW_PRIMITIVES = new Set<PrimitiveBoxType>(['doughnut', 'ring'])
+// A single reference-point dot test is not valid when the point lies in a hole
+// or concavity. These shapes are still checked for closed topology and positive volume.
+const CENTROID_INWARD_UNRELIABLE = new Set<PrimitiveBoxType>([
+  'doughnut',
+  'ring',
+  'dome',
+  'halfCircle',
+  'stairs',
+])
 
 for (const view of ['front', 'right', 'top'] as const) {
   const ha = heightAxisForView(view)
@@ -71,23 +81,26 @@ for (const view of ['front', 'right', 'top'] as const) {
     const unwelded =
       obj != null &&
       weldSceneObjectCoincidentVertices(obj).positions.length < obj.positions.length
+    const committedMesh = obj ? HalfEdgeMesh.fromObject(obj) : null
+    const nakedEdges = committedMesh ? countNakedEdges(committedMesh) : -1
+    const signedVolume = committedMesh ? meshSignedVolume(committedMesh) : 0
 
     const label = `${type} @ ${view}`
-    const skipInwardValidation = HOLLOW_PRIMITIVES.has(type) || type === 'dome' || type === 'halfCircle'
+    const skipInwardValidation = CENTROID_INWARD_UNRELIABLE.has(type)
     const blockingIssues = skipInwardValidation
       ? validation.issues.filter((i) => i.code !== 'inward_face')
       : validation.issues
     const validateOk = blockingIssues.length === 0
     const countInward = skipInwardValidation ? 0 : inward
-    if (!validateOk || countInward > 0 || unwelded) {
+    if (!validateOk || countInward > 0 || unwelded || nakedEdges !== 0 || signedVolume <= 0) {
       console.error(
-        `FAIL ${label}: validate ok=${validateOk} inward=${inward} unwelded=${unwelded} issues=${blockingIssues.length}`
+        `FAIL ${label}: validate ok=${validateOk} inward=${inward} unwelded=${unwelded} naked=${nakedEdges} volume=${signedVolume.toFixed(4)} issues=${blockingIssues.length}`
       )
       validation.issues.slice(0, 3).forEach((i) => console.error(`  - ${i.message}`))
       failures++
     } else {
       console.log(
-        `OK   ${label}: ${obj?.faces.length ?? 0} faces, ${obj?.positions.length ?? 0} verts, inward=0`
+        `OK   ${label}: ${obj?.faces.length ?? 0} faces, ${obj?.positions.length ?? 0} verts, naked=0, volume=${signedVolume.toFixed(4)}`
       )
     }
   }

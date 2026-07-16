@@ -51,6 +51,8 @@ export interface FinalizeMeshOptions {
   validate?: boolean
   /** Skip per-face centroid flip (needed for torus-like shapes). */
   skipOutwardWinding?: boolean
+  /** Disable reference-point inward checks when no point lies inside every face plane. */
+  validateInwardFaces?: boolean
 }
 
 export class MeshBuilder {
@@ -194,9 +196,14 @@ export function ensureOutwardWinding(mesh: IndexedMesh, refPoint?: Vec3): Indexe
   return { ...mesh, faces }
 }
 
-export function validateMesh(mesh: IndexedMesh, refPoint?: Vec3): MeshValidationResult {
+export function validateMesh(
+  mesh: IndexedMesh,
+  refPoint?: Vec3,
+  options: { checkInwardFaces?: boolean } = {}
+): MeshValidationResult {
   const issues: MeshValidationIssue[] = []
   const center = refPoint ?? meshCentroid(mesh.positions)
+  const checkInwardFaces = options.checkInwardFaces ?? true
   const referenced = new Set<number>()
 
   mesh.faces.forEach((face, fi) => {
@@ -214,7 +221,7 @@ export function validateMesh(mesh: IndexedMesh, refPoint?: Vec3): MeshValidation
     const n = computeFaceNormal(mesh.positions, face)
     const c = faceCentroid(mesh.positions, face)
     const dot = n.x * (c.x - center.x) + n.y * (c.y - center.y) + n.z * (c.z - center.z)
-    if (dot < 0) {
+    if (checkInwardFaces && dot < 0) {
       issues.push({
         code: 'inward_face',
         message: `Face ${fi} normal points toward reference center`,
@@ -379,7 +386,9 @@ export function finalizeIndexedMesh(
 
   let next = options.skipOutwardWinding ? mesh : ensureOutwardWinding(mesh, outwardCenter)
   if (shouldValidate) {
-    const result = validateMesh(next, outwardCenter)
+    const result = validateMesh(next, outwardCenter, {
+      checkInwardFaces: options.validateInwardFaces,
+    })
     if (!result.ok && import.meta.env?.DEV) {
       console.warn('[MeshBuilder] validateMesh:', result.issues.slice(0, 8))
     }

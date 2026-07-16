@@ -17,7 +17,8 @@ const cube: SceneObject = {
     [0, 4, 7, 3], [7, 6, 2, 3], [0, 1, 5, 4],
   ],
   faceColors: [0, 0, 0, 0, 0, 0],
-  type: 'mesh',
+  topologyLocked: false, polyBudget: 128, polyBudgetMode: 'strict',
+  smoothShading: false, facetExaggeration: 0, color: 0,
 }
 
 const rect = {
@@ -100,7 +101,7 @@ describe('paint-on-model UV seams', () => {
 
   it('joins faces that share a continuous UV edge and restarts across an atlas seam', () => {
     const base: SceneObject = {
-      id: 'seam-test', name: 'seam test', type: 'mesh',
+      id: 'seam-test', name: 'seam test',
       positions: [
         { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 },
         { x: 0, y: 1, z: 0 }, { x: 1, y: 1, z: 0 },
@@ -110,6 +111,8 @@ describe('paint-on-model UV seams', () => {
         { u: 0, v: 0 }, { u: 1, v: 0 }, { u: 0, v: 1 }, { u: 1, v: 1 },
       ],
       faceUvIndices: [[0, 1, 2], [1, 3, 2]],
+      topologyLocked: false, polyBudget: 128, polyBudgetMode: 'strict',
+      smoothShading: false, facetExaggeration: 0, color: 0,
     }
     expect(areSurfaceHitsUvContinuous(base, hit(0), hit(1))).toBe(true)
 

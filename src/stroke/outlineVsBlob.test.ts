@@ -54,8 +54,8 @@ describe('outline vs blob stroke modes', () => {
     expect(blob?.name).toBe('Blob')
     expect(blob?.sketchSource?.kind).toBe('soft')
     expect(outline!.positions.length).not.toBe(blob!.positions.length)
-    // Sharp Outline uses the lighter five-ring profile; Blob carries two extra rings.
-    expect(outline!.positions.length).toBe(20)
+    // Sharp Outline uses the lighter profile plus compact cap-transition rings.
+    expect(outline!.positions.length).toBe(30)
     expect(blob!.positions.length).toBeGreaterThan(outline!.positions.length)
     expect(outline!.faces.filter((face) => face.length === 4).length).toBeGreaterThan(0)
   })
@@ -68,8 +68,9 @@ describe('outline vs blob stroke modes', () => {
       expect(countNakedEdges(mesh)).toBe(0)
       expect(meshSignedVolume(mesh)).toBeGreaterThan(0)
       expect(mesh.faces.filter((face) => face.length === 4).length).toBeGreaterThan(0)
-      expect(mesh.faces.filter((face) => face.length === 3).length).toBe(0)
-      expect(mesh.faces.filter((face) => face.length > 4).length).toBe(2)
+      // Smooth-shaded caps use two compact triangle fans behind quad transition rings.
+      expect(mesh.faces.filter((face) => face.length === 3).length).toBeGreaterThan(0)
+      expect(mesh.faces.filter((face) => face.length > 4).length).toBe(0)
     }
   })
 
@@ -106,7 +107,9 @@ describe('outline vs blob stroke modes', () => {
     // Front+back copies of the boundary — must keep the notch tips, not a triangle.
     const boundaryVerts = outline!.positions.length / 2
     expect(boundaryVerts).toBeGreaterThanOrEqual(8)
-    expect(outline!.faces.some((f) => f.length >= 8)).toBe(true)
+    const outlineMesh = HalfEdgeMesh.fromObject(outline!)
+    expect(countNakedEdges(outlineMesh)).toBe(0)
+    expect(meshSignedVolume(outlineMesh)).toBeGreaterThan(0)
 
     const prepared = prepareOutlineBoundary(
       jaggedLoop.slice(0, -1).map((p) => ({ x: p.x, y: p.y })),
@@ -196,9 +199,9 @@ describe('outline vs blob stroke modes', () => {
     expect(outline).not.toBeNull()
     const boundaryVerts = outline!.positions.length / 2
     expect(boundaryVerts).toBeGreaterThan(60)
-    expect(outline!.faces.filter((f) => f.length === 3).length).toBe(0)
+    expect(outline!.faces.filter((f) => f.length === 3).length).toBeGreaterThan(0)
     expect(outline!.faces.filter((f) => f.length === 4).length).toBeGreaterThan(0)
-    expect(outline!.faces.filter((f) => f.length > 4).length).toBe(2)
+    expect(outline!.faces.filter((f) => f.length > 4).length).toBe(0)
 
     // Editable Sketch regenerate must not re-decimate the silhouette.
     const regen = regenerateSketchObjectFromSource(outline!, {

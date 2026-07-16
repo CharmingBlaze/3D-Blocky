@@ -7,13 +7,18 @@ function box(min: number, max: number): SceneObject {
   return {
     id: `box-${min}-${max}`,
     name: 'Bounds box',
-    type: 'mesh',
     positions: [
       { x: min, y: min, z: min },
       { x: max, y: max, z: max },
     ],
     faces: [],
     faceColors: [],
+    topologyLocked: false,
+    polyBudget: 128,
+    polyBudgetMode: 'strict',
+    smoothShading: false,
+    facetExaggeration: 0,
+    color: 0,
     pivot: { x: 0, y: 0, z: 0 },
     transform: {
       position: { x: 0, y: 0, z: 0 },

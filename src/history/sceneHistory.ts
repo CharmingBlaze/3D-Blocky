@@ -100,6 +100,12 @@ export function cloneSceneObject(obj: SceneObject): SceneObject {
           },
         }
       : undefined,
+    latheSource: obj.latheSource
+      ? {
+          ...obj.latheSource,
+          points: obj.latheSource.points.map((point) => ({ ...point })),
+        }
+      : undefined,
   }
 }
 
@@ -317,6 +323,7 @@ export function sceneObjectsContentEqual(a: SceneObject, b: SceneObject): boolea
   if (
     a.id !== b.id ||
     a.name !== b.name ||
+    a.visible !== b.visible ||
     a.color !== b.color ||
     a.topologyLocked !== b.topologyLocked ||
     a.polyBudget !== b.polyBudget ||
@@ -371,6 +378,16 @@ export function sceneObjectsContentEqual(a: SceneObject, b: SceneObject): boolea
   if (a.vectorSource !== b.vectorSource) {
     if (!a.vectorSource || !b.vectorSource) return !a.vectorSource && !b.vectorSource
     if (JSON.stringify(a.vectorSource) !== JSON.stringify(b.vectorSource)) return false
+  }
+  if (a.latheSource !== b.latheSource) {
+    if (!a.latheSource || !b.latheSource) return !a.latheSource && !b.latheSource
+    if (JSON.stringify(a.latheSource) !== JSON.stringify(b.latheSource)) return false
+  }
+  if (a.primitiveSource !== b.primitiveSource) {
+    if (!a.primitiveSource || !b.primitiveSource) {
+      return !a.primitiveSource && !b.primitiveSource
+    }
+    if (JSON.stringify(a.primitiveSource) !== JSON.stringify(b.primitiveSource)) return false
   }
 
   return true

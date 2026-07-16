@@ -32,22 +32,22 @@ export function isComponentSelectionMode(mode: SelectionMode): boolean {
 
 export function isBoxSelectInteraction(mode: SelectionMode, tool: ActiveTool): boolean {
   if (mode === 'object') {
-    return tool === 'select-object' || TRANSFORM_GIZMO_TOOLS.includes(tool)
+    return tool === 'select-object' || tool === 'smart' || TRANSFORM_GIZMO_TOOLS.includes(tool)
   }
   return (
     isComponentSelectionMode(mode) &&
-    (MESH_SELECT_TOOLS.includes(tool) || TRANSFORM_GIZMO_TOOLS.includes(tool))
+    (MESH_SELECT_TOOLS.includes(tool) || tool === 'smart' || tool === 'extrude' || TRANSFORM_GIZMO_TOOLS.includes(tool))
   )
 }
 
 /** Click-pick / multiselect while a component select or transform gizmo tool is active. */
 export function canPickComponentSelection(tool: ActiveTool): boolean {
-  return MESH_SELECT_TOOLS.includes(tool) || TRANSFORM_GIZMO_TOOLS.includes(tool)
+  return MESH_SELECT_TOOLS.includes(tool) || tool === 'smart' || tool === 'extrude' || TRANSFORM_GIZMO_TOOLS.includes(tool)
 }
 
 /** Free-drag the current component selection without using the gizmo (select tools + move). */
 export function canDragComponentSelection(tool: ActiveTool): boolean {
-  return MESH_SELECT_TOOLS.includes(tool) || tool === 'move'
+  return MESH_SELECT_TOOLS.includes(tool) || tool === 'smart' || tool === 'move'
 }
 
 export function isHitInMeshSelection(

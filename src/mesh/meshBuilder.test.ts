@@ -4,7 +4,6 @@ import {
   MeshBuilder,
   computeFaceNormal,
   ensureOutwardWinding,
-  faceCentroid,
   finalizeIndexedMesh,
   meshCentroid,
   validateMesh,
@@ -13,13 +12,12 @@ import { primitiveBoxToSceneObject } from '../primitives/primitiveBoxCommit'
 import { heightAxisForView, setAxisComponent, type Axis } from '../primitives/viewAxes'
 import { vectorShapeToObject } from './lowPolyPrimitives'
 import { polylineToMesh } from '../stroke/polylineToMesh'
-import { meshSignedVolume } from './meshWinding'
+import { countNakedEdges, meshSignedVolume } from './meshWinding'
 import type { SceneObject } from './HalfEdgeMesh'
 import { weldSceneObjectCoincidentVertices } from '../mesh/subdivisionSurface'
 import { roundedBoxFromWorldBox } from '../mesh/roundedBox'
 import { prepareSceneObject } from '../mesh/objectTransform'
 import { enforceSceneObjectPolyBudget } from './meshPolyBudget'
-import { prepareSceneObject } from './objectTransform'
 import { HalfEdgeMesh } from './HalfEdgeMesh'
 import { bakeSceneObjectForExport, sceneObjectToThreeMesh } from '../io/sceneMeshBridge'
 import { SCENE_GRID_CELL } from '../scene/units'
@@ -269,6 +267,20 @@ describe('MeshBuilder', () => {
     }
   })
 
+  it.each(CAD_PRIMITIVE_TYPES)('CAD %s commits a closed positive-volume mesh', (type) => {
+    const obj = primitiveBoxToSceneObject(
+      type,
+      TEST_BOX,
+      heightAxisForView('front'),
+      0x6ecbf5,
+      128
+    )
+    expect(obj).not.toBeNull()
+    const mesh = HalfEdgeMesh.fromObject(obj!)
+    expect(countNakedEdges(mesh)).toBe(0)
+    expect(meshSignedVolume(mesh)).toBeGreaterThan(0)
+  })
+
   it('CAD stairs have distinct tread and riser quads, not a ramp wedge', () => {
     const box = { min: { x: -2, y: 0, z: -4 }, max: { x: 2, y: 4, z: 4 } }
     const obj = primitiveBoxToSceneObject(
@@ -282,6 +294,9 @@ describe('MeshBuilder', () => {
     expect(obj!.faces.length).toBeGreaterThan(0)
     expect(obj!.faces.every((f) => f.length === 4)).toBe(true)
     expect(inwardFaceCount(obj!.positions, obj!.faces, { x: 0, y: 0.5, z: 2 })).toBe(0)
+    const topology = HalfEdgeMesh.fromObject(obj!)
+    expect(countNakedEdges(topology)).toBe(0)
+    expect(meshSignedVolume(topology)).toBeGreaterThan(0)
 
     let treadFaces = 0
     let riserFaces = 0

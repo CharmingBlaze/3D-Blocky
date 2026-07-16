@@ -8,6 +8,7 @@ interface ColorWheelPickerProps {
   onChange: (color: Rgba4) => void
   onCommit: (color: Rgba4) => void
   showAlpha?: boolean
+  cancelEpoch?: number
 }
 
 const WHEEL_SIZE = 148
@@ -63,7 +64,13 @@ function hsvToRgba4(h: number, s: number, v: number, alpha: number): Rgba4 {
   return [r, g, b, alpha]
 }
 
-export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }: ColorWheelPickerProps) {
+export function ColorWheelPicker({
+  color,
+  onChange,
+  onCommit,
+  showAlpha = true,
+  cancelEpoch = 0,
+}: ColorWheelPickerProps) {
   const { bgPanel, text, bgDark } = useTheme()
   const wheelRef = useRef<HTMLDivElement>(null)
   const svRef = useRef<HTMLDivElement>(null)
@@ -103,6 +110,14 @@ export function ColorWheelPicker({ color, onChange, onCommit, showAlpha = true }
     },
     []
   )
+
+  useEffect(() => {
+    if (changeRafRef.current) cancelAnimationFrame(changeRafRef.current)
+    changeRafRef.current = 0
+    pendingColorRef.current = null
+    draggingRef.current = null
+    setDragging(false)
+  }, [cancelEpoch])
 
   const applyHsv = useCallback(
     (nh: number, ns: number, nv: number, alpha: number, commit: boolean) => {

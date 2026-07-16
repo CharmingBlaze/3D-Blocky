@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
+    "typecheck": "tsc -p tsconfig.json --pretty false && tsc -p tsconfig.test.json --pretty false",
     "preview": "vite preview",
     "test": "vitest run --configLoader runner",
     "test:watch": "vitest --configLoader runner",

@@ -206,7 +206,11 @@ function PreviewMesh({ textureDoc, textureUrl, transform, settings, kind, pointe
 export function HairTexturePreview3D(props: Props) {
   return (
     <div className="hair-preview-3d">
-      <Canvas camera={{ position: [0.2, 0.35, 5.8], fov: 38 }} dpr={[1, 1.5]}>
+      <Canvas
+        frameloop="demand"
+        camera={{ position: [0.2, 0.35, 5.8], fov: 38 }}
+        dpr={[1, 1.5]}
+      >
         <color attach="background" args={['#181b21']} />
         <ambientLight intensity={1.35} />
         <directionalLight position={[3, 4, 5]} intensity={2.2} />

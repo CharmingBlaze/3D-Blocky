@@ -204,6 +204,7 @@ export interface AppState extends ViewportSlice, HistorySlice, SelectionSlice, C
   materialEditorGradientStops: Rgba4[]
   materialEditorApplyToSelection: boolean
   materialPaintHistoryPending: boolean
+  materialColorCancelEpoch: number
 
   pixelEditorOpen: boolean
   pixelEditorPanel: FloatingPanelState
@@ -393,6 +394,7 @@ function restoreSceneToStore(
     retainTextureIds?: Iterable<string>
   }
 ): void {
+  cancelMaterialColorPaintRaf()
   invalidateFaceGroupCache()
   invalidateSubdivisionPreviewCache()
   clearSculptSession()
@@ -416,6 +418,8 @@ function restoreSceneToStore(
     selectedObjectId: restored.selectedObjectId,
     selectionObjectIds: restored.selectionObjectIds,
     meshSelection: restored.meshSelection,
+    materialPaintHistoryPending: false,
+    materialColorCancelEpoch: get().materialColorCancelEpoch + 1,
     ...imageSelection,
     ...syncHistoryFlags(),
     meshModal: null,
@@ -571,8 +575,10 @@ function runDocumentPaint(
 
 let materialColorPaintRaf = 0
 let materialColorPaintPending: Rgba4 | null = null
+let materialColorPaintEpoch = 0
 
 function cancelMaterialColorPaintRaf() {
+  materialColorPaintEpoch += 1
   if (materialColorPaintRaf) {
     cancelAnimationFrame(materialColorPaintRaf)
     materialColorPaintRaf = 0
@@ -704,8 +710,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     materialColorPaintPending = color
     if (materialColorPaintRaf) return
+    const scheduledEpoch = materialColorPaintEpoch
     materialColorPaintRaf = requestAnimationFrame(() => {
       materialColorPaintRaf = 0
+      if (scheduledEpoch !== materialColorPaintEpoch) return
       const pending = materialColorPaintPending
       materialColorPaintPending = null
       if (!pending) return

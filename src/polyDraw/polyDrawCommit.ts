@@ -4,6 +4,8 @@ import { triangulatePolygon, triangulateQuad } from '../mesh/geometry2d'
 import { prepareSceneObject, localPointFromWorld } from '../mesh/objectTransform'
 import { generateId } from '../utils/math'
 import { mergeSceneObjects } from '../mesh/meshEdit'
+import { normalizeViewType, type ViewType } from '../scene/viewTypes'
+import type { Vec3 } from '../utils/math'
 
 export interface PolyDrawCommitResult {
   objects: SceneObject[]
@@ -11,6 +13,43 @@ export interface PolyDrawCommitResult {
   primaryId: string
   newFaceStartIndex: number
   newFaceCount: number
+}
+
+function polygonNormal(points: readonly Vec3[]): Vec3 {
+  let x = 0
+  let y = 0
+  let z = 0
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!
+    const b = points[(i + 1) % points.length]!
+    x += (a.y - b.y) * (a.z + b.z)
+    y += (a.z - b.z) * (a.x + b.x)
+    z += (a.x - b.x) * (a.y + b.y)
+  }
+  return { x, y, z }
+}
+
+/** Normal pointing from the drawing plane toward its orthographic camera. */
+export function polyDrawViewFacingNormal(view: ViewType): Vec3 | null {
+  switch (normalizeViewType(view)) {
+    case 'front': return { x: 0, y: 0, z: 1 }
+    case 'back': return { x: 0, y: 0, z: -1 }
+    case 'right': return { x: 1, y: 0, z: 0 }
+    case 'left': return { x: -1, y: 0, z: 0 }
+    case 'top': return { x: 0, y: 1, z: 0 }
+    case 'bottom': return { x: 0, y: -1, z: 0 }
+    case 'perspective': return null
+  }
+}
+
+export function shouldFlipPolyDrawFaceTowardView(
+  points: readonly Vec3[],
+  view: ViewType
+): boolean {
+  const facing = polyDrawViewFacingNormal(view)
+  if (!facing || points.length < 3) return false
+  const normal = polygonNormal(points)
+  return normal.x * facing.x + normal.y * facing.y + normal.z * facing.z < 0
 }
 
 function collectSnapObjectIds(points: PolyDrawDraftPoint[]): string[] {
@@ -52,7 +91,8 @@ function appendTrianglesToObject(
   cornerIndices: number[],
   worldCorners: { x: number; y: number; z: number }[],
   color: number,
-  flipNormal?: boolean
+  flipNormal?: boolean,
+  facingNormal?: Vec3 | null
 ): { object: SceneObject; faceStart: number; faceCount: number } {
   const faces = object.faces.map((f) => [...f])
   const faceColors = [...object.faceColors]
@@ -72,7 +112,33 @@ function appendTrianglesToObject(
     ])
   }
 
-  if (flipNormal) {
+  let facesAwayFromTarget = false
+  if (facingNormal) {
+    const worldByVertex = new Map<number, Vec3>()
+    cornerIndices.forEach((vertexIndex, cornerIndex) => {
+      worldByVertex.set(vertexIndex, worldCorners[cornerIndex]!)
+    })
+    for (const [a, b, c] of triangles) {
+      const pa = worldByVertex.get(a)
+      const pb = worldByVertex.get(b)
+      const pc = worldByVertex.get(c)
+      if (!pa || !pb || !pc) continue
+      const ab = { x: pb.x - pa.x, y: pb.y - pa.y, z: pb.z - pa.z }
+      const ac = { x: pc.x - pa.x, y: pc.y - pa.y, z: pc.z - pa.z }
+      const normal = {
+        x: ab.y * ac.z - ab.z * ac.y,
+        y: ab.z * ac.x - ab.x * ac.z,
+        z: ab.x * ac.y - ab.y * ac.x,
+      }
+      const dot = normal.x * facingNormal.x + normal.y * facingNormal.y + normal.z * facingNormal.z
+      if (Math.abs(dot) > 1e-10) {
+        facesAwayFromTarget = dot < 0
+        break
+      }
+    }
+  }
+
+  if (facesAwayFromTarget !== Boolean(flipNormal)) {
     triangles = triangles.map(([a, b, c]) => [a, c, b] as [number, number, number])
   }
 
@@ -98,6 +164,8 @@ export function commitPolyDrawFace(
     mode: PolyDrawMode
     color: number
     flipNormal?: boolean
+    view?: ViewType
+    facingNormal?: Vec3
     objectNamePrefix?: string
   }
 ): PolyDrawCommitResult | null {
@@ -105,6 +173,9 @@ export function commitPolyDrawFace(
   if (points.length < minPoints) return null
 
   const worldCorners = points.map((p) => p.world)
+  const facingNormal = options.facingNormal ?? (
+    options.view ? polyDrawViewFacingNormal(options.view) : null
+  )
   const snapIds = collectSnapObjectIds(points)
 
   if (snapIds.length === 0) {
@@ -122,7 +193,14 @@ export function commitPolyDrawFace(
       color: options.color,
     }
     const indices = resolveVertexIndices(points, empty, new Map())
-    const appended = appendTrianglesToObject(empty, indices, worldCorners, options.color, options.flipNormal)
+    const appended = appendTrianglesToObject(
+      empty,
+      indices,
+      worldCorners,
+      options.color,
+      options.flipNormal,
+      facingNormal
+    )
     return {
       objects: [...objects, prepareSceneObject(appended.object)],
       removedIds: [],
@@ -163,7 +241,8 @@ export function commitPolyDrawFace(
     indices,
     worldCorners,
     options.color,
-    options.flipNormal
+    options.flipNormal,
+    facingNormal
   )
 
   const nextObjects = objects
@@ -192,5 +271,6 @@ export function flipFacesWinding(obj: SceneObject, faceStart: number, faceCount:
 export function autoFinalizeCount(mode: PolyDrawMode): number | null {
   if (mode === 'triangle') return 3
   if (mode === 'quad') return 4
+  if (mode === 'rectangle' || mode === 'ngon') return 2
   return null
 }

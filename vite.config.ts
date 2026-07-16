@@ -7,6 +7,9 @@ export default defineConfig({
   build: {
     target: 'es2020',
     modulePreload: { polyfill: false },
+    // Three.js is intentionally isolated as an ~801 kB minified / ~209 kB gzip
+    // vendor chunk. Keep warnings actionable without splitting one runtime.
+    chunkSizeWarningLimit: 850,
     rollupOptions: {
       output: {
         manualChunks(id) {

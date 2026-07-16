@@ -213,7 +213,7 @@ describe('BVH source face mapping', () => {
     ['bottom', [0, -5, 0] as const, 5],
   ])('maps a %s ray to the original SceneObject face', (_name, position, expectedFace) => {
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
-    camera.position.set(...position)
+    camera.position.set(position[0], position[1], position[2])
     camera.lookAt(0, 0, 0)
     camera.updateProjectionMatrix()
     camera.updateMatrixWorld(true)
@@ -237,7 +237,7 @@ describe('BVH source face mapping', () => {
     ['bottom', [0, -5, 0] as const, 5],
   ])('gives Knife the original %s face ID', (_name, position, expectedFace) => {
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
-    camera.position.set(...position)
+    camera.position.set(position[0], position[1], position[2])
     camera.lookAt(0, 0, 0)
     camera.updateProjectionMatrix()
     const rect = {

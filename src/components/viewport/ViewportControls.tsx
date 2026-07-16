@@ -38,12 +38,15 @@ export function ViewportControls({
   slotIndex,
   enableZoom = true,
   disableMiddlePan = false,
+  trackViewportFrameLoop = true,
 }: {
   rootRef: React.RefObject<HTMLDivElement | null>
   view: ViewType
   slotIndex: ViewportSlotIndex
   enableZoom?: boolean
   disableMiddlePan?: boolean
+  /** False for secondary canvases that are not part of the quad viewport registry. */
+  trackViewportFrameLoop?: boolean
 }) {
   const { layoutVisible } = useViewportRender()
   const invalidate = useThree((s) => s.invalidate)
@@ -63,10 +66,12 @@ export function ViewportControls({
   useEffect(() => {
     return () => {
       if (releaseTimerRef.current !== null) clearTimeout(releaseTimerRef.current)
-      if (interactionHeldRef.current) popViewportLocalInteraction(slotIndex)
+      if (interactionHeldRef.current && trackViewportFrameLoop) {
+        popViewportLocalInteraction(slotIndex)
+      }
       setDomElement(null)
     }
-  }, [slotIndex])
+  }, [slotIndex, trackViewportFrameLoop])
 
   useEffect(() => {
     const syncFromModifiers = (modifiers: {
@@ -138,9 +143,9 @@ export function ViewportControls({
     }
     if (!interactionHeldRef.current) {
       interactionHeldRef.current = true
-      pushViewportLocalInteraction(slotIndex)
+      if (trackViewportFrameLoop) pushViewportLocalInteraction(slotIndex)
     }
-  }, [slotIndex])
+  }, [slotIndex, trackViewportFrameLoop])
 
   const handleControlsEnd = useCallback(() => {
     if (releaseTimerRef.current !== null) clearTimeout(releaseTimerRef.current)
@@ -149,9 +154,9 @@ export function ViewportControls({
       releaseTimerRef.current = null
       if (!interactionHeldRef.current) return
       interactionHeldRef.current = false
-      popViewportLocalInteraction(slotIndex)
+      if (trackViewportFrameLoop) popViewportLocalInteraction(slotIndex)
     }, 260)
-  }, [slotIndex])
+  }, [slotIndex, trackViewportFrameLoop])
 
   if (!domElement) return null
 

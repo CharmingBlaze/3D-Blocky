@@ -42,7 +42,8 @@ export function DrawVertexOverlay() {
   )
 
   const isPolyDraw = activeTool === 'poly-draw'
-  const showVertices = activeTool === 'draw' || isPolyDraw
+  const isDirectMeshMode = activeTool === 'smart' || activeTool === 'extrude'
+  const showVertices = activeTool === 'draw' || isPolyDraw || isDirectMeshMode
 
   const visibleObjects = useMemo(() => {
     if (!showVertices) return []

@@ -7,6 +7,7 @@ import { triangulatePolygon } from '../mesh/geometry2d'
 
 import { useTheme } from '../theme/useTheme'
 import { hexToNumber } from '../theme/themes'
+import { rectangleWorldPoints, regularPolygonWorldPoints } from '../polyDraw/polyDrawShapes'
 
 function pointMarker(
   world: { x: number; y: number; z: number },
@@ -26,20 +27,36 @@ export function PolyDrawVisuals() {
   const { accent, accentGreen, vertexHover } = useTheme()
   const edgeColor = accent
   const fillColor = hexToNumber(accent)
-  const { polyDrawDraft, polyDrawHover, activeTool } = useAppStore(
+  const { polyDrawDraft, polyDrawHover, polyDrawMode, activeTool } = useAppStore(
     useShallow((s) => ({
       polyDrawDraft: s.polyDrawDraft,
       polyDrawHover: s.polyDrawHover,
+      polyDrawMode: s.polyDrawMode,
       activeTool: s.activeTool,
     }))
   )
 
+  const shapePreviewWorlds = useMemo(() => {
+    if (!polyDrawDraft?.previewWorld || polyDrawDraft.points.length !== 1) return []
+    const anchor = polyDrawDraft.points[0]!.world
+    if (polyDrawMode === 'rectangle') {
+      return rectangleWorldPoints(anchor, polyDrawDraft.previewWorld, polyDrawDraft.view)
+    }
+    if (polyDrawMode === 'ngon') {
+      return regularPolygonWorldPoints(anchor, polyDrawDraft.previewWorld, polyDrawDraft.view)
+    }
+    return []
+  }, [polyDrawDraft, polyDrawMode])
+
   const fillGeometry = useMemo(() => {
-    if (!polyDrawDraft || polyDrawDraft.points.length < 3) return null
-    const worlds = polyDrawDraft.points.map((p) => p.world)
-    if (polyDrawDraft.previewWorld && polyDrawDraft.points.length >= 2) {
+    if (!polyDrawDraft) return null
+    const worlds = shapePreviewWorlds.length >= 3
+      ? shapePreviewWorlds
+      : polyDrawDraft.points.map((p) => p.world)
+    if (shapePreviewWorlds.length === 0 && polyDrawDraft.previewWorld && polyDrawDraft.points.length >= 2) {
       worlds.push(polyDrawDraft.previewWorld)
     }
+    if (worlds.length < 3) return null
     const tris = triangulatePolygon(worlds)
     if (tris.length === 0) return null
 
@@ -54,7 +71,7 @@ export function PolyDrawVisuals() {
     geo.setIndex(indices)
     geo.computeVertexNormals()
     return geo
-  }, [polyDrawDraft])
+  }, [polyDrawDraft, shapePreviewWorlds])
 
   useEffect(() => () => fillGeometry?.dispose(), [fillGeometry])
 
@@ -62,15 +79,20 @@ export function PolyDrawVisuals() {
 
   const { points, previewWorld, snapHighlight } = polyDrawDraft
 
-  const edgePoints: [number, number, number][] = points.map((p) => [p.world.x, p.world.y, p.world.z])
-  if (previewWorld && points.length > 0) {
+  const edgeWorlds = shapePreviewWorlds.length > 0
+    ? shapePreviewWorlds
+    : points.map((point) => point.world)
+  const edgePoints: [number, number, number][] = edgeWorlds.map((point) => [point.x, point.y, point.z])
+  if (shapePreviewWorlds.length === 0 && previewWorld && points.length > 0) {
     edgePoints.push([previewWorld.x, previewWorld.y, previewWorld.z])
   }
 
   const closedPreview =
-    polyDrawDraft.points.length >= 3 &&
-    previewWorld &&
-    snapHighlight?.isDraft
+    shapePreviewWorlds.length >= 3 || (
+      polyDrawDraft.points.length >= 3 &&
+      previewWorld &&
+      snapHighlight?.isDraft
+    )
 
   const loopPoints = closedPreview
     ? [...edgePoints, edgePoints[0] as [number, number, number]]

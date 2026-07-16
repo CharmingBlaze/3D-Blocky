@@ -32,6 +32,7 @@ export function MaterialEditorPanel() {
     materialEditorGradientActiveStop,
     materialEditorGradientStops,
     materialEditorApplyToSelection,
+    materialColorCancelEpoch,
     selectedObjectId,
     selectionObjectIds,
     objectTextures,
@@ -73,6 +74,7 @@ export function MaterialEditorPanel() {
       materialEditorGradientActiveStop: s.materialEditorGradientActiveStop,
       materialEditorGradientStops: s.materialEditorGradientStops,
       materialEditorApplyToSelection: s.materialEditorApplyToSelection,
+      materialColorCancelEpoch: s.materialColorCancelEpoch,
       selectedObjectId: s.selectedObjectId,
       selectionObjectIds: s.selectionObjectIds,
       selectionMode: s.selectionMode,
@@ -212,6 +214,7 @@ export function MaterialEditorPanel() {
             color={materialEditorColor}
             onChange={setMaterialEditorColorLive}
             onCommit={commitMaterialEditorColor}
+            cancelEpoch={materialColorCancelEpoch}
           />
           <label className="mat-slider-row">
             <span>Opacity</span>

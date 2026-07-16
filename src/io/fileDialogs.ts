@@ -1,10 +1,10 @@
 import {
-  PickOpenFile as wailsPickOpen,
-  PickSaveFile as wailsPickSave,
-  ReadFileBase64 as wailsReadBase64,
-  WriteFileBase64 as wailsWriteBase64,
-  WriteTextFile as wailsWriteText,
-} from '../../wailsjs/go/main/App'
+  wailsPickOpen,
+  wailsPickSave,
+  wailsReadBase64,
+  wailsWriteBase64,
+  wailsWriteText,
+} from './wailsBridge'
 
 export type FileFilter = {
   name: string
@@ -186,7 +186,7 @@ function triggerBrowserDownload(blob: Blob, filename: string): void {
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function pickOpenFileBrowser(options: PickOpenFileOptions): Promise<File | null> {

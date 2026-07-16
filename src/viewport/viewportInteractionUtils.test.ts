@@ -22,12 +22,16 @@ describe('viewportInteractionUtils component tools', () => {
     expect(canPickComponentSelection('move')).toBe(true)
     expect(canPickComponentSelection('rotate')).toBe(true)
     expect(canPickComponentSelection('scale')).toBe(true)
+    expect(canPickComponentSelection('smart')).toBe(true)
+    expect(canPickComponentSelection('extrude')).toBe(true)
     expect(canPickComponentSelection('draw')).toBe(false)
   })
 
   it('allows free-drag only for select tools and move', () => {
     expect(canDragComponentSelection('select-vertex')).toBe(true)
     expect(canDragComponentSelection('move')).toBe(true)
+    expect(canDragComponentSelection('smart')).toBe(true)
+    expect(canDragComponentSelection('extrude')).toBe(false)
     expect(canDragComponentSelection('rotate')).toBe(false)
     expect(canDragComponentSelection('scale')).toBe(false)
   })
@@ -38,7 +42,10 @@ describe('viewportInteractionUtils component tools', () => {
       expect(isBoxSelectInteraction(mode, 'rotate')).toBe(true)
       expect(isBoxSelectInteraction(mode, 'scale')).toBe(true)
       expect(isBoxSelectInteraction(mode, 'select-vertex')).toBe(true)
+      expect(isBoxSelectInteraction(mode, 'smart')).toBe(true)
+      expect(isBoxSelectInteraction(mode, 'extrude')).toBe(true)
     }
+    expect(isBoxSelectInteraction('object', 'smart')).toBe(true)
   })
 
   it('routes hover updates for every interactive topology cutting tool', () => {

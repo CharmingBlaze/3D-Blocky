@@ -1,7 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type * as THREE from 'three'
-import { useViewportSlotInteraction } from '../../rendering/viewportFrameLoop'
+import {
+  shouldViewportRenderContinuously,
+  useViewportSlotInteraction,
+} from '../../rendering/viewportFrameLoop'
 import { ViewportRenderContext } from '../ViewportRenderContext'
 import { ViewportDomContext } from '../ViewportDomContext'
 import { useAppStore } from '../../store/appStore'
@@ -64,7 +67,7 @@ export function ViewportPanel({
     roundedBoxSubdivisions,
     imageDropMode,
     selectedBillboardImageId,
-    billboardImages,
+    billboardImagesLength,
     viewportXRay,
     pixelEditorOpen,
     pixelEditorPaintOnModel,
@@ -90,7 +93,7 @@ export function ViewportPanel({
       roundedBoxSubdivisions: s.roundedBoxSubdivisions,
       imageDropMode: s.imageDropMode,
       selectedBillboardImageId: s.selectedBillboardImageId,
-      billboardImages: s.billboardImages,
+      billboardImagesLength: s.billboardImages.length,
       viewportXRay: s.viewportXRay,
       pixelEditorOpen: s.pixelEditorOpen,
       pixelEditorPaintOnModel: s.pixelEditorPaintOnModel,
@@ -118,15 +121,15 @@ export function ViewportPanel({
       s.objectTransformModal != null
   )
 
-  // Camera orbit/pan/zoom: continuous only on this slot (localActive).
-  // Shared mesh edits + live CAD/stroke drafts: keep every *visible* slot
-  // continuous so peers mirror the change immediately (demand invalidate alone
-  // is not enough while drafts update every pointer move).
-  const continuousFrames =
-    layoutVisible &&
-    (interaction.localActive ||
-      interaction.sharedActiveAnywhere ||
-      cadPreviewActive)
+  // Camera/tool motion stays continuous only at its source. Peer panes use the
+  // existing scene/draft invalidation bridge and render once per changed state.
+  const continuousFrames = shouldViewportRenderContinuously({
+    layoutVisible,
+    isActive,
+    localActive: interaction.localActive,
+    sharedActiveHere: interaction.sharedActiveHere,
+    cadPreviewActive,
+  })
 
   const quality: 'high' | 'low' = layoutVisible && isActive ? 'high' : 'low'
 
@@ -229,7 +232,7 @@ export function ViewportPanel({
   const billboardPickActive =
     isActiveViewport &&
     !pixelPaintActive &&
-    billboardImages.length > 0 &&
+    billboardImagesLength > 0 &&
     selectionMode === 'object' &&
     (activeTool === 'select-object' || TRANSFORM_GIZMO_TOOLS.includes(activeTool))
 
@@ -396,7 +399,7 @@ export function ViewportPanel({
               multiObjectGizmoActive={multiObjectGizmoActive}
               componentGizmoActive={componentGizmoActive}
               componentGizmoObject={componentGizmoObject}
-              billboardImagesLength={billboardImages.length}
+              billboardImagesLength={billboardImagesLength}
               viewportBg={viewportBg}
             />
           </ViewportDomContext.Provider>

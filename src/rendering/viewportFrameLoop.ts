@@ -5,6 +5,29 @@ export type ViewportInteractionKind = 'local' | 'shared'
 
 type InteractionListener = () => void
 
+export interface ViewportContinuousFrameState {
+  layoutVisible: boolean
+  isActive: boolean
+  localActive: boolean
+  sharedActiveHere: boolean
+  cadPreviewActive: boolean
+}
+
+/**
+ * Continuous frames are limited to the viewport producing camera/tool motion.
+ * Peer panes receive explicit invalidations when shared scene state changes.
+ */
+export function shouldViewportRenderContinuously(
+  state: ViewportContinuousFrameState
+): boolean {
+  return (
+    state.layoutVisible &&
+    (state.localActive ||
+      state.sharedActiveHere ||
+      (state.isActive && state.cadPreviewActive))
+  )
+}
+
 const localCounts = new Map<ViewportSlotIndex, number>()
 const sharedCounts = new Map<ViewportSlotIndex, number>()
 const listeners = new Set<InteractionListener>()

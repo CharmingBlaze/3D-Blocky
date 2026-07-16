@@ -47,6 +47,7 @@ function finalize(mesh: IndexedMesh, outwardCenter: Vec3, skipOutwardWinding = f
     facet: false,
     validate: true,
     skipOutwardWinding,
+    validateInwardFaces: !skipOutwardWinding,
   })
   return data.indices.length === 0 ? emptyMeshData() : data
 }
@@ -255,7 +256,6 @@ export function createInscribedStairs(
   const hy = size.y / 2
   const hz = size.z / 2
   const baseY = center.y - hy
-  const topY = center.y + hy
   const cx = center.x
   const cz = center.z
   const zFront = cz - hz
@@ -289,52 +289,57 @@ export function createInscribedStairs(
     )
   }
 
-  // Underside
-  quad(
-    cx - hx,
-    baseY,
-    zFront,
-    cx + hx,
-    baseY,
-    zFront,
-    cx + hx,
-    baseY,
-    zBack,
-    cx - hx,
-    baseY,
-    zBack
-  )
-
-  // Back wall (full height)
-  quad(
-    cx + hx,
-    baseY,
-    zBack,
-    cx - hx,
-    baseY,
-    zBack,
-    cx - hx,
-    topY,
-    zBack,
-    cx + hx,
-    topY,
-    zBack
-  )
-
   for (let s = 0; s < steps; s++) {
     const z0 = zFront + s * tread
     const z1 = z0 + tread
     const y0 = baseY + s * rise
     const y1 = y0 + rise
 
+    // Segment the underside and back wall at the same boundaries used by the
+    // stepped side panels so every boundary edge has an exact topological twin.
+    quad(cx - hx, baseY, z0, cx + hx, baseY, z0, cx + hx, baseY, z1, cx - hx, baseY, z1)
+    quad(cx + hx, y0, zBack, cx - hx, y0, zBack, cx - hx, y1, zBack, cx + hx, y1, zBack)
+
     // Riser — vertical face at the front of this step
     quad(cx - hx, y0, z0, cx + hx, y0, z0, cx + hx, y1, z0, cx - hx, y1, z0)
     // Tread — horizontal face for this step only (not the full remaining depth)
     quad(cx - hx, y1, z0, cx + hx, y1, z0, cx + hx, y1, z1, cx - hx, y1, z1)
 
-    // Solid side panels under this tread (stepped silhouette in side view)
-    quad(cx - hx, baseY, z0, cx - hx, baseY, z1, cx - hx, y1, z1, cx - hx, y1, z0)
-    quad(cx + hx, baseY, z1, cx + hx, baseY, z0, cx + hx, y1, z0, cx + hx, y1, z1)
+    // Split each side panel at every lower step height. Without these matching
+    // boundary vertices, adjacent panels meet in T-junctions and leave naked
+    // half-edges even though the rendered surface looks closed.
+    for (let band = 0; band <= s; band++) {
+      const bandY0 = baseY + band * rise
+      const bandY1 = bandY0 + rise
+      quad(
+        cx - hx,
+        bandY0,
+        z0,
+        cx - hx,
+        bandY0,
+        z1,
+        cx - hx,
+        bandY1,
+        z1,
+        cx - hx,
+        bandY1,
+        z0
+      )
+      quad(
+        cx + hx,
+        bandY0,
+        z1,
+        cx + hx,
+        bandY0,
+        z0,
+        cx + hx,
+        bandY1,
+        z0,
+        cx + hx,
+        bandY1,
+        z1
+      )
+    }
   }
 
   // Box center often sits in empty air above lower steps — use a point inside the solid.
@@ -526,32 +531,16 @@ export function createInscribedHalfCircle(
       profileQuad(bot[i]!, bot[i + 1]!, top[i + 1]!, top[i]!)
     }
 
-    const flatBot: number[] = []
-    const flatTop: number[] = []
-    for (let i = 0; i <= archSegs; i++) {
-      const t = i / archSegs
-      const hu = Math.cos(Math.PI * t) * h
-      flatBot.push(b.addVertexVec(profileToWorld(profileView, center, heightAxis, hu, -v, -halfDepth)))
-      flatTop.push(b.addVertexVec(profileToWorld(profileView, center, heightAxis, hu, -v, halfDepth)))
-    }
-    for (let i = 0; i < archSegs; i++) {
-      profileQuad(flatBot[i]!, flatBot[i + 1]!, flatTop[i + 1]!, flatTop[i]!)
-    }
-
-    const leftBot = b.addVertexVec(profileToWorld(profileView, center, heightAxis, -h, -v, -halfDepth))
-    const leftTop = b.addVertexVec(profileToWorld(profileView, center, heightAxis, -h, -v, halfDepth))
-    const rightBot = b.addVertexVec(profileToWorld(profileView, center, heightAxis, h, -v, -halfDepth))
-    const rightTop = b.addVertexVec(profileToWorld(profileView, center, heightAxis, h, -v, halfDepth))
-    const depthSign =
-      profileView === 'perspective' ? 1 : VIEW_AXIS_TABLE[profileView].dSign * VIEW_AXIS_TABLE[profileView].vSign
-    if (depthSign < 0) {
-      b.addQuad(leftBot, rightBot, rightTop, leftTop)
-    } else {
-      b.addQuad(leftBot, leftTop, rightTop, rightBot)
-    }
-
     const capPivotBot = b.addVertexVec(profileToWorld(profileView, center, heightAxis, 0, -v, -halfDepth))
     const capPivotTop = b.addVertexVec(profileToWorld(profileView, center, heightAxis, 0, -v, halfDepth))
+    // Split the flat diameter at the cap pivot. Matching edge segmentation keeps
+    // the curved shell, base, and cap fans manifold after coincident welding.
+    const baseQuad = (a: number, b0: number, c: number, d: number) => {
+      if (flipProfile) b.addQuad(a, b0, c, d)
+      else b.addQuad(a, d, c, b0)
+    }
+    baseQuad(bot[0]!, capPivotBot, capPivotTop, top[0]!)
+    baseQuad(capPivotBot, bot[archSegs]!, top[archSegs]!, capPivotTop)
     for (let i = 0; i < archSegs; i++) {
       if (flipProfile) {
         b.addTriangle(capPivotBot, bot[i]!, bot[i + 1]!)
@@ -581,14 +570,10 @@ export function createInscribedHalfCircle(
   for (let i = 0; i < segs; i++) {
     b.addQuad(bot[i]!, top[i]!, top[i + 1]!, bot[i + 1]!)
   }
-  const flatBot = b.addVertexVec(mapLocal(-halfA0, -halfA1, -halfDepth, heightAxis, center))
-  const flatTop = b.addVertexVec(mapLocal(-halfA0, -halfA1, halfDepth, heightAxis, center))
-  const flatBot2 = b.addVertexVec(mapLocal(halfA0, -halfA1, -halfDepth, heightAxis, center))
-  const flatTop2 = b.addVertexVec(mapLocal(halfA0, -halfA1, halfDepth, heightAxis, center))
-  b.addQuad(flatBot, flatTop, flatTop2, flatBot2)
-
   const capPivotBot = b.addVertexVec(mapLocal(0, -halfA1, -halfDepth, heightAxis, center))
   const capPivotTop = b.addVertexVec(mapLocal(0, -halfA1, halfDepth, heightAxis, center))
+  b.addQuad(bot[segs]!, top[segs]!, capPivotTop, capPivotBot)
+  b.addQuad(capPivotBot, capPivotTop, top[0]!, bot[0]!)
   for (let i = 0; i < segs; i++) {
     b.addTriangle(capPivotBot, bot[i + 1]!, bot[i]!)
     b.addTriangle(capPivotTop, top[i]!, top[i + 1]!)

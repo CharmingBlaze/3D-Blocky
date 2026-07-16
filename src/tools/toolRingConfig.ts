@@ -33,9 +33,9 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
   draw: [
     { kind: 'drawInput', mode: 'regular', label: 'Sketch' },
     { kind: 'drawInput', mode: 'vector-pen', label: 'Vector Pen' },
-    { kind: 'polyMode', mode: 'triangle', label: 'Poly · Triangle' },
-    { kind: 'polyMode', mode: 'quad', label: 'Poly · Quad' },
-    { kind: 'polyMode', mode: 'poly', label: 'Poly · Free' },
+    { kind: 'polyMode', mode: 'poly', label: 'Mesh · Line' },
+    { kind: 'polyMode', mode: 'rectangle', label: 'Mesh · Rectangle' },
+    { kind: 'polyMode', mode: 'ngon', label: 'Mesh · Polygon' },
     { kind: 'stroke', mode: 'outline', label: 'Stroke · Outline' },
     { kind: 'stroke', mode: 'centerline', label: 'Stroke · Path' },
     { kind: 'stroke', mode: 'blob', label: 'Stroke · Blob' },
@@ -123,6 +123,8 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
 const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate', 'relax', 'pinch']
 
 export function categoryForActiveTool(tool: ActiveTool, fallback: ToolCategory): ToolCategory {
+  if (tool === 'smart') return 'select'
+  if (tool === 'extrude') return 'mesh'
   if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'bend') return 'transform'
   if (SCULPT_TOOLS.includes(tool)) return 'sculpt'
   if (tool === 'boolean-hole') return 'boolean'
