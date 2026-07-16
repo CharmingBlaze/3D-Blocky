@@ -172,7 +172,7 @@ export function generateVerticalShapedCapsule(
   const slices = collectSlices(boundary, profileRings)
   if (slices.length < 2) return mesh
 
-  const segments = Math.max(6, Math.min(12, radialSegments))
+  const segments = Math.max(6, Math.min(24, radialSegments))
   const first = slices[0]!
   const last = slices[slices.length - 1]!
   const ringCount = slices.length

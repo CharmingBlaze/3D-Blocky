@@ -69,6 +69,8 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     strokeMode,
     sketchExtrudeMode,
     penExtrudeMode,
+    sketchLatheMode,
+    penLatheMode,
   } = useAppStore(
     useShallow((s) => ({
       currentStroke: s.currentStroke,
@@ -84,6 +86,8 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
       strokeMode: s.strokeMode,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
+      sketchLatheMode: s.sketchLatheMode,
+      penLatheMode: s.penLatheMode,
     }))
   )
 
@@ -113,7 +117,7 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
 
   const showPlaneGuides = isDrawing && currentStrokeView === view
   const explicitlyVolumetric =
-    sketchExtrudeMode || penExtrudeMode || strokeMode.startsWith('hair-')
+    sketchExtrudeMode || penExtrudeMode || sketchLatheMode || penLatheMode || strokeMode.startsWith('hair-')
   // Ordinary Sketch stays a clean line. Only explicitly volumetric tools show a
   // mesh preview, and the active drawing viewport remains unobstructed.
   const showVolumePreview =

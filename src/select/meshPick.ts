@@ -19,6 +19,7 @@ import {
   getFaceTriangulation,
 } from './meshPickGeometryCache'
 import { getOverlayPickData } from './overlayPickCache'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 export interface MeshPickHit {
   objectId: string
@@ -296,8 +297,8 @@ function pickClosestObject(
   preferredId?: string | null
 ): FaceHit | null {
   const candidates = preferredId
-    ? objects.filter((o) => o.id === preferredId)
-    : objects
+    ? objects.filter((o) => o.id === preferredId && isSceneObjectVisible(o))
+    : objects.filter(isSceneObjectVisible)
 
   let best: FaceHit | null = null
   for (const obj of candidates) {

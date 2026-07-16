@@ -20,7 +20,8 @@ import {
 } from '../stroke/hairUvTransform'
 import type { HairTextureSettings } from '../stroke/hairTextureSettings'
 import { DEFAULT_HAIR_TEXTURE_SETTINGS } from '../stroke/hairTextureSettings'
-import type { HairTipStyle, StrokeMode } from '../store/strokeSlice'
+import type { HairTipStyle, StrokeMode, SweepCapStyle } from '../store/strokeSlice'
+import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
 
 export { PROJECT_FILE_EXTENSION, DEFAULT_PROJECT_FILENAME, LEGACY_PROJECT_FILE_EXTENSION } from '../app/branding'
 
@@ -40,6 +41,40 @@ export interface ProjectStrokeState {
   extrudeAmount: number
   sketchExtrudeMode: boolean
   penExtrudeMode: boolean
+  latheRadialSegments: number
+  latheProfileRings: number
+  latheSmoothing: number
+  pathStartCap: SweepCapStyle
+  pathEndCap: SweepCapStyle
+  pathRadialSegments: number
+  pathRadiusScale: number
+  ribbonStartTip: HairTipStyle
+  ribbonEndTip: HairTipStyle
+  ribbonTaper: number
+  ribbonWidthScale: number
+  ribbonFlat: boolean
+  pathOutput: PathOutput
+  pathStartScale: number
+  pathEndScale: number
+  pathTwist: number
+  pathSpacing: number
+  pathOffset: number
+  pathProfile: PathProfile
+  pathProfileWidth: number
+  pathProfileHeight: number
+  pathChainAlternating: boolean
+  pathCardCrossed: boolean
+  pathDistributionMode: PathDistributionMode
+  pathCount: number
+  pathStartPadding: number
+  pathEndPadding: number
+  pathRandomScale: number
+  pathRotation: number
+  pathRandomRotation: number
+  pathAlternateRotation: boolean
+  pathMirrorAlternate: boolean
+  pathSeed: number
+  pathKeepInstances: boolean
 }
 
 export interface ProjectSceneSettingsState {
@@ -218,6 +253,40 @@ function parseStrokePreferences(raw: unknown): ProjectStrokeState | undefined {
     extrudeAmount: Number.isFinite(raw.extrudeAmount) ? Number(raw.extrudeAmount) : 16,
     sketchExtrudeMode: Boolean(raw.sketchExtrudeMode),
     penExtrudeMode: Boolean(raw.penExtrudeMode),
+    latheRadialSegments: Number.isFinite(raw.latheRadialSegments) ? Math.max(8, Math.min(64, Number(raw.latheRadialSegments))) : 24,
+    latheProfileRings: Number.isFinite(raw.latheProfileRings) ? Math.max(4, Math.min(128, Number(raw.latheProfileRings))) : 48,
+    latheSmoothing: Number.isFinite(raw.latheSmoothing) ? Math.max(0, Math.min(1, Number(raw.latheSmoothing))) : 0.15,
+    pathStartCap: ['flat', 'round', 'pointed', 'open'].includes(String(raw.pathStartCap)) ? raw.pathStartCap as SweepCapStyle : 'flat',
+    pathEndCap: ['flat', 'round', 'pointed', 'open'].includes(String(raw.pathEndCap)) ? raw.pathEndCap as SweepCapStyle : 'flat',
+    pathRadialSegments: Number.isFinite(raw.pathRadialSegments) ? Math.max(3, Math.min(24, Number(raw.pathRadialSegments))) : 8,
+    pathRadiusScale: Number.isFinite(raw.pathRadiusScale) ? Math.max(0.1, Math.min(4, Number(raw.pathRadiusScale))) : 1,
+    ribbonStartTip: raw.ribbonStartTip === 'pointed' ? 'pointed' : 'square',
+    ribbonEndTip: raw.ribbonEndTip === 'pointed' ? 'pointed' : 'square',
+    ribbonTaper: Number.isFinite(raw.ribbonTaper) ? Math.max(0.05, Math.min(0.49, Number(raw.ribbonTaper))) : 0.35,
+    ribbonWidthScale: Number.isFinite(raw.ribbonWidthScale) ? Math.max(0.1, Math.min(4, Number(raw.ribbonWidthScale))) : 1,
+    ribbonFlat: Boolean(raw.ribbonFlat),
+    pathOutput: ['tube','ribbon','chain','vine','rope','cards','object-array','profile-sweep'].includes(String(raw.pathOutput)) ? raw.pathOutput as PathOutput : 'tube',
+    pathStartScale: Number.isFinite(raw.pathStartScale) ? Number(raw.pathStartScale) : 1,
+    pathEndScale: Number.isFinite(raw.pathEndScale) ? Number(raw.pathEndScale) : 1,
+    pathTwist: Number.isFinite(raw.pathTwist) ? Number(raw.pathTwist) : 360,
+    pathSpacing: Number.isFinite(raw.pathSpacing) ? Number(raw.pathSpacing) : 16,
+    pathOffset: Number.isFinite(raw.pathOffset) ? Number(raw.pathOffset) : 0,
+    pathProfile: ['round','square','rectangle','rail'].includes(String(raw.pathProfile)) ? raw.pathProfile as PathProfile : 'round',
+    pathProfileWidth: Number.isFinite(raw.pathProfileWidth) ? Number(raw.pathProfileWidth) : 1,
+    pathProfileHeight: Number.isFinite(raw.pathProfileHeight) ? Number(raw.pathProfileHeight) : 1,
+    pathChainAlternating: raw.pathChainAlternating !== false,
+    pathCardCrossed: Boolean(raw.pathCardCrossed),
+    pathDistributionMode: ['spacing','count','fit'].includes(String(raw.pathDistributionMode)) ? raw.pathDistributionMode as PathDistributionMode : 'spacing',
+    pathCount: Number.isFinite(raw.pathCount) ? Math.max(1, Number(raw.pathCount)) : 8,
+    pathStartPadding: Number.isFinite(raw.pathStartPadding) ? Math.max(0, Number(raw.pathStartPadding)) : 0,
+    pathEndPadding: Number.isFinite(raw.pathEndPadding) ? Math.max(0, Number(raw.pathEndPadding)) : 0,
+    pathRandomScale: Number.isFinite(raw.pathRandomScale) ? Math.max(0, Math.min(1, Number(raw.pathRandomScale))) : 0,
+    pathRotation: Number.isFinite(raw.pathRotation) ? Number(raw.pathRotation) : 0,
+    pathRandomRotation: Number.isFinite(raw.pathRandomRotation) ? Math.max(0, Number(raw.pathRandomRotation)) : 0,
+    pathAlternateRotation: Boolean(raw.pathAlternateRotation),
+    pathMirrorAlternate: Boolean(raw.pathMirrorAlternate),
+    pathSeed: Number.isFinite(raw.pathSeed) ? Math.floor(Number(raw.pathSeed)) : 1,
+    pathKeepInstances: raw.pathKeepInstances !== false,
   }
 }
 

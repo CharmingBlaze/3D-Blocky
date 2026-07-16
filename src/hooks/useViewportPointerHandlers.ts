@@ -2014,7 +2014,7 @@ export function useViewportPointerHandlers({
         strokeView === view &&
         storeAtUp.isDrawing
       ) {
-        endStroke(view)
+        endStroke(view, getDrawPlanePoint(e))
       }
 
       if (e.button === 0) {

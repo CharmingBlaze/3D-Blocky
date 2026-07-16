@@ -211,6 +211,9 @@ type VectorStore = VectorToolsLayoutState & {
   penExtrudeMode: boolean
   penLatheMode: boolean
   penLatheCaps: boolean
+  latheRadialSegments: number
+  latheProfileRings: number
+  latheSmoothing: number
   extrudeAmount: number
   activeColor: number
   activeTool: string
@@ -222,6 +225,37 @@ type VectorStore = VectorToolsLayoutState & {
   hairUvTransform: import('../stroke/hairUvTransform').HairUvTransform
   hairTextureSettings: import('../stroke/hairTextureSettings').HairTextureSettings
   hairTipStyle: import('./strokeSlice').HairTipStyle
+  pathStartCap: import('./strokeSlice').SweepCapStyle
+  pathEndCap: import('./strokeSlice').SweepCapStyle
+  pathRadialSegments: number
+  pathRadiusScale: number
+  ribbonStartTip: import('./strokeSlice').HairTipStyle
+  ribbonEndTip: import('./strokeSlice').HairTipStyle
+  ribbonTaper: number
+  ribbonWidthScale: number
+  ribbonFlat: boolean
+  pathOutput: import('../mesh/pathOutputs').PathOutput
+  pathStartScale: number
+  pathEndScale: number
+  pathTwist: number
+  pathSpacing: number
+  pathOffset: number
+  pathProfile: import('../mesh/pathOutputs').PathProfile
+  pathProfileWidth: number
+  pathProfileHeight: number
+  pathChainAlternating: boolean
+  pathCardCrossed: boolean
+  pathDistributionMode: import('../mesh/pathOutputs').PathDistributionMode
+  pathCount: number
+  pathStartPadding: number
+  pathEndPadding: number
+  pathRandomScale: number
+  pathRotation: number
+  pathRandomRotation: number
+  pathAlternateRotation: boolean
+  pathMirrorAlternate: boolean
+  pathSeed: number
+  pathKeepInstances: boolean
   pushHistory: (label?: string) => boolean
   objectTextures: Record<string, UvTextureInfo>
 }
@@ -721,11 +755,27 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         penExtrudeMode,
         penLatheMode,
         penLatheCaps,
+        latheRadialSegments,
+        latheProfileRings,
+        latheSmoothing,
         extrudeAmount,
         hairTextureId,
         hairUvTransform,
         hairTextureSettings,
         hairTipStyle,
+        pathStartCap,
+        pathEndCap,
+        pathRadialSegments,
+        pathRadiusScale,
+        ribbonStartTip,
+        ribbonEndTip,
+        ribbonTaper,
+        ribbonWidthScale,
+        ribbonFlat,
+        pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
+        pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+        pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
+        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
       } = store()
 
       let obj = vectorPathToMesh(path, {
@@ -741,8 +791,24 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         extrudeMode: penLatheMode ? false : penExtrudeMode,
         latheMode: penLatheMode,
         latheCaps: penLatheCaps,
+        latheRadialSegments,
+        latheProfileRings,
+        latheSmoothing,
         extrudeAmount,
         hairTipStyle,
+        pathStartCap,
+        pathEndCap,
+        pathRadialSegments,
+        pathRadiusScale,
+        ribbonStartTip,
+        ribbonEndTip,
+        ribbonTaper,
+        ribbonWidthScale,
+        ribbonFlat,
+        pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
+        pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+        pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
+        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
       })
 
       if (obj && isHairStrokeMode(strokeMode)) {
@@ -766,6 +832,19 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
               stylize: facetExaggeration,
               extrudeDepth: extrudeAmount,
               hairTipStyle: hairMode ? hairTipStyle : undefined,
+              pathStartCap,
+              pathEndCap,
+              pathRadialSegments,
+              pathRadiusScale,
+              ribbonStartTip,
+              ribbonEndTip,
+              ribbonTaper,
+              ribbonWidthScale,
+              ribbonFlat,
+              pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
+              pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+              pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
+              pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
             })
           : obj
 

@@ -2,6 +2,7 @@ import { ObjectNode } from '../ObjectNode'
 import type { SceneObject } from '../../mesh/HalfEdgeMesh'
 import type { SelectionMode } from '../../store/appStore'
 import type { ViewportDisplayMode } from '../../rendering/viewportDisplay'
+import { isSceneObjectVisible } from '../../scene/objectVisibility'
 
 export function ViewportObjects({
   objects,
@@ -26,7 +27,7 @@ export function ViewportObjects({
 }) {
   return (
     <>
-      {objects.map((obj) => (
+      {objects.filter(isSceneObjectVisible).map((obj) => (
         <ObjectNode
           key={obj.id}
           object={obj}

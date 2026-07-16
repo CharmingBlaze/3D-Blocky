@@ -10,6 +10,7 @@ import { selectionHasComponents } from './mesh/meshSelection'
 import type { NudgeDirection } from './utils/viewNavigation'
 import { AppConfirmDialog } from './components/AppConfirmDialog'
 import { confirmDiscardProject } from './ui/appConfirm'
+import { useOutlinerUiStore } from './store/outlinerUiStore'
 
 const SidePanel = lazy(() =>
   import('./components/SidePanel').then((m) => ({ default: m.SidePanel }))
@@ -31,6 +32,9 @@ const MaterialEditorPanel = lazy(() =>
 )
 const PixelEditorPanel = lazy(() =>
   import('./components/PixelEditorPanel').then((m) => ({ default: m.PixelEditorPanel }))
+)
+const OutlinerPanel = lazy(() =>
+  import('./components/OutlinerPanel').then((m) => ({ default: m.OutlinerPanel }))
 )
 
 const NUDGE_KEYS: Record<string, NudgeDirection> = {
@@ -142,6 +146,11 @@ export default function App() {
         })()
         return
       }
+      if (e.code === 'KeyO' && !ctrlOrMeta && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        useOutlinerUiStore.getState().toggle()
+        return
+      }
       if (e.key === 'Tab') {
         e.preventDefault()
         const s = store()
@@ -151,6 +160,11 @@ export default function App() {
         e.preventDefault()
         const state = store()
         state.setShowSidePanel(!state.showSidePanel)
+        return
+      }
+      if (store().meshModal && (/^[0-9.-]$/.test(e.key) || e.key === 'Backspace')) {
+        e.preventDefault()
+        store().inputMeshModalNumericKey(e.key)
         return
       }
       if (e.key === 'x' || e.key === 'X' || e.key === 'y' || e.key === 'Y' || e.key === 'z' || e.key === 'Z') {
@@ -406,7 +420,9 @@ export default function App() {
         if (hasMeshComponents) {
           if (e.key === 'e' || e.key === 'E') {
             e.preventDefault()
-            state.beginMeshModal('extrude', lastMousePosRef.current.x, lastMousePosRef.current.y)
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
+            state.beginMeshModal('extrude', lastMousePosRef.current.x, lastMousePosRef.current.y, activeView)
             return
           }
           if (e.key === 'r' || e.key === 'R') {
@@ -589,6 +605,7 @@ function AppOverlays() {
       {meshModalOpen && <MeshModalController />}
       {materialEditorOpen && <MaterialEditorPanel />}
       {pixelEditorOpen && <PixelEditorPanel />}
+      <OutlinerPanel />
     </>
   )
 }

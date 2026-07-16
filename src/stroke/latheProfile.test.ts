@@ -7,6 +7,8 @@ import {
   LATHE_RADIAL_SEGMENTS,
 } from './latheProfile'
 import { projectMeshToView } from './worldProjection'
+import { polylineToMesh } from './polylineToMesh'
+import { regenerateLatheObject } from './latheSource'
 
 describe('latheProfile', () => {
   it('keeps profile corners but drops dense straight runs', () => {
@@ -33,6 +35,18 @@ describe('latheProfile', () => {
     }))
     const result = strokeToLatheProfile(many)!
     expect(result.profile.length).toBeLessThanOrEqual(LATHE_MAX_PROFILE_RINGS)
+  })
+
+  it('honors adjustable profile precision and smoothing', () => {
+    const wave = Array.from({ length: 100 }, (_, i) => ({
+      x: 20 + Math.sin(i * 0.35) * 5,
+      y: i,
+    }))
+    const precise = strokeToLatheProfile(wave, { maxProfileRings: 64, smoothing: 0 })!
+    const smooth = strokeToLatheProfile(wave, { maxProfileRings: 16, smoothing: 1 })!
+    expect(precise.profile.length).toBeGreaterThan(smooth.profile.length)
+    expect(precise.profile.length).toBeLessThanOrEqual(64)
+    expect(smooth.profile.length).toBeLessThanOrEqual(16)
   })
 
   it('follows a curved silhouette instead of collapsing to a few chords', () => {
@@ -92,5 +106,20 @@ describe('latheProfile', () => {
     expect(ringVert).toBeDefined()
     const topMatch = top.find((p) => Math.abs(p.x - ringVert!.x) < 0.01 && Math.abs(p.y - ringVert!.y) < 0.01 && Math.abs(p.z - ringVert!.z) < 0.01)
     expect(topMatch).toBeUndefined()
+  })
+
+  it('retains its profile and can rebuild an existing lathe at a new precision', () => {
+    const object = polylineToMesh({
+      points: [{ x: 4, y: 0 }, { x: 18, y: 12 }, { x: 10, y: 30 }],
+      view: 'front', polyBudget: 128, brushDensity: 12, strokeMode: 'outline',
+      rdpTolerance: 0.5, closeThreshold: 8, defaultDepth: 0, color: 0x336699,
+      latheMode: true, latheRadialSegments: 12, latheProfileRings: 16,
+    })!
+    expect(object.latheSource?.radialSegments).toBe(12)
+    const rebuilt = regenerateLatheObject(object, { radialSegments: 32, profileRings: 48 })!
+    expect(rebuilt.id).toBe(object.id)
+    expect(rebuilt.latheSource?.radialSegments).toBe(32)
+    expect(rebuilt.positions.length).toBeGreaterThan(object.positions.length)
+    expect(rebuilt.uvs?.length).toBeGreaterThan(0)
   })
 })

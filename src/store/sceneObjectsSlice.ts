@@ -14,6 +14,7 @@ import { invalidateSubdivisionPreviewCache } from '../mesh/subdivisionSurface'
 import { clearSculptSession } from '../sculpt/sculptSessionCache'
 import { stampDrawMaterial } from '../material/materialEditorSlice'
 import { ensureObjectUVs } from '../uv/uvObject'
+import { worldPointFromObject } from '../mesh/objectTransform'
 import { rebuildObjectIndex, getObjectIndex } from './objectIndex'
 import type { UvTextureInfo } from './appStore'
 
@@ -37,6 +38,8 @@ export interface SceneObjectsLayoutActions {
   toggleSymmetry: () => void
   setSymmetryAxis: (axis: SymmetryAxis) => void
   setSymmetryPlane: (plane: number) => void
+  centerSymmetryPlaneOnSelection: () => void
+  applySymmetryToSelection: () => void
   copySelection: () => void
   pasteClipboard: () => void
 }
@@ -236,6 +239,37 @@ export function createSceneObjectsSlice<T extends SceneObjectsLayoutState>(
     setSymmetryAxis: (axis) => setPartial({ symmetryAxis: axis }),
     setSymmetryPlane: (plane) =>
       setPartial({ symmetryPlane: Number.isFinite(plane) ? plane : 0 }),
+
+    centerSymmetryPlaneOnSelection: () => {
+      const { selectionObjectIds, selectedObjectId, objects, symmetryAxis } = store()
+      const ids = selectionObjectIds.length > 0 ? selectionObjectIds : selectedObjectId ? [selectedObjectId] : []
+      const selected = objects.filter((object) => ids.includes(object.id))
+      const coordinates: number[] = []
+      for (const object of selected) {
+        for (const point of object.positions) {
+          const world = worldPointFromObject(object, point)
+          coordinates.push(symmetryAxis === 'x' ? world.x : symmetryAxis === 'y' ? world.y : world.z)
+        }
+      }
+      if (coordinates.length === 0) return
+      setPartial({ symmetryPlane: (Math.min(...coordinates) + Math.max(...coordinates)) * 0.5 })
+    },
+
+    applySymmetryToSelection: () => {
+      const { selectionObjectIds, selectedObjectId, objects, symmetryAxis, symmetryPlane } = store()
+      const ids = selectionObjectIds.length > 0 ? selectionObjectIds : selectedObjectId ? [selectedObjectId] : []
+      if (ids.length === 0) return
+      const mirrored = objects.filter((object) => ids.includes(object.id)).map((object) =>
+        mirrorSceneObject(object, symmetryAxis, symmetryPlane)
+      )
+      if (mirrored.length === 0) return
+      setPartial({
+        objects: [...objects, ...mirrored],
+        selectedObjectId: mirrored[mirrored.length - 1]!.id,
+        selectionObjectIds: mirrored.map((object) => object.id),
+      })
+      store().commitHistory('Apply mirror')
+    },
 
     copySelection: () => {
       const { selectionObjectIds, objects } = store()

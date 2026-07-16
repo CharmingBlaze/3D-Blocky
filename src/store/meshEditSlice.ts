@@ -28,6 +28,7 @@ import {
 import type { SelectionMode } from './selectionSlice'
 import type { ViewType } from '../scene/viewTypes'
 import type { ViewMoveBasis } from '../utils/viewNavigation'
+import { ensureObjectUVs } from '../uv/uvObject'
 
 export interface MeshEditLayoutState {
   vertexMergeModifierHeld: boolean
@@ -180,27 +181,19 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
     },
 
     recalculateOutwardNormals: () => {
-      const { meshSelection, objects, selectionMode, selectedObjectId } = store()
-      const targetId =
-        selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
-          ? meshSelection.objectId
-          : selectedObjectId
-
-      if (!targetId) return
-      const obj = objects.find((o) => o.id === targetId)
-      if (!obj || obj.topologyLocked) return
-
-      const updated = makeSelectionOutward(
-        obj,
-        selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
-          ? meshSelection
-          : null,
-        selectionMode
-      )
-
-      store().updateObject(obj.id, {
-        faces: updated.faces,
-        faceUvIndices: updated.faceUvIndices,
+      const { meshSelection, objects, selectionMode, selectedObjectId, selectionObjectIds } = store()
+      const componentTarget = selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
+      const ids = componentTarget
+        ? [meshSelection.objectId]
+        : selectionObjectIds.length > 0
+          ? selectionObjectIds
+          : selectedObjectId ? [selectedObjectId] : []
+      if (ids.length === 0) return
+      setPartial({
+        objects: objects.map((obj) => {
+          if (!ids.includes(obj.id) || obj.topologyLocked) return obj
+          return makeSelectionOutward(obj, componentTarget ? meshSelection : null, selectionMode)
+        }),
       })
       store().commitHistory('Recalculate outward normals')
     },
@@ -296,18 +289,31 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
     },
 
     subdivideSelected: () => {
-      const { meshSelection, objects, selectionMode, selectedObjectId } = store()
-      const objectId = meshSelection?.objectId ?? selectedObjectId
-      if (!objectId) return
-      const obj = objects.find((o) => o.id === objectId)
-      if (!obj || obj.topologyLocked) return
-      const subdivided = subdivideObject(obj, meshSelection, selectionMode)
-      store().updateObject(obj.id, {
-        positions: subdivided.positions,
-        faces: subdivided.faces,
-        faceColors: subdivided.faceColors,
-        faceGroups: subdivided.faceGroups,
+      const { meshSelection, objects, selectionMode, selectedObjectId, selectionObjectIds } = store()
+      const componentTarget = selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
+      const ids = componentTarget
+        ? [meshSelection.objectId]
+        : selectionObjectIds.length > 0
+          ? selectionObjectIds
+          : selectedObjectId ? [selectedObjectId] : []
+      if (ids.length === 0) return
+      setPartial({
+        objects: objects.map((obj) => {
+          if (!ids.includes(obj.id) || obj.topologyLocked) return obj
+          const subdivided = subdivideObject(obj, componentTarget ? meshSelection : null, selectionMode)
+          return ensureObjectUVs({
+            ...subdivided,
+            uvs: undefined,
+            faceUvIndices: undefined,
+            uvAutoPacked: false,
+            sketchSource: undefined,
+            vectorSource: undefined,
+            latheSource: undefined,
+            primitiveSource: undefined,
+          })
+        }),
       })
+      if (componentTarget) setPartial({ meshSelection: null })
       store().commitHistory('Subdivide')
     },
 

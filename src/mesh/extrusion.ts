@@ -26,7 +26,11 @@ export interface CapsuleSweepOptions extends TubeOptions {
    * Use for Sketch Path so gentle freehand bends are not crushed to a few corners.
    */
   preserveSpine?: boolean
+  startCap?: SweepCapStyle
+  endCap?: SweepCapStyle
 }
+
+export type SweepCapStyle = 'flat' | 'round' | 'pointed' | 'open'
 
 function faceNormal3(mesh: HalfEdgeMesh, face: number[]): Vec3 {
   const a = mesh.positions[face[0]!]!
@@ -415,6 +419,25 @@ function appendSweepEndCap(
   }
 }
 
+function appendStyledSweepEndCap(
+  mesh: HalfEdgeMesh,
+  frame: SweepFrame,
+  ring: number[],
+  radius: number,
+  segments: number,
+  atStart: boolean,
+  color: number,
+  style: SweepCapStyle
+): void {
+  if (style === 'open') return
+  if (style === 'flat') {
+    appendFlatEndCap(mesh, ring, atStart, color)
+    return
+  }
+  const roundRings = Math.max(4, Math.min(10, Math.ceil(segments * 0.6)))
+  appendSweepEndCap(mesh, frame, ring, radius, segments, style === 'round' ? roundRings : 1, atStart, color)
+}
+
 function normalizeClosedSpine(path: Vec2[], closed: boolean): Vec2[] {
   if (!closed || path.length < 2) return path
   const first = path[0]!
@@ -440,10 +463,12 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
     hemiRings = 0,
     color = 0xf5a66e,
     preserveSpine = false,
+    startCap,
+    endCap,
   } = options
 
   const mesh = new HalfEdgeMesh()
-  const segments = Math.max(6, Math.min(10, radialSegments))
+  const segments = Math.max(3, Math.min(24, radialSegments))
   if (path.length < 2 || radius < 1e-6) return mesh
 
   const spine = normalizeClosedSpine(path, closed)
@@ -466,17 +491,9 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
   if (closed && ringCount > 2) {
     connectRingQuads(mesh, ringVerts[ringCount - 1]!, ringVerts[0]!, segments, color)
   } else if (ringCount >= 1) {
-    appendSweepEndCap(mesh, frames[0]!, ringVerts[0]!, radius, segments, hemiRings, true, color)
-    appendSweepEndCap(
-      mesh,
-      frames[ringCount - 1]!,
-      ringVerts[ringCount - 1]!,
-      radius,
-      segments,
-      hemiRings,
-      false,
-      color
-    )
+    const legacyStyle: SweepCapStyle = hemiRings > 0 ? 'round' : 'flat'
+    appendStyledSweepEndCap(mesh, frames[0]!, ringVerts[0]!, radius, segments, true, color, startCap ?? legacyStyle)
+    appendStyledSweepEndCap(mesh, frames[ringCount - 1]!, ringVerts[ringCount - 1]!, radius, segments, false, color, endCap ?? legacyStyle)
   }
 
   mesh.buildHalfEdges()

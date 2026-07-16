@@ -12,6 +12,7 @@ import type { CornerColor } from '../material/colorObject'
 import type { Uv2 } from '../uv/uvTypes'
 import type { SketchSource } from '../stroke/sketchSource'
 import type { VectorSource } from '../vector/vectorSource'
+import type { LatheSource } from '../stroke/latheSource'
 import type { PrimitiveSource } from '../primitives/primitiveBoxCommit'
 import { buildTopologyVertexNormals, getVertexNormalFromHalfEdges } from './meshNormals'
 import { triangulateMeshFace } from './faceTriangulation'
@@ -52,6 +53,8 @@ export interface ObjectTransform {
 export interface SceneObject {
   id: string
   name: string
+  /** Outliner visibility. Undefined preserves compatibility and means visible. */
+  visible?: boolean
   positions: Vec3[]
   faces: number[][]
   faceColors: number[]
@@ -89,6 +92,8 @@ export interface SceneObject {
   sketchSource?: SketchSource
   /** When set, mesh can be rebuilt from vector pen path data. */
   vectorSource?: VectorSource
+  /** Retained profile and precision settings for an editable Lathe. */
+  latheSource?: LatheSource
   /** Retained CAD parameters until explicitly converted to a regular mesh. */
   primitiveSource?: PrimitiveSource
 }
@@ -204,8 +209,15 @@ export class HalfEdgeMesh {
                 ? { ...meta.vectorSource.path.shapeParams }
                 : undefined,
             },
+        }
+        : undefined,
+      latheSource: meta.latheSource
+        ? {
+            ...meta.latheSource,
+            points: meta.latheSource.points.map((point) => ({ ...point })),
           }
         : undefined,
+      primitiveSource: meta.primitiveSource,
     }
   }
 

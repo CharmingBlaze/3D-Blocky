@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { worldBounds } from '../mesh/objectTransform'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 export interface SceneWorldBounds {
   min: THREE.Vector3
@@ -19,6 +20,7 @@ export function computeSceneWorldBounds(objects: SceneObject[]): SceneWorldBound
   const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity)
   let any = false
   for (const object of objects) {
+    if (!isSceneObjectVisible(object)) continue
     if (object.positions.length === 0) continue
     const bounds = worldBounds(object)
     if (!Number.isFinite(bounds.min.x) || !Number.isFinite(bounds.max.x)) continue

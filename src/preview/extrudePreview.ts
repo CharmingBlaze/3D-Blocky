@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { ensureCCW } from '../mesh/concaveTriangulate'
-import { generateCapsuleSweep, generateTaperedPointedTube } from '../mesh/extrusion'
+import { generateCapsuleSweep, generateTaperedPointedTube, type SweepCapStyle } from '../mesh/extrusion'
 import {
   generateHairRibbon,
   hairHalfWidthFromBrush,
@@ -20,7 +20,9 @@ import {
   prepareHairPathCenterline,
   prepareHairStripCenterline,
   prepareOutlineBoundary,
+  preparePathCenterline,
   resolveSilhouetteDepth,
+  capsuleProfileRingsForBudget,
 } from '../stroke/sketchSource'
 import type { StrokeMode, ViewType } from '../store/appStore'
 import type { Vec2 } from '../utils/math'
@@ -30,17 +32,57 @@ import {
 } from '../vector/vectorPenLimits'
 import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
 import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
+import { generateVerticalShapedCapsule } from '../mesh/verticalCapsule'
+import { generatePathOutput, type PathDistributionMode, type PathOutput, type PathProfile } from '../mesh/pathOutputs'
+import { generateLathe } from '../mesh/lathe'
+import { strokeToLatheProfile } from '../stroke/latheProfile'
 
 export interface ExtrudePreviewOptions {
   strokeMode?: StrokeMode
   polyBudget?: number
   hairTipStyle?: HairTipStyle
   planeFrame?: StrokePlaneFrame | null
+  pathStartCap?: SweepCapStyle
+  pathEndCap?: SweepCapStyle
+  pathRadialSegments?: number
+  pathRadiusScale?: number
+  ribbonStartTip?: HairTipStyle
+  ribbonEndTip?: HairTipStyle
+  ribbonTaper?: number
+  ribbonWidthScale?: number
+  ribbonFlat?: boolean
+  pathOutput?: PathOutput
+  pathStartScale?: number
+  pathEndScale?: number
+  pathTwist?: number
+  pathSpacing?: number
+  pathOffset?: number
+  pathProfile?: PathProfile
+  pathProfileWidth?: number
+  pathProfileHeight?: number
+  pathChainAlternating?: boolean
+  pathCardCrossed?: boolean
+  pathDistributionMode?: PathDistributionMode
+  pathCount?: number
+  pathStartPadding?: number
+  pathEndPadding?: number
+  pathRandomScale?: number
+  pathRotation?: number
+  pathRandomRotation?: number
+  pathAlternateRotation?: boolean
+  pathMirrorAlternate?: boolean
+  pathSeed?: number
+  latheMode?: boolean
+  latheCaps?: boolean
+  latheRadialSegments?: number
+  latheProfileRings?: number
+  latheSmoothing?: number
 }
 
 function hairStyleFromStrokeMode(strokeMode: StrokeMode | undefined): HairRibbonStyle | null {
   if (strokeMode === 'hair-paths') return 'path'
   if (strokeMode === 'hair-strips') return 'strip'
+  if (strokeMode === 'ribbon') return 'path'
   return null
 }
 
@@ -62,7 +104,7 @@ export function buildExtrudePreviewGeometry(
   const roundedHair = options?.strokeMode === 'hair-round'
   const outlineMode = options?.strokeMode === 'outline'
   const prepared = prepareSketchStroke(snapped, closeThreshold, brushDensity, {
-    highFidelity: hairStyle === 'path' || roundedHair,
+    highFidelity: hairStyle === 'path' || roundedHair || options?.strokeMode === 'capsule',
     forceOpen: hairStyle != null || roundedHair,
   })
   if (!prepared) return null
@@ -70,6 +112,21 @@ export function buildExtrudePreviewGeometry(
   const polyBudget = options?.polyBudget ?? 128
 
   const mesh = (() => {
+    if (options?.latheMode) {
+      const lathe = strokeToLatheProfile(prepared.relative, {
+        maxProfileRings: options.latheProfileRings,
+        smoothing: options.latheSmoothing,
+      })
+      if (!lathe) return null
+      const result = generateLathe(lathe.profile, {
+        radialSegments: Math.max(8, Math.min(64, Math.round(options.latheRadialSegments ?? 24))),
+        preserveProfile: true,
+        capBottom: options.latheCaps,
+        capTop: options.latheCaps,
+      })
+      offsetMeshInPlane(result, lathe.axisH, 0)
+      return result
+    }
     const tipStyle: HairTipStyle =
       options?.hairTipStyle === 'square' ? 'square' : 'pointed'
     if (roundedHair) {
@@ -91,12 +148,56 @@ export function buildExtrudePreviewGeometry(
           : prepareHairPathCenterline(prepared.relative, polyBudget)
       if (!spine) return null
       return generateHairRibbon(spine, {
-        halfWidth: hairHalfWidthFromBrush(brushDensity, hairStyle),
+        halfWidth: hairHalfWidthFromBrush(brushDensity, hairStyle) * (options?.ribbonWidthScale ?? 1),
         depth: resolveHairDepth(extrudeAmount, brushDensity, hairStyle),
         color: 0x6ecbf5,
-        flat: hairStyle === 'strip',
+        flat: options?.strokeMode === 'ribbon' ? (options.ribbonFlat ?? false) : hairStyle === 'strip',
         tipStyle,
+        startTipStyle: options?.strokeMode === 'ribbon' ? (options.ribbonStartTip ?? 'square') : tipStyle,
+        endTipStyle: options?.strokeMode === 'ribbon' ? (options.ribbonEndTip ?? 'square') : tipStyle,
+        taperFraction: options?.ribbonTaper ?? 0.35,
       })
+    }
+
+    if (options?.strokeMode === 'capsule') {
+      const radius = Math.max(2, Math.abs(extrudeAmount || brushDensity))
+      if (prepared.isClosed) {
+        const boundary = prepareOutlineBoundary(prepared.relative, polyBudget, true)
+        if (!boundary || boundary.length < 3) return null
+        return generateVerticalShapedCapsule(boundary, {
+          radialSegments: Math.max(12, Math.min(24, options.pathRadialSegments ?? 12)),
+          profileRings: capsuleProfileRingsForBudget(polyBudget),
+          preserveBoundary: true,
+          color: 0x6ecbf5,
+        })
+      }
+      const spine = preparePathCenterline(prepared.relative, polyBudget)
+      if (!spine) return null
+      return generateCapsuleSweep(spine, {
+        radius,
+        radialSegments: Math.max(12, Math.min(24, options.pathRadialSegments ?? 12)),
+        preserveSpine: true,
+        hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
+        startCap: 'round',
+        endCap: 'round',
+        color: 0x6ecbf5,
+      })
+    }
+
+    if (options?.strokeMode === 'centerline') {
+      const spine = preparePathCenterline(prepared.relative, polyBudget)
+      if (!spine) return null
+      return generatePathOutput(spine, {
+        output: options.pathOutput ?? 'tube', radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)) * (options.pathRadiusScale ?? 1), radialSegments: options.pathRadialSegments ?? 8,
+        startCap: options.pathStartCap ?? 'flat', endCap: options.pathEndCap ?? 'flat', startScale: options.pathStartScale ?? 1, endScale: options.pathEndScale ?? 1,
+        twist: options.pathTwist ?? 360, spacing: options.pathSpacing ?? 16, offset: options.pathOffset ?? 0,
+        ribbonStartTip: options.ribbonStartTip ?? 'square', ribbonEndTip: options.ribbonEndTip ?? 'square', ribbonTaper: options.ribbonTaper ?? .35, ribbonFlat: options.ribbonFlat ?? false,
+        profile: options.pathProfile ?? 'round', profileWidth: options.pathProfileWidth ?? 1, profileHeight: options.pathProfileHeight ?? 1,
+        chainAlternating: options.pathChainAlternating ?? true, cardCrossed: options.pathCardCrossed ?? false,
+        distributionMode: options.pathDistributionMode, count: options.pathCount, startPadding: options.pathStartPadding, endPadding: options.pathEndPadding,
+        randomScale: options.pathRandomScale, rotation: options.pathRotation, randomRotation: options.pathRandomRotation,
+        alternateRotation: options.pathAlternateRotation, mirrorAlternate: options.pathMirrorAlternate, seed: options.pathSeed,
+      }, 0x6ecbf5)
     }
 
     const isClosed = closed ?? prepared.isClosed

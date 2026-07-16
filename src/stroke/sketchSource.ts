@@ -1,6 +1,6 @@
 import { HalfEdgeMesh, type SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
-import { generateCapsuleSweep, generateTaperedPointedTube } from '../mesh/extrusion'
+import { generateCapsuleSweep, generateTaperedPointedTube, type SweepCapStyle } from '../mesh/extrusion'
 import { ensureCCW } from '../mesh/concaveTriangulate'
 import { generateSoftInflateDome } from '../mesh/softInflate'
 import { extrudeSilhouette, strokeToFlatOutline } from '../mesh/silhouetteExtrude'
@@ -22,11 +22,16 @@ import {
 } from '../vector/vectorPenLimits'
 import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
 import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
+import { generateVerticalShapedCapsule } from '../mesh/verticalCapsule'
+import { ensureObjectUVs } from '../uv/uvObject'
+import { generatePathOutput, type PathDistributionMode, type PathOutput, type PathProfile } from '../mesh/pathOutputs'
 
 export type SketchDoodleKind =
   | 'soft'
   | 'sharp'
   | 'path'
+  | 'capsule-path'
+  | 'capsule-shape'
   | 'outline'
   | 'ribbon'
   | 'tapered-tube'
@@ -50,6 +55,40 @@ export interface SketchSource {
   inflation?: number
   /** Hair tip shape; only used for hair-* kinds. Defaults to pointed when missing. */
   tipStyle?: HairTipStyle
+  pathStartCap?: SweepCapStyle
+  pathEndCap?: SweepCapStyle
+  pathRadialSegments?: number
+  pathRadiusScale?: number
+  ribbonStartTip?: HairTipStyle
+  ribbonEndTip?: HairTipStyle
+  ribbonTaper?: number
+  ribbonWidthScale?: number
+  ribbonFlat?: boolean
+  pathOutput?: PathOutput
+  pathStartScale?: number
+  pathEndScale?: number
+  pathTwist?: number
+  pathSpacing?: number
+  pathOffset?: number
+  pathProfile?: PathProfile
+  pathProfileWidth?: number
+  pathProfileHeight?: number
+  pathChainAlternating?: boolean
+  pathCardCrossed?: boolean
+  pathDistributionMode?: PathDistributionMode
+  pathCount?: number
+  pathStartPadding?: number
+  pathEndPadding?: number
+  pathRandomScale?: number
+  pathRotation?: number
+  pathRandomRotation?: number
+  pathAlternateRotation?: boolean
+  pathMirrorAlternate?: boolean
+  pathSeed?: number
+  pathKeepInstances?: boolean
+  pathSourceObjectId?: string | null
+  /** Embedded source mesh keeps Object Arrays stable across save/load and source edits. */
+  pathSourceObject?: SceneObject | null
   /** Locked perspective draw plane so regenerates stay in world space. */
   planeFrame?: StrokePlaneFrame | null
 }
@@ -84,6 +123,11 @@ export const HAIR_STRIP_SPINE_HARD_CAP = 14
 
 /** Slightly denser than Outline cleanup so short dense strokes don't over-ring. */
 export const PATH_CLEANUP_MIN_DISTANCE = 0.9
+
+/** Closed Capsule silhouette sampling. Kept dense enough to preserve necks and asymmetric curves. */
+export function capsuleProfileRingsForBudget(polyBudget: number): number {
+  return Math.max(16, Math.min(48, Math.round(polyBudget / 4)))
+}
 
 /**
  * Soft poly budget for flat outline extrude — prefer stroke fidelity.
@@ -227,6 +271,32 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
   const { relative, brushDensity, polyBudget, isClosed, kind } = source
   const depth = Math.max(1.6, Math.abs(extrudeDepth))
 
+  if (kind === 'capsule-path') {
+    const spine = preparePathCenterline(relative, polyBudget)
+    if (!spine) return null
+    return generateCapsuleSweep(spine, {
+      radius: depth,
+      radialSegments: Math.max(12, Math.min(24, source.pathRadialSegments ?? 12)),
+      closed: false,
+      hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
+      preserveSpine: true,
+      color,
+      startCap: 'round',
+      endCap: 'round',
+    })
+  }
+
+  if (kind === 'capsule-shape') {
+    const boundary = prepareOutlineBoundary(relative, polyBudget, true)
+    if (!boundary || boundary.length < 3) return null
+    return generateVerticalShapedCapsule(boundary, {
+      radialSegments: Math.max(12, Math.min(24, source.pathRadialSegments ?? 12)),
+      profileRings: capsuleProfileRingsForBudget(polyBudget),
+      preserveBoundary: true,
+      color,
+    })
+  }
+
   if (kind === 'ribbon' || kind === 'tapered-tube' || kind === 'hair-path' || kind === 'hair-strip' || kind === 'hair-round') {
     const spine =
       kind === 'hair-strip'
@@ -245,11 +315,14 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     }
     const style = kind === 'hair-strip' ? 'strip' : 'path'
     return generateHairRibbon(spine, {
-      halfWidth: hairHalfWidthFromBrush(brushDensity, style),
+      halfWidth: hairHalfWidthFromBrush(brushDensity, style) * (source.ribbonWidthScale ?? 1),
       depth: resolveHairDepth(extrudeDepth, brushDensity, style),
       color,
-      flat: style === 'strip',
+      flat: kind === 'ribbon' ? (source.ribbonFlat ?? false) : style === 'strip',
       tipStyle: kind === 'ribbon' ? 'square' : tipStyle,
+      startTipStyle: kind === 'ribbon' ? (source.ribbonStartTip ?? 'square') : tipStyle,
+      endTipStyle: kind === 'ribbon' ? (source.ribbonEndTip ?? 'square') : tipStyle,
+      taperFraction: source.ribbonTaper ?? 0.35,
     })
   }
 
@@ -300,14 +373,18 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     // Path / soft open stroke: fidelity centerline → tube with flat n-gon caps + quad rings.
     const spine = preparePathCenterline(relative, polyBudget)
     if (!spine) return null
-    return generateCapsuleSweep(spine, {
-      radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)),
-      radialSegments: primitiveSegmentsForBudget(polyBudget, VECTOR_PEN_RADIAL_SEGMENTS),
-      closed: false,
-      hemiRings: 0,
-      preserveSpine: true,
-      color,
-    })
+    return generatePathOutput(spine, {
+      output: source.pathOutput ?? 'tube', radius: Math.max(2.5, Math.min(14, brushDensity * 0.55)) * (source.pathRadiusScale ?? 1),
+      radialSegments: source.pathRadialSegments ?? primitiveSegmentsForBudget(polyBudget, VECTOR_PEN_RADIAL_SEGMENTS), startCap: source.pathStartCap ?? 'flat', endCap: source.pathEndCap ?? 'flat',
+      startScale: source.pathStartScale ?? 1, endScale: source.pathEndScale ?? 1, twist: source.pathTwist ?? 360, spacing: source.pathSpacing ?? 16, offset: source.pathOffset ?? 0,
+      ribbonStartTip: source.ribbonStartTip ?? 'square', ribbonEndTip: source.ribbonEndTip ?? 'square', ribbonTaper: source.ribbonTaper ?? .35, ribbonFlat: source.ribbonFlat ?? false,
+      profile: source.pathProfile ?? 'round', profileWidth: source.pathProfileWidth ?? 1, profileHeight: source.pathProfileHeight ?? 1,
+      chainAlternating: source.pathChainAlternating ?? true, cardCrossed: source.pathCardCrossed ?? false,
+      distributionMode: source.pathDistributionMode ?? 'spacing', count: source.pathCount ?? 8, startPadding: source.pathStartPadding ?? 0, endPadding: source.pathEndPadding ?? 0,
+      randomScale: source.pathRandomScale ?? 0, rotation: source.pathRotation ?? 0, randomRotation: source.pathRandomRotation ?? 0,
+      alternateRotation: source.pathAlternateRotation ?? false, mirrorAlternate: source.pathMirrorAlternate ?? false, seed: source.pathSeed ?? 1,
+      sourceObject: source.pathSourceObject ?? null,
+    }, color)
   }
 
   const budgetRings = polyBudget < 64 ? 2 : polyBudget < 128 ? 3 : polyBudget < 224 ? 4 : 5
@@ -348,9 +425,15 @@ export function createSketchSource(
   }
 }
 
-export type EditableSketchSourcePatch = Partial<
-  Pick<SketchSource, 'brushDensity' | 'polyBudget' | 'extrudeDepth' | 'inflation'>
->
+export type EditableSketchSourcePatch = Partial<Pick<SketchSource,
+  | 'brushDensity' | 'polyBudget' | 'extrudeDepth' | 'inflation'
+  | 'pathStartCap' | 'pathEndCap' | 'pathRadialSegments' | 'pathRadiusScale'
+  | 'ribbonStartTip' | 'ribbonEndTip' | 'ribbonTaper' | 'ribbonWidthScale' | 'ribbonFlat'
+  | 'pathOutput' | 'pathStartScale' | 'pathEndScale' | 'pathTwist' | 'pathSpacing' | 'pathOffset'
+  | 'pathProfile' | 'pathProfileWidth' | 'pathProfileHeight' | 'pathChainAlternating' | 'pathCardCrossed'
+  | 'pathDistributionMode' | 'pathCount' | 'pathStartPadding' | 'pathEndPadding' | 'pathRandomScale' | 'pathRotation'
+  | 'pathRandomRotation' | 'pathAlternateRotation' | 'pathMirrorAlternate' | 'pathSeed' | 'pathKeepInstances'
+>>
 
 /** Rebuild a sketch doodle from editable source parameters, preserving identity and transforms. */
 export function regenerateSketchObjectFromSource(
@@ -366,6 +449,37 @@ export function regenerateSketchObjectFromSource(
     polyBudget: Math.max(16, Math.min(512, changes.polyBudget ?? source.polyBudget)),
     extrudeDepth: changes.extrudeDepth ?? source.extrudeDepth,
     inflation: Math.max(0, Math.min(1, changes.inflation ?? source.inflation ?? 0.65)),
+    pathStartCap: changes.pathStartCap ?? source.pathStartCap,
+    pathEndCap: changes.pathEndCap ?? source.pathEndCap,
+    pathRadialSegments: Math.max(3, Math.min(24, changes.pathRadialSegments ?? source.pathRadialSegments ?? 8)),
+    pathRadiusScale: Math.max(0.1, Math.min(4, changes.pathRadiusScale ?? source.pathRadiusScale ?? 1)),
+    ribbonStartTip: changes.ribbonStartTip ?? source.ribbonStartTip,
+    ribbonEndTip: changes.ribbonEndTip ?? source.ribbonEndTip,
+    ribbonTaper: Math.max(0.05, Math.min(0.49, changes.ribbonTaper ?? source.ribbonTaper ?? 0.35)),
+    ribbonWidthScale: Math.max(0.1, Math.min(4, changes.ribbonWidthScale ?? source.ribbonWidthScale ?? 1)),
+    ribbonFlat: changes.ribbonFlat ?? source.ribbonFlat,
+    pathOutput: changes.pathOutput ?? source.pathOutput,
+    pathStartScale: Math.max(.05, Math.min(5, changes.pathStartScale ?? source.pathStartScale ?? 1)),
+    pathEndScale: Math.max(.05, Math.min(5, changes.pathEndScale ?? source.pathEndScale ?? 1)),
+    pathTwist: Math.max(-3600, Math.min(3600, changes.pathTwist ?? source.pathTwist ?? 360)),
+    pathSpacing: Math.max(1, Math.min(512, changes.pathSpacing ?? source.pathSpacing ?? 16)),
+    pathOffset: Math.max(-256, Math.min(256, changes.pathOffset ?? source.pathOffset ?? 0)),
+    pathProfile: changes.pathProfile ?? source.pathProfile,
+    pathProfileWidth: Math.max(.1, Math.min(8, changes.pathProfileWidth ?? source.pathProfileWidth ?? 1)),
+    pathProfileHeight: Math.max(.1, Math.min(8, changes.pathProfileHeight ?? source.pathProfileHeight ?? 1)),
+    pathChainAlternating: changes.pathChainAlternating ?? source.pathChainAlternating,
+    pathCardCrossed: changes.pathCardCrossed ?? source.pathCardCrossed,
+    pathDistributionMode: changes.pathDistributionMode ?? source.pathDistributionMode,
+    pathCount: Math.max(1, Math.min(1000, changes.pathCount ?? source.pathCount ?? 8)),
+    pathStartPadding: Math.max(0, changes.pathStartPadding ?? source.pathStartPadding ?? 0),
+    pathEndPadding: Math.max(0, changes.pathEndPadding ?? source.pathEndPadding ?? 0),
+    pathRandomScale: Math.max(0, Math.min(1, changes.pathRandomScale ?? source.pathRandomScale ?? 0)),
+    pathRotation: changes.pathRotation ?? source.pathRotation ?? 0,
+    pathRandomRotation: Math.max(0, Math.min(360, changes.pathRandomRotation ?? source.pathRandomRotation ?? 0)),
+    pathAlternateRotation: changes.pathAlternateRotation ?? source.pathAlternateRotation,
+    pathMirrorAlternate: changes.pathMirrorAlternate ?? source.pathMirrorAlternate,
+    pathSeed: Math.floor(changes.pathSeed ?? source.pathSeed ?? 1),
+    pathKeepInstances: changes.pathKeepInstances ?? source.pathKeepInstances,
   }
 
   const mesh = buildMeshFromSource(nextSource, nextSource.extrudeDepth, obj.color)
@@ -405,8 +519,11 @@ export function regenerateSketchObjectFromSource(
     mesh.uvs.length > 0 &&
     mesh.faceUvIndices.length === mesh.faces.length
 
-  return mesh.toObject(obj.id, obj.name, {
+  const capsuleKind = nextSource.kind === 'capsule-path' || nextSource.kind === 'capsule-shape'
+  const rebuilt = mesh.toObject(obj.id, obj.name, {
     ...obj,
+    uvs: capsuleKind ? undefined : obj.uvs,
+    faceUvIndices: capsuleKind ? undefined : obj.faceUvIndices,
     sketchSource: nextSource,
     polyBudget: Math.max(mesh.vertexCount(), nextSource.polyBudget),
     color: obj.color,
@@ -419,6 +536,7 @@ export function regenerateSketchObjectFromSource(
       scale: { ...IDENTITY_TRANSFORM.scale },
     },
   })
+  return capsuleKind ? ensureObjectUVs(rebuilt) : rebuilt
 }
 
 /** Rebuild a sketch doodle with a new extrusion depth, preserving id and transform. */

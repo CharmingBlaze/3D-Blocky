@@ -24,6 +24,10 @@ function box(min: number, max: number): SceneObject {
 }
 
 describe('adaptive viewport clipping', () => {
+  it('excludes hidden Outliner objects from scene framing bounds', () => {
+    expect(computeSceneWorldBounds([{ ...box(-10, 10), visible: false }])).toBeNull()
+  })
+
   it('moves the Top camera above models that extend behind its old fixed position', () => {
     const bounds = computeSceneWorldBounds([box(250, 500)])
     const camera = new THREE.OrthographicCamera(-100, 100, 100, -100, 0.1, 4000)

@@ -75,6 +75,40 @@ type ProjectStore = {
   extrudeAmount: number
   sketchExtrudeMode: boolean
   penExtrudeMode: boolean
+  latheRadialSegments: number
+  latheProfileRings: number
+  latheSmoothing: number
+  pathStartCap: import('./strokeSlice').SweepCapStyle
+  pathEndCap: import('./strokeSlice').SweepCapStyle
+  pathRadialSegments: number
+  pathRadiusScale: number
+  ribbonStartTip: HairTipStyle
+  ribbonEndTip: HairTipStyle
+  ribbonTaper: number
+  ribbonWidthScale: number
+  ribbonFlat: boolean
+  pathOutput: import('../mesh/pathOutputs').PathOutput
+  pathStartScale: number
+  pathEndScale: number
+  pathTwist: number
+  pathSpacing: number
+  pathOffset: number
+  pathProfile: import('../mesh/pathOutputs').PathProfile
+  pathProfileWidth: number
+  pathProfileHeight: number
+  pathChainAlternating: boolean
+  pathCardCrossed: boolean
+  pathDistributionMode: import('../mesh/pathOutputs').PathDistributionMode
+  pathCount: number
+  pathStartPadding: number
+  pathEndPadding: number
+  pathRandomScale: number
+  pathRotation: number
+  pathRandomRotation: number
+  pathAlternateRotation: boolean
+  pathMirrorAlternate: boolean
+  pathSeed: number
+  pathKeepInstances: boolean
   commitHistory: (label?: string) => boolean
 }
 
@@ -92,6 +126,25 @@ export function collectProjectPreferences(state: ProjectStore): ProjectPreferenc
       extrudeAmount: state.extrudeAmount,
       sketchExtrudeMode: state.sketchExtrudeMode,
       penExtrudeMode: state.penExtrudeMode,
+      latheRadialSegments: state.latheRadialSegments,
+      latheProfileRings: state.latheProfileRings,
+      latheSmoothing: state.latheSmoothing,
+      pathStartCap: state.pathStartCap,
+      pathEndCap: state.pathEndCap,
+      pathRadialSegments: state.pathRadialSegments,
+      pathRadiusScale: state.pathRadiusScale,
+      ribbonStartTip: state.ribbonStartTip,
+      ribbonEndTip: state.ribbonEndTip,
+      ribbonTaper: state.ribbonTaper,
+      ribbonWidthScale: state.ribbonWidthScale,
+      ribbonFlat: state.ribbonFlat,
+      pathOutput: state.pathOutput, pathStartScale: state.pathStartScale, pathEndScale: state.pathEndScale,
+      pathTwist: state.pathTwist, pathSpacing: state.pathSpacing, pathOffset: state.pathOffset, pathProfile: state.pathProfile,
+      pathProfileWidth: state.pathProfileWidth, pathProfileHeight: state.pathProfileHeight,
+      pathChainAlternating: state.pathChainAlternating, pathCardCrossed: state.pathCardCrossed,
+      pathDistributionMode: state.pathDistributionMode, pathCount: state.pathCount, pathStartPadding: state.pathStartPadding, pathEndPadding: state.pathEndPadding,
+      pathRandomScale: state.pathRandomScale, pathRotation: state.pathRotation, pathRandomRotation: state.pathRandomRotation,
+      pathAlternateRotation: state.pathAlternateRotation, pathMirrorAlternate: state.pathMirrorAlternate, pathSeed: state.pathSeed, pathKeepInstances: state.pathKeepInstances,
     },
     sceneSettings: {
       polyBudget: state.polyBudget,
@@ -116,6 +169,40 @@ export function defaultProjectPreferencesPartial(): Record<string, unknown> {
     extrudeAmount: strokeLayoutInitialState.extrudeAmount,
     sketchExtrudeMode: strokeLayoutInitialState.sketchExtrudeMode,
     penExtrudeMode: strokeLayoutInitialState.penExtrudeMode,
+    latheRadialSegments: strokeLayoutInitialState.latheRadialSegments,
+    latheProfileRings: strokeLayoutInitialState.latheProfileRings,
+    latheSmoothing: strokeLayoutInitialState.latheSmoothing,
+    pathStartCap: strokeLayoutInitialState.pathStartCap,
+    pathEndCap: strokeLayoutInitialState.pathEndCap,
+    pathRadialSegments: strokeLayoutInitialState.pathRadialSegments,
+    pathRadiusScale: strokeLayoutInitialState.pathRadiusScale,
+    ribbonStartTip: strokeLayoutInitialState.ribbonStartTip,
+    ribbonEndTip: strokeLayoutInitialState.ribbonEndTip,
+    ribbonTaper: strokeLayoutInitialState.ribbonTaper,
+    ribbonWidthScale: strokeLayoutInitialState.ribbonWidthScale,
+    ribbonFlat: strokeLayoutInitialState.ribbonFlat,
+    pathOutput: strokeLayoutInitialState.pathOutput,
+    pathStartScale: strokeLayoutInitialState.pathStartScale,
+    pathEndScale: strokeLayoutInitialState.pathEndScale,
+    pathTwist: strokeLayoutInitialState.pathTwist,
+    pathSpacing: strokeLayoutInitialState.pathSpacing,
+    pathOffset: strokeLayoutInitialState.pathOffset,
+    pathProfile: strokeLayoutInitialState.pathProfile,
+    pathProfileWidth: strokeLayoutInitialState.pathProfileWidth,
+    pathProfileHeight: strokeLayoutInitialState.pathProfileHeight,
+    pathChainAlternating: strokeLayoutInitialState.pathChainAlternating,
+    pathCardCrossed: strokeLayoutInitialState.pathCardCrossed,
+    pathDistributionMode: strokeLayoutInitialState.pathDistributionMode,
+    pathCount: strokeLayoutInitialState.pathCount,
+    pathStartPadding: strokeLayoutInitialState.pathStartPadding,
+    pathEndPadding: strokeLayoutInitialState.pathEndPadding,
+    pathRandomScale: strokeLayoutInitialState.pathRandomScale,
+    pathRotation: strokeLayoutInitialState.pathRotation,
+    pathRandomRotation: strokeLayoutInitialState.pathRandomRotation,
+    pathAlternateRotation: strokeLayoutInitialState.pathAlternateRotation,
+    pathMirrorAlternate: strokeLayoutInitialState.pathMirrorAlternate,
+    pathSeed: strokeLayoutInitialState.pathSeed,
+    pathKeepInstances: strokeLayoutInitialState.pathKeepInstances,
     polyBudget: sceneSettingsInitialState.polyBudget,
     brushDensity: sceneSettingsInitialState.brushDensity,
     drawDoubleSided: sceneSettingsInitialState.drawDoubleSided,
@@ -142,6 +229,40 @@ export function projectPreferencesToStorePartial(
     extra.extrudeAmount = preferences.stroke.extrudeAmount
     extra.sketchExtrudeMode = preferences.stroke.sketchExtrudeMode
     extra.penExtrudeMode = preferences.stroke.penExtrudeMode
+    extra.latheRadialSegments = preferences.stroke.latheRadialSegments
+    extra.latheProfileRings = preferences.stroke.latheProfileRings
+    extra.latheSmoothing = preferences.stroke.latheSmoothing
+    extra.pathStartCap = preferences.stroke.pathStartCap
+    extra.pathEndCap = preferences.stroke.pathEndCap
+    extra.pathRadialSegments = preferences.stroke.pathRadialSegments
+    extra.pathRadiusScale = preferences.stroke.pathRadiusScale
+    extra.ribbonStartTip = preferences.stroke.ribbonStartTip
+    extra.ribbonEndTip = preferences.stroke.ribbonEndTip
+    extra.ribbonTaper = preferences.stroke.ribbonTaper
+    extra.ribbonWidthScale = preferences.stroke.ribbonWidthScale
+    extra.ribbonFlat = preferences.stroke.ribbonFlat
+    extra.pathOutput = preferences.stroke.pathOutput
+    extra.pathStartScale = preferences.stroke.pathStartScale
+    extra.pathEndScale = preferences.stroke.pathEndScale
+    extra.pathTwist = preferences.stroke.pathTwist
+    extra.pathSpacing = preferences.stroke.pathSpacing
+    extra.pathOffset = preferences.stroke.pathOffset
+    extra.pathProfile = preferences.stroke.pathProfile
+    extra.pathProfileWidth = preferences.stroke.pathProfileWidth
+    extra.pathProfileHeight = preferences.stroke.pathProfileHeight
+    extra.pathChainAlternating = preferences.stroke.pathChainAlternating
+    extra.pathCardCrossed = preferences.stroke.pathCardCrossed
+    extra.pathDistributionMode = preferences.stroke.pathDistributionMode
+    extra.pathCount = preferences.stroke.pathCount
+    extra.pathStartPadding = preferences.stroke.pathStartPadding
+    extra.pathEndPadding = preferences.stroke.pathEndPadding
+    extra.pathRandomScale = preferences.stroke.pathRandomScale
+    extra.pathRotation = preferences.stroke.pathRotation
+    extra.pathRandomRotation = preferences.stroke.pathRandomRotation
+    extra.pathAlternateRotation = preferences.stroke.pathAlternateRotation
+    extra.pathMirrorAlternate = preferences.stroke.pathMirrorAlternate
+    extra.pathSeed = preferences.stroke.pathSeed
+    extra.pathKeepInstances = preferences.stroke.pathKeepInstances
   }
   if (preferences.sceneSettings) {
     extra.polyBudget = preferences.sceneSettings.polyBudget

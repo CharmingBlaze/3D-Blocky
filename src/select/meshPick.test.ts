@@ -190,6 +190,20 @@ describe('SubD face pick', () => {
 })
 
 describe('BVH source face mapping', () => {
+  it('does not select hidden Outliner objects', () => {
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+    camera.position.set(0, 0, 5)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    const rect = {
+      left: 0, top: 0, width: 200, height: 200,
+      right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect
+    expect(pickMeshComponent('face', 100, 100, rect, camera, [{ ...box, visible: false }], box.id, {
+      cullBackVertices: true,
+    })).toBeNull()
+  })
+
   it.each([
     ['front', [0, 0, 5] as const, 1],
     ['back', [0, 0, -5] as const, 0],

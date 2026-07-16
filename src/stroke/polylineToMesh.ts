@@ -34,9 +34,12 @@ import { orientTubeFacesOutward } from '../mesh/extrusion'
 import { ensureClosedMeshOutward, orientLatheMeshOutward } from '../mesh/meshWinding'
 import type { ViewType, StrokeMode } from '../store/appStore'
 import type { HairTipStyle } from '../mesh/hairRibbon'
+import type { SweepCapStyle } from '../mesh/extrusion'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import { blobStrokeToObject } from '../blob/strokeToBlob'
 import { preparePathCenterline } from './sketchSource'
+import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
+import { ensureObjectUVs } from '../uv/uvObject'
 
 function capSpineToSampleCount(spine: Vec2[], maxSamples: number): Vec2[] {
   if (maxSamples < 2 || spine.length <= maxSamples) return spine
@@ -63,6 +66,9 @@ export interface PolylineInput {
   extrudeMode?: boolean
   latheMode?: boolean
   latheCaps?: boolean
+  latheRadialSegments?: number
+  latheProfileRings?: number
+  latheSmoothing?: number
   /** Thickness of flat silhouette extrusion along the view axis. */
   extrudeAmount?: number
   /** Fullness for newly drawn Blob shoulders, 0–1. */
@@ -74,6 +80,39 @@ export interface PolylineInput {
   preserveDetail?: boolean
   /** Hair tip shape: pointed (tapered) or square (blunt). Default pointed. */
   hairTipStyle?: HairTipStyle
+  pathStartCap?: SweepCapStyle
+  pathEndCap?: SweepCapStyle
+  pathRadialSegments?: number
+  pathRadiusScale?: number
+  ribbonStartTip?: HairTipStyle
+  ribbonEndTip?: HairTipStyle
+  ribbonTaper?: number
+  ribbonWidthScale?: number
+  ribbonFlat?: boolean
+  pathOutput?: PathOutput
+  pathStartScale?: number
+  pathEndScale?: number
+  pathTwist?: number
+  pathSpacing?: number
+  pathOffset?: number
+  pathProfile?: PathProfile
+  pathProfileWidth?: number
+  pathProfileHeight?: number
+  pathChainAlternating?: boolean
+  pathCardCrossed?: boolean
+  pathSourceObject?: SceneObject | null
+  pathDistributionMode?: PathDistributionMode
+  pathCount?: number
+  pathStartPadding?: number
+  pathEndPadding?: number
+  pathRandomScale?: number
+  pathRotation?: number
+  pathRandomRotation?: number
+  pathAlternateRotation?: boolean
+  pathMirrorAlternate?: boolean
+  pathSeed?: number
+  pathKeepInstances?: boolean
+  pathSourceObjectId?: string | null
   /** Locked camera-facing plane for perspective strokes (required for correct world placement). */
   planeFrame?: StrokePlaneFrame | null
 }
@@ -172,11 +211,11 @@ function finalizeMesh(
     result.uvs.length > 0 &&
     result.faceUvIndices.length === result.faces.length
 
-  return result.toObject(generateId(), customName ?? interpretation.name, {
+  const object = result.toObject(generateId(), customName ?? interpretation.name, {
     polyBudget: latheObject ? result.vertexCount() : preserveDetail ? result.vertexCount() : polyBudget,
     color,
     polyBudgetMode: latheObject || preserveDetail ? 'adaptive' : 'strict',
-    smoothShading: latheObject ? false : undefined,
+    smoothShading: latheObject ? true : undefined,
     uvAutoPacked: hasCylindricalUvs ? true : undefined,
     uvMappingMode: hasCylindricalUvs ? 'box' : undefined,
     transform: {
@@ -185,6 +224,7 @@ function finalizeMesh(
       scale: { ...IDENTITY_TRANSFORM.scale },
     },
   })
+  return latheObject ? ensureObjectUVs(object) : object
 }
 
 function generateForIntent(
@@ -196,7 +236,10 @@ function generateForIntent(
   brushDensity: number,
   stylize: number,
   polyBudget: number,
-  latheCaps = false
+  latheCaps = false,
+  latheRadialSegments?: number,
+  latheProfileRings?: number,
+  latheSmoothing?: number
 ): HalfEdgeMesh | null {
   const relative = centroidRelative(points, interpretation.centroid.x, interpretation.centroid.y)
 
@@ -403,10 +446,13 @@ function generateForIntent(
     }
 
     case 'profile-lathe': {
-      const lathe = strokeToLatheProfile(points)
+      const lathe = strokeToLatheProfile(points, {
+        maxProfileRings: latheProfileRings,
+        smoothing: latheSmoothing,
+      })
       if (!lathe || lathe.profile.length < 2) return null
       return generateLathe(lathe.profile, {
-        radialSegments: tess.radialSegments,
+        radialSegments: Math.max(8, Math.min(64, Math.round(latheRadialSegments ?? 24))),
         preserveProfile: true,
         capBottom: latheCaps,
         capTop: latheCaps,
@@ -435,6 +481,9 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     extrudeMode = false,
     latheMode = false,
     latheCaps = false,
+    latheRadialSegments = 24,
+    latheProfileRings = 48,
+    latheSmoothing = 0.15,
     extrudeAmount,
     name,
     pathClosed,
@@ -542,11 +591,14 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     brushDensity,
     stylize,
     polyBudget,
-    latheCaps
+    latheCaps,
+    latheRadialSegments,
+    latheProfileRings,
+    latheSmoothing
   )
   if (!mesh || mesh.vertexCount() === 0) return null
 
-  return finalizeMesh(
+  const object = finalizeMesh(
     mesh,
     interpretation,
     view,
@@ -562,6 +614,18 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     interpretation.intent === 'profile-lathe',
     planeFrame
   )
+  if (interpretation.intent === 'profile-lathe') {
+    object.latheSource = {
+      points: closedPoints.map((point) => ({ ...point })),
+      view,
+      defaultDepth,
+      caps: latheCaps,
+      radialSegments: latheRadialSegments,
+      profileRings: latheProfileRings,
+      smoothing: latheSmoothing,
+    }
+  }
+  return object
 }
 
 export function isHoleLinePolyline(input: PolylineInput): boolean {

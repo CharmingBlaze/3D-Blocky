@@ -25,10 +25,15 @@ import {
   prepareOutlineBoundary,
   preparePathCenterline,
   resolveSilhouetteDepth,
+  capsuleProfileRingsForBudget,
   type SketchDoodleKind,
   type SketchSource,
 } from './sketchSource'
 import { primitiveSegmentsForBudget } from '../mesh/meshPolyBudget'
+import { generatePathOutput } from '../mesh/pathOutputs'
+import { generateVerticalShapedCapsule } from '../mesh/verticalCapsule'
+import { LOW_POLY_CAPSULE_HEMI_RINGS } from '../primitives/capsuleMesh'
+import { ensureObjectUVs } from '../uv/uvObject'
 
 export interface PreparedSketch {
   points: Vec2[]
@@ -462,6 +467,57 @@ function makeSketchSource(
     ...(kind === 'soft' ? { inflation: input.blobInflation ?? 0.65 } : {}),
     planeFrame: input.planeFrame ?? null,
     ...(hairKind ? { tipStyle } : {}),
+    ...(kind === 'path' || kind === 'capsule-path' || kind === 'capsule-shape' ? {
+      pathStartCap: input.pathStartCap ?? 'flat',
+      pathEndCap: input.pathEndCap ?? 'flat',
+      pathRadialSegments: input.pathRadialSegments ?? 8,
+      pathRadiusScale: input.pathRadiusScale ?? 1,
+      pathOutput: input.pathOutput ?? 'tube',
+      pathStartScale: input.pathStartScale ?? 1,
+      pathEndScale: input.pathEndScale ?? 1,
+      pathTwist: input.pathTwist ?? 360,
+      pathSpacing: input.pathSpacing ?? 16,
+      pathOffset: input.pathOffset ?? 0,
+      pathProfile: input.pathProfile ?? 'round',
+      pathProfileWidth: input.pathProfileWidth ?? 1,
+      pathProfileHeight: input.pathProfileHeight ?? 1,
+      pathChainAlternating: input.pathChainAlternating ?? true,
+      pathCardCrossed: input.pathCardCrossed ?? false,
+      pathDistributionMode: input.pathDistributionMode ?? 'spacing',
+      pathCount: input.pathCount ?? 8,
+      pathStartPadding: input.pathStartPadding ?? 0,
+      pathEndPadding: input.pathEndPadding ?? 0,
+      pathRandomScale: input.pathRandomScale ?? 0,
+      pathRotation: input.pathRotation ?? 0,
+      pathRandomRotation: input.pathRandomRotation ?? 0,
+      pathAlternateRotation: input.pathAlternateRotation ?? false,
+      pathMirrorAlternate: input.pathMirrorAlternate ?? false,
+      pathSeed: input.pathSeed ?? 1,
+      pathKeepInstances: input.pathKeepInstances ?? true,
+      pathSourceObjectId: input.pathSourceObjectId ?? null,
+      pathSourceObject: input.pathSourceObject ? (() => {
+        const { sketchSource: _sketch, vectorSource: _vector, ...snapshot } = input.pathSourceObject!
+        return {
+          ...snapshot,
+          positions: snapshot.positions.map((p) => ({ ...p })),
+          faces: snapshot.faces.map((face) => [...face]),
+          faceColors: [...snapshot.faceColors],
+          uvs: snapshot.uvs?.map((uv) => ({ ...uv })),
+          faceUvIndices: snapshot.faceUvIndices?.map((face) => [...face]),
+        }
+      })() : null,
+      ribbonStartTip: input.ribbonStartTip ?? 'square',
+      ribbonEndTip: input.ribbonEndTip ?? 'square',
+      ribbonTaper: input.ribbonTaper ?? .35,
+      ribbonFlat: input.ribbonFlat ?? false,
+    } : {}),
+    ...(kind === 'ribbon' ? {
+      ribbonStartTip: input.ribbonStartTip ?? 'square',
+      ribbonEndTip: input.ribbonEndTip ?? 'square',
+      ribbonTaper: input.ribbonTaper ?? 0.35,
+      ribbonWidthScale: input.ribbonWidthScale ?? 1,
+      ribbonFlat: input.ribbonFlat ?? false,
+    } : {}),
   }
 }
 
@@ -585,18 +641,21 @@ export function pathSketchDoodleToObject(input: PolylineInput): SceneObject | nu
 
   const { relative, center } = prepared
   const extrudeDepth = resolveExtrudeDepth(input, brushDensity)
-  const radius = Math.max(2.5, Math.min(14, brushDensity * 0.55))
+  const radius = Math.max(2.5, Math.min(14, brushDensity * 0.55)) * (input.pathRadiusScale ?? 1)
   const spine = preparePathCenterline(relative, polyBudget)
   if (!spine) return null
 
-  const mesh = generateCapsuleSweep(spine, {
-    radius,
-    radialSegments: primitiveSegmentsForBudget(polyBudget, 8),
-    closed: false,
-    hemiRings: 0,
-    preserveSpine: true,
-    color,
-  })
+  const mesh = generatePathOutput(spine, {
+    output: input.pathOutput ?? 'tube', radius, radialSegments: input.pathRadialSegments ?? primitiveSegmentsForBudget(polyBudget, 8),
+    startCap: input.pathStartCap ?? 'flat', endCap: input.pathEndCap ?? 'flat', startScale: input.pathStartScale ?? 1, endScale: input.pathEndScale ?? 1,
+    twist: input.pathTwist ?? 360, spacing: input.pathSpacing ?? 16, offset: input.pathOffset ?? 0,
+    ribbonStartTip: input.ribbonStartTip ?? 'square', ribbonEndTip: input.ribbonEndTip ?? 'square', ribbonTaper: input.ribbonTaper ?? .35, ribbonFlat: input.ribbonFlat ?? false,
+    profile: input.pathProfile ?? 'round', profileWidth: input.pathProfileWidth ?? 1, profileHeight: input.pathProfileHeight ?? 1,
+    chainAlternating: input.pathChainAlternating ?? true, cardCrossed: input.pathCardCrossed ?? false, sourceObject: input.pathSourceObject,
+    distributionMode: input.pathDistributionMode ?? 'spacing', count: input.pathCount ?? 8, startPadding: input.pathStartPadding ?? 0, endPadding: input.pathEndPadding ?? 0,
+    randomScale: input.pathRandomScale ?? 0, rotation: input.pathRotation ?? 0, randomRotation: input.pathRandomRotation ?? 0,
+    alternateRotation: input.pathAlternateRotation ?? false, mirrorAlternate: input.pathMirrorAlternate ?? false, seed: input.pathSeed ?? 1,
+  }, color)
 
   if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
 
@@ -613,11 +672,54 @@ export function pathSketchDoodleToObject(input: PolylineInput): SceneObject | nu
     defaultDepth,
     color,
     polyBudget,
-    name ?? 'Path',
+    name ?? ({tube:'Path',ribbon:'Ribbon',chain:'Chain',vine:'Vine',rope:'Rope',cards:'2D Cards','object-array':'Object Array','profile-sweep':'Profile Sweep'}[input.pathOutput ?? 'tube']),
     source,
     false,
     prepared.points
   )
+}
+
+/** Precise Capsule — rounded sweep for open strokes, rounded silhouette volume for loops. */
+export function capsuleSketchDoodleToObject(input: PolylineInput): SceneObject | null {
+  const { points, view, polyBudget, brushDensity, closeThreshold, defaultDepth, color, name } = input
+  if (points.length < 2 || (view === 'perspective' && !input.planeFrame)) return null
+  const prepared = prepareSketchStroke(points, closeThreshold, brushDensity, {
+    preserveDetail: input.preserveDetail,
+    pathClosed: input.pathClosed,
+    highFidelity: true,
+  })
+  if (!prepared) return null
+  const depth = Math.max(2, Math.abs(input.extrudeAmount ?? brushDensity))
+  let mesh: HalfEdgeMesh
+  let kind: SketchDoodleKind
+  if (prepared.isClosed) {
+    const boundary = prepareOutlineBoundary(prepared.relative, polyBudget, true)
+    if (!boundary || boundary.length < 3) return null
+    mesh = generateVerticalShapedCapsule(boundary, {
+      radialSegments: Math.max(12, Math.min(24, input.pathRadialSegments ?? 12)),
+      profileRings: capsuleProfileRingsForBudget(polyBudget),
+      preserveBoundary: true,
+      color,
+    })
+    kind = 'capsule-shape'
+  } else {
+    const spine = preparePathCenterline(prepared.relative, polyBudget)
+    if (!spine) return null
+    mesh = generateCapsuleSweep(spine, {
+      radius: depth,
+      radialSegments: Math.max(12, Math.min(24, input.pathRadialSegments ?? 12)),
+      closed: false,
+      hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
+      preserveSpine: true,
+      color,
+      startCap: 'round',
+      endCap: 'round',
+    })
+    kind = 'capsule-path'
+  }
+  if (!mesh.vertexCount() || !mesh.faces.length) return null
+  const source = makeSketchSource(prepared, input, kind, depth)
+  return ensureObjectUVs(finalizeSketchMesh(mesh, prepared.center, view, defaultDepth, color, polyBudget, name ?? 'Capsule', source, true, prepared.isClosed ? undefined : prepared.points, {uvAutoPacked:true,uvMappingMode:'box'}))
 }
 
 /** Paint 3D sharp-edge doodle — closed silhouette extruded with flat sides. */
@@ -740,11 +842,14 @@ export function hairSketchDoodleToObject(
   const extrudeDepth = resolveHairDepth(input.extrudeAmount, brushDensity, style)
   const tipStyle: HairTipStyle = input.hairTipStyle === 'square' ? 'square' : 'pointed'
   const mesh = generateHairRibbon(spine, {
-    halfWidth: hairHalfWidthFromBrush(brushDensity, style),
+    halfWidth: hairHalfWidthFromBrush(brushDensity, style) * (input.ribbonWidthScale ?? 1),
     depth: extrudeDepth,
     color,
-    flat: style === 'strip',
+    flat: input.ribbonFlat ?? style === 'strip',
     tipStyle,
+    startTipStyle: input.ribbonStartTip ?? tipStyle,
+    endTipStyle: input.ribbonEndTip ?? tipStyle,
+    taperFraction: input.ribbonTaper ?? 0.35,
   })
 
   if (mesh.vertexCount() === 0 || mesh.faces.length === 0) return null
@@ -780,7 +885,20 @@ export function ribbonSketchDoodleToObject(input: PolylineInput): SceneObject | 
     'path'
   )
   if (!object?.sketchSource) return object
-  return { ...object, name: input.name ?? 'Ribbon', sketchSource: { ...object.sketchSource, kind: 'ribbon', tipStyle: 'square' } }
+  return {
+    ...object,
+    name: input.name ?? 'Ribbon',
+    sketchSource: {
+      ...object.sketchSource,
+      kind: 'ribbon',
+      tipStyle: 'square',
+      ribbonStartTip: input.ribbonStartTip ?? 'square',
+      ribbonEndTip: input.ribbonEndTip ?? 'square',
+      ribbonTaper: input.ribbonTaper ?? 0.35,
+      ribbonWidthScale: input.ribbonWidthScale ?? 1,
+      ribbonFlat: input.ribbonFlat ?? false,
+    },
+  }
 }
 
 /** General-purpose UV-mapped tube tapering toward both ends. */

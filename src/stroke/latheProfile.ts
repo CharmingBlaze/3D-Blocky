@@ -8,17 +8,22 @@ import { curvatureSampleProfile, rdpSimplify } from './rdp'
  * Octagonal lathe cross-section — rounder silhouette while staying mid-poly.
  * 8 × ~16 rings ≈ 128 verts.
  */
-export const LATHE_RADIAL_SEGMENTS = 8
+export const LATHE_RADIAL_SEGMENTS = 24
 /** Keep gentle bends from the drawn profile (was 20° — too aggressive). */
-export const LATHE_MIN_ANGLE_DEG = 10
+export const LATHE_MIN_ANGLE_DEG = 4
 /** Max rings along the profile height (low–mid poly). */
-export const LATHE_MAX_PROFILE_RINGS = 16
+export const LATHE_MAX_PROFILE_RINGS = 48
 /** RDP tolerance in plane units — follows the stroke silhouette before angle filter. */
-export const LATHE_PROFILE_RDP_TOLERANCE = 0.55
+export const LATHE_PROFILE_RDP_TOLERANCE = 0.18
 /** Minimum spacing between consecutive profile samples before simplify. */
-export const LATHE_PROFILE_DEDUPE = 0.22
+export const LATHE_PROFILE_DEDUPE = 0.1
 /** Target vertex budget for lathe mesh commits (~ rings × radial). */
-export const LATHE_POLY_BUDGET = 128
+export const LATHE_POLY_BUDGET = LATHE_RADIAL_SEGMENTS * LATHE_MAX_PROFILE_RINGS
+
+export interface LatheProfileOptions {
+  maxProfileRings?: number
+  smoothing?: number
+}
 
 export interface LatheProfileResult {
   /** (radius, planeHeight) pairs in draw order. */
@@ -55,7 +60,10 @@ export function getLatheViewHint(view: ViewType): string {
  * Drawn stroke → lathe profile that follows the silhouette.
  * Uses RDP + mild curvature filter so gentle curves survive, then caps rings by importance.
  */
-export function strokeToLatheProfile(points: Vec2[]): LatheProfileResult | null {
+export function strokeToLatheProfile(
+  points: Vec2[],
+  options: LatheProfileOptions = {}
+): LatheProfileResult | null {
   if (points.length < 2) return null
 
   const axisH = Math.min(...points.map((p) => p.x))
@@ -73,11 +81,14 @@ export function strokeToLatheProfile(points: Vec2[]): LatheProfileResult | null 
   if (raw.length < 2) return null
 
   // Follow the drawn polyline first (silhouette fidelity), then angle-filter + ring cap.
-  const silhouette = rdpSimplify(raw, LATHE_PROFILE_RDP_TOLERANCE)
+  const smoothing = Math.max(0, Math.min(1, options.smoothing ?? 0.15))
+  const tolerance = LATHE_PROFILE_RDP_TOLERANCE + smoothing * 0.82
+  const maxRings = Math.max(4, Math.min(128, Math.round(options.maxProfileRings ?? LATHE_MAX_PROFILE_RINGS)))
+  const silhouette = rdpSimplify(raw, tolerance)
   const profile = curvatureSampleProfile(
     silhouette.length >= 2 ? silhouette : raw,
-    LATHE_MIN_ANGLE_DEG,
-    LATHE_MAX_PROFILE_RINGS
+    LATHE_MIN_ANGLE_DEG + smoothing * 8,
+    maxRings
   )
   if (profile.length < 2) return null
 

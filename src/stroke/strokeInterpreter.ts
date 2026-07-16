@@ -169,8 +169,8 @@ export function interpretStroke(
     if (!isClosed) {
       return {
         ...base,
-        intent: isStraightLine(points) ? 'hole-line' : 'path-capsule',
-        name: isStraightLine(points) ? 'Hole' : 'Capsule',
+        intent: 'path-capsule',
+        name: 'Capsule',
       }
     }
     return {

@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import { worldPointFromObject } from '../mesh/objectTransform'
 
 import { useTheme } from '../theme/useTheme'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 function markerKey(objId: string, vi: number) {
   return `${objId}-${vi}`
@@ -45,11 +46,12 @@ export function DrawVertexOverlay() {
 
   const visibleObjects = useMemo(() => {
     if (!showVertices) return []
-    if (isPolyDraw && polyDrawSnapAllScene) return objects
+    const shown = objects.filter(isSceneObjectVisible)
+    if (isPolyDraw && polyDrawSnapAllScene) return shown
     if (selectionObjectIds.length > 0) {
-      return objects.filter((o) => selectionObjectIds.includes(o.id))
+      return shown.filter((o) => selectionObjectIds.includes(o.id))
     }
-    return objects
+    return shown
   }, [showVertices, isPolyDraw, objects, selectionObjectIds, polyDrawSnapAllScene])
 
   const hoverSnap = polyDrawHover?.snap ?? null

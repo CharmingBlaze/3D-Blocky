@@ -37,6 +37,13 @@ function ortho(position: [number, number, number], up: [number, number, number])
 }
 
 describe('paint-on-model quad views', () => {
+  it('does not paint a hidden Outliner object', () => {
+    expect(pickObjectSurfaceUv(100, 100, rect, ortho([0, 0, 10], [0, 1, 0]), {
+      ...cube,
+      visible: false,
+    })).toBeNull()
+  })
+
   it.each([
     ['front', ortho([0, 0, 10], [0, 1, 0])],
     ['back', ortho([0, 0, -10], [0, 1, 0])],

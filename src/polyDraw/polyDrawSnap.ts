@@ -3,6 +3,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import type { PolyDrawDraftPoint, PolyDrawPointSnap } from '../store/appStore'
 import type { Vec3 } from '../utils/math'
 import { worldPointFromObject } from '../mesh/objectTransform'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 /** Generous enough for trackpads without making nearby vertices feel ambiguous. */
 export const POLY_DRAW_SNAP_RADIUS_PX = 20
@@ -43,12 +44,12 @@ export function findPolyDrawSnapTarget(
 
   const objectSet = new Set<string>()
   if (options.includeAllScene) {
-    for (const o of objects) objectSet.add(o.id)
+    for (const o of objects) if (isSceneObjectVisible(o)) objectSet.add(o.id)
   }
   for (const id of options.selectionObjectIds) objectSet.add(id)
 
   for (const obj of objects) {
-    if (!objectSet.has(obj.id)) continue
+    if (!objectSet.has(obj.id) || !isSceneObjectVisible(obj)) continue
     for (let vi = 0; vi < obj.positions.length; vi++) {
       const world = worldPointFromObject(obj, obj.positions[vi])
       const screen = screenFromWorld(world, camera, rect)

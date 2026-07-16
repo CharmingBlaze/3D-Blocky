@@ -4,6 +4,7 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { ensureTransform, worldPointFromObject } from '../mesh/objectTransform'
 import { getLocalAabb } from './meshPickGeometryCache'
 import type { ViewportSlotIndex } from '../scene/viewTypes'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 const raycaster = new THREE.Raycaster()
 const ndc = new THREE.Vector2()
@@ -87,6 +88,7 @@ export function objectsInScreenRect(
 
   const ids: string[] = []
   for (const obj of objects) {
+    if (!isSceneObjectVisible(obj)) continue
     const b = objectScreenBounds(obj, camera, viewportRect)
     if (!b) continue
     if (b.right >= left && b.left <= right && b.bottom >= top && b.top <= bottom) {

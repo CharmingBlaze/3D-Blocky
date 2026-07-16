@@ -3,6 +3,7 @@ import { worldBounds } from '../mesh/objectTransform'
 import type { Vec3 } from '../utils/math'
 import * as THREE from 'three'
 import { getCameraSetup, type ViewType } from '../scene/viewTypes'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 export interface ViewportFitFrame {
   center: Vec3
@@ -26,6 +27,7 @@ export function computeObjectsFitFrame(objects: SceneObject[]): ViewportFitFrame
   let any = false
 
   for (const obj of objects) {
+    if (!isSceneObjectVisible(obj)) continue
     if (obj.positions.length === 0) continue
     const b = worldBounds(obj)
     if (!Number.isFinite(b.min.x)) continue

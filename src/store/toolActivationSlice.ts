@@ -75,6 +75,7 @@ export interface MeshModalState {
   currentClientY: number
   pivotWorld: Vec3
   axisLock?: 'x' | 'y' | 'z' | null
+  numericInput?: string
 }
 
 export interface ObjectTransformModalState {
@@ -106,6 +107,7 @@ export interface ToolActivationLayoutActions {
   beginMeshModal: (op: MeshModalOp, clientX: number, clientY: number, view?: ViewType) => void
   updateMeshModalFromPointer: (clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   adjustMeshModalWheel: (deltaY: number) => void
+  inputMeshModalNumericKey: (key: string) => void
   confirmMeshModal: () => void
   cancelMeshModal: () => void
   applyMeshModalPreview: () => void
@@ -368,14 +370,22 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         modal.selectionMode,
         modal.op,
         modal.value,
-        modal.pivotWorld
+        modal.pivotWorld,
+        modal.currentClientX - modal.startClientX,
+        modal.startClientY - modal.currentClientY,
+        modal.axisLock,
+        modal.view
       )
 
       store().updateObject(modal.objectId, {
         positions: result.positions,
         faces: result.faces,
         faceColors: result.faceColors,
+        faceGroups: result.faceGroups,
+        uvs: result.uvs,
+        faceUvIndices: result.faceUvIndices,
       })
+      if (result.resultingSelection) setPartial({ meshSelection: result.resultingSelection })
     },
 
     beginMeshModal: (op, clientX, clientY, view = 'perspective') => {
@@ -423,6 +433,16 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
 
       let value = modalValueFromMouseDelta(modal.op, dx, dy, shiftKey)
 
+      if (modal.op === 'extrude') {
+        const positions = modal.baseObject.positions
+        if (positions.length) {
+          let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity
+          for (const p of positions) { minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);minZ=Math.min(minZ,p.z);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y);maxZ=Math.max(maxZ,p.z) }
+          const diagonal = Math.max(1e-3, Math.hypot(maxX-minX,maxY-minY,maxZ-minZ))
+          value = (dx + dy) * diagonal / 300 * (shiftKey ? .1 : 1)
+        }
+      }
+
       if (ctrlKey) {
         if (modal.op === 'extrude' || modal.op === 'bevel') {
           value = Math.round(value / 0.25) * 0.25
@@ -434,7 +454,7 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         }
       }
 
-      setPartial({ meshModal: { ...modal, value } })
+      setPartial({ meshModal: { ...modal, value, currentClientX: clientX, currentClientY: clientY, numericInput: undefined } })
       store().applyMeshModalPreview()
     },
 
@@ -447,17 +467,33 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       store().applyMeshModalPreview()
     },
 
+    inputMeshModalNumericKey: (key) => {
+      const modal = store().meshModal
+      if (!modal) return
+      let input = modal.numericInput ?? ''
+      if (key === 'Backspace') input = input.slice(0, -1)
+      else if (key === '-' && input.length === 0) input = '-'
+      else if (key === '.' && !input.includes('.')) input += input.length === 0 ? '0.' : '.'
+      else if (/^[0-9]$/.test(key)) input += key
+      else return
+      const parsed = input !== '' && input !== '-' && input !== '.' && input !== '-.' ? Number(input) : Number.NaN
+      const value = modal.op === 'rotate' ? parsed * Math.PI / 180 : parsed
+      setPartial({ meshModal: { ...modal, numericInput: input, value: Number.isFinite(value) ? value : modal.value } })
+      if (Number.isFinite(value)) store().applyMeshModalPreview()
+    },
+
     confirmMeshModal: () => {
       store().replaceHistoryHead('Mesh edit')
       setPartial({ meshModal: null })
     },
 
     cancelMeshModal: () => {
-      if (!store().meshModal) return
+      const modal = store().meshModal
+      if (!modal) return
       store().pauseHistory()
       store().undo()
       store().resumeHistory()
-      setPartial({ meshModal: null })
+      setPartial({ meshModal: null, meshSelection: modal.selection })
     },
 
     applyObjectTransformModalPreview: () => {

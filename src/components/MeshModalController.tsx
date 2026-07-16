@@ -84,14 +84,16 @@ export function MeshModalController() {
 
   if (meshModal) {
     const label = MESH_OP_LABELS[meshModal.op]
-    const value = formatModalValue(meshModal.op, meshModal.value)
+    const value = meshModal.numericInput != null
+      ? `${meshModal.numericInput}${meshModal.op === 'rotate' ? '°' : ''}`
+      : formatModalValue(meshModal.op, meshModal.value)
     const hint =
       meshModal.op === 'extrude'
-        ? 'Up/right extrude · left/down inset · scroll to adjust · click to confirm · Esc cancel'
+        ? 'Move along the region normal · X/Y/Z constrain · type distance · Ctrl snap · Shift precision · click/Enter confirm · Esc cancel'
         : meshModal.op === 'rotate'
-          ? 'Move mouse horizontally · scroll to adjust · click to confirm · Esc cancel'
+          ? 'Move mouse or type degrees · X/Y/Z constrain axis · Ctrl snap · click/Enter confirm · Esc cancel'
           : meshModal.op === 'scale'
-            ? 'Move mouse up/down · scroll to adjust · click to confirm · Esc cancel'
+            ? 'Move mouse or type factor · X/Y/Z constrain axis · negative mirrors · click/Enter confirm · Esc cancel'
             : 'Move mouse · scroll to adjust · click to confirm · Esc cancel'
 
     return (

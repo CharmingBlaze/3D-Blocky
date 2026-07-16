@@ -7,6 +7,7 @@ import { ensureObjectUVs } from '../uv/uvObject'
 import { uvToPixel } from '../uv/uvEditing'
 import type { Vec3 } from '../utils/math'
 import { ensureTransform, getObjectPivot, worldPointFromObject } from '../mesh/objectTransform'
+import { isSceneObjectVisible } from '../scene/objectVisibility'
 
 export interface MeshSurfaceUvHit {
   objectId: string
@@ -288,8 +289,8 @@ export function pickMeshSurfaceUv(
 ): MeshSurfaceUvHit | null {
   const ray = rayFromPointer(clientX, clientY, rect, camera)
   const candidates = preferredObjectId
-    ? objects.filter((o) => o.id === preferredObjectId)
-    : objects
+    ? objects.filter((o) => o.id === preferredObjectId && isSceneObjectVisible(o))
+    : objects.filter(isSceneObjectVisible)
 
   let bestObj: SceneObject | null = null
   let bestHit: FaceTriHit | null = null
@@ -333,6 +334,7 @@ export function pickObjectSurfaceUv(
   object: SceneObject,
   hint?: MeshPickHint | null
 ): MeshSurfaceUvHit | null {
+  if (!isSceneObjectVisible(object)) return null
   const ray = rayFromPointer(clientX, clientY, rect, camera)
   const hit = raycastObjectUv(object, ray, hint)
   if (!hit) return null

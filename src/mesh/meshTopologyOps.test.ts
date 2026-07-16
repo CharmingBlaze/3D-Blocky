@@ -9,6 +9,7 @@ import {
   loopCutPreviewPositions,
   loopCutPreviewSegments,
   validateCutTopology,
+  subdivideObject,
 } from './meshTopologyOps'
 import { edgeKey } from './meshSelection'
 import { identityFaceGroups } from './faceGroups'
@@ -72,6 +73,32 @@ describe('meshTopologyOps - insertEdgeLoop', () => {
     const cut = insertEdgeLoop(obj, loop, 0.5)
     expect(validateCutTopology(cut)).toEqual([])
     expect(cut.faceUvIndices?.length).toBe(cut.faces.length)
+  })
+})
+
+describe('meshTopologyOps - Blender-style subdivide', () => {
+  it('turns every box face into four quads using shared edge midpoints', () => {
+    const obj = makeBox()
+    const subdivided = subdivideObject(obj, null, 'object')
+
+    expect(subdivided.positions.length).toBe(26)
+    expect(subdivided.faces.length).toBe(24)
+    expect(subdivided.faces.every((face) => face.length === 4)).toBe(true)
+    expect(validateCutTopology(subdivided)).toEqual([])
+  })
+
+  it('subdivides only the selected face into four quads', () => {
+    const obj = makeBox()
+    const subdivided = subdivideObject(obj, {
+      objectId: obj.id,
+      vertices: [],
+      edges: [],
+      faces: [0],
+    }, 'face')
+
+    expect(subdivided.faces.length).toBe(9)
+    expect(subdivided.faces.slice(0, 4).every((face) => face.length === 4)).toBe(true)
+    expect(validateCutTopology(subdivided)).toEqual([])
   })
 })
 

@@ -17,6 +17,8 @@ export interface HairRibbonOptions {
   taperFraction?: number
   /** Pointed pinches tips; square keeps full half-width to blunt ends. Default pointed. */
   tipStyle?: HairTipStyle
+  startTipStyle?: HairTipStyle
+  endTipStyle?: HairTipStyle
   /**
    * Flat double-sided hair card (Hair Strips): single plane of quads + reverse
    * backfaces, zero extrusion thickness. Matches low-poly plane double-sided topology.
@@ -67,7 +69,9 @@ export function strokeToTaperedRibbon(
   points: Vec2[],
   halfWidth: number,
   taperFraction = 0.35,
-  tipStyle: HairTipStyle = 'pointed'
+  tipStyle: HairTipStyle = 'pointed',
+  startTipStyle: HairTipStyle = tipStyle,
+  endTipStyle: HairTipStyle = tipStyle
 ): { left: Vec2[]; right: Vec2[]; halfWidths: number[]; arcT: number[] } | null {
   if (points.length < 2 || halfWidth <= 0) return null
 
@@ -77,7 +81,6 @@ export function strokeToTaperedRibbon(
   const right: Vec2[] = []
   const halfWidths: number[] = []
   const arcT: number[] = []
-  const square = tipStyle === 'square'
 
   // Near-zero but non-zero so tip cross-sections stay valid for quads (pointed only).
   const minHalf = Math.max(1e-3, halfWidth * 0.002)
@@ -102,9 +105,13 @@ export function strokeToTaperedRibbon(
     const ny = tx
 
     const t = lengths[i]! / denom
-    const hw = square
-      ? halfWidth
-      : Math.max(minHalf, halfWidth * hairTaperFactor(t, taperFraction))
+    const startFactor = startTipStyle === 'square' || t >= taperFraction
+      ? 1
+      : hairTaperFactor(Math.min(t, 0.5), taperFraction)
+    const endFactor = endTipStyle === 'square' || t <= 1 - taperFraction
+      ? 1
+      : hairTaperFactor(Math.max(t, 0.5), taperFraction)
+    const hw = Math.max(minHalf, halfWidth * Math.min(startFactor, endFactor))
     halfWidths.push(hw)
     arcT.push(t)
     left.push({ x: curr.x + nx * hw, y: curr.y + ny * hw })
@@ -173,9 +180,11 @@ export function generateHairRibbon(points: Vec2[], options: HairRibbonOptions): 
     color = 0x7ecba1,
     taperFraction = 0.35,
     tipStyle = 'pointed',
+    startTipStyle = tipStyle,
+    endTipStyle = tipStyle,
     flat = false,
   } = options
-  const ribbon = strokeToTaperedRibbon(points, halfWidth, taperFraction, tipStyle)
+  const ribbon = strokeToTaperedRibbon(points, halfWidth, taperFraction, tipStyle, startTipStyle, endTipStyle)
   if (!ribbon || ribbon.left.length < 2) return new HalfEdgeMesh()
 
   const { left, right, arcT } = ribbon

@@ -680,8 +680,8 @@ function facesToSubdivide(
   return new Set(obj.faces.map((_, i) => i))
 }
 
-/** Split an edge-subdivided face loop into corner faces + center face. */
-function subdivideFaceLoop(face: number[]): number[][] {
+/** Blender-style face subdivision: connect every edge midpoint to a new face center. */
+function subdivideFaceLoop(face: number[], positions: Vec3[]): number[][] {
   const n = face.length / 2
   if (n < 3 || face.length % 2 !== 0) return [face]
 
@@ -692,11 +692,23 @@ function subdivideFaceLoop(face: number[]): number[][] {
     else mids.push(face[i])
   }
 
+  const center = { x: 0, y: 0, z: 0 }
+  for (const vertexIndex of corners) {
+    const point = positions[vertexIndex]!
+    center.x += point.x
+    center.y += point.y
+    center.z += point.z
+  }
+  center.x /= n
+  center.y /= n
+  center.z /= n
+  const centerIndex = positions.length
+  positions.push(center)
+
   const parts: number[][] = []
   for (let i = 0; i < n; i++) {
-    parts.push([corners[i], mids[i], mids[(i - 1 + n) % n]])
+    parts.push([corners[i]!, mids[i]!, centerIndex, mids[(i - 1 + n) % n]!])
   }
-  parts.push([...mids])
   return parts
 }
 
@@ -729,6 +741,7 @@ export function subdivideObject(
 
   const outFaces: number[][] = []
   const outColors: number[] = []
+  const outMaterials = obj.faceMaterials ? [] as NonNullable<SceneObject['faceMaterials']> : undefined
   const oldToNew = new Map<number, number[]>()
   let nextFi = 0
 
@@ -736,15 +749,17 @@ export function subdivideObject(
     const color = faceColors[fi]
     if (faceSet.has(fi)) {
       const replacements: number[] = []
-      for (const part of subdivideFaceLoop(faces[fi])) {
+      for (const part of subdivideFaceLoop(faces[fi], positions)) {
         outFaces.push(part)
         outColors.push(color)
+        outMaterials?.push(obj.faceMaterials?.[fi] ? cloneMaterial(obj.faceMaterials[fi]!) : null)
         replacements.push(nextFi++)
       }
       oldToNew.set(fi, replacements)
     } else {
       outFaces.push(faces[fi])
       outColors.push(color)
+      outMaterials?.push(obj.faceMaterials?.[fi] ? cloneMaterial(obj.faceMaterials[fi]!) : null)
       oldToNew.set(fi, [nextFi++])
     }
   }
@@ -757,6 +772,11 @@ export function subdivideObject(
     faces: outFaces,
     faceColors: outColors,
     faceGroups,
+    uvs: undefined,
+    faceUvIndices: undefined,
+    cornerColors: undefined,
+    faceColorIndices: undefined,
+    faceMaterials: outMaterials,
   })
 }
 

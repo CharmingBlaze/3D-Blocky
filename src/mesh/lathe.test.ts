@@ -29,4 +29,13 @@ describe('generateLathe caps', () => {
     expect(mesh.faces.length).toBe(18)
     expect(mesh.faces.filter((f) => f.length === 4).length).toBe(6)
   })
+
+  it('uses the requested radial precision without changing the profile', () => {
+    const mesh = generateLathe(cylinderProfile, {
+      radialSegments: 32,
+      preserveProfile: true,
+    })
+    expect(mesh.positions.length).toBe(64)
+    expect(mesh.faces.length).toBe(32)
+  })
 })

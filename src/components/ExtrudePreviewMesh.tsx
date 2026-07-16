@@ -22,6 +22,12 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
     polyBudget,
     hairTipStyle,
     currentStrokePlane,
+    pathStartCap, pathEndCap, pathRadialSegments, pathRadiusScale,
+    ribbonStartTip, ribbonEndTip, ribbonTaper, ribbonWidthScale, ribbonFlat,
+    pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+    pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
+    sketchLatheMode, penLatheMode, sketchLatheCaps, penLatheCaps,
+    latheRadialSegments, latheProfileRings, latheSmoothing, drawInputMode,
   } = useAppStore(
     useShallow((s) => ({
       extrudeAmount: s.extrudeAmount,
@@ -33,6 +39,24 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       polyBudget: s.polyBudget,
       hairTipStyle: s.hairTipStyle,
       currentStrokePlane: s.currentStrokePlane,
+      pathStartCap: s.pathStartCap,
+      pathEndCap: s.pathEndCap,
+      pathRadialSegments: s.pathRadialSegments,
+      pathRadiusScale: s.pathRadiusScale,
+      ribbonStartTip: s.ribbonStartTip,
+      ribbonEndTip: s.ribbonEndTip,
+      ribbonTaper: s.ribbonTaper,
+      ribbonWidthScale: s.ribbonWidthScale,
+      ribbonFlat: s.ribbonFlat,
+      pathOutput: s.pathOutput, pathStartScale: s.pathStartScale, pathEndScale: s.pathEndScale, pathTwist: s.pathTwist, pathSpacing: s.pathSpacing, pathOffset: s.pathOffset,
+      pathProfile: s.pathProfile, pathProfileWidth: s.pathProfileWidth, pathProfileHeight: s.pathProfileHeight, pathChainAlternating: s.pathChainAlternating, pathCardCrossed: s.pathCardCrossed,
+      pathDistributionMode: s.pathDistributionMode, pathCount: s.pathCount, pathStartPadding: s.pathStartPadding, pathEndPadding: s.pathEndPadding,
+      pathRandomScale: s.pathRandomScale, pathRotation: s.pathRotation, pathRandomRotation: s.pathRandomRotation,
+      pathAlternateRotation: s.pathAlternateRotation, pathMirrorAlternate: s.pathMirrorAlternate, pathSeed: s.pathSeed,
+      sketchLatheMode: s.sketchLatheMode, penLatheMode: s.penLatheMode,
+      sketchLatheCaps: s.sketchLatheCaps, penLatheCaps: s.penLatheCaps,
+      latheRadialSegments: s.latheRadialSegments, latheProfileRings: s.latheProfileRings,
+      latheSmoothing: s.latheSmoothing, drawInputMode: s.drawInputMode,
     }))
   )
 
@@ -46,7 +70,16 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       brushDensity,
       closeThreshold,
       closed,
-      { strokeMode, polyBudget, hairTipStyle, planeFrame: currentStrokePlane }
+      {
+        strokeMode, polyBudget, hairTipStyle, planeFrame: currentStrokePlane,
+        pathStartCap, pathEndCap, pathRadialSegments, pathRadiusScale,
+        ribbonStartTip, ribbonEndTip, ribbonTaper, ribbonWidthScale, ribbonFlat,
+        pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+        pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
+        latheMode: drawInputMode === 'vector-pen' ? penLatheMode : sketchLatheMode,
+        latheCaps: drawInputMode === 'vector-pen' ? penLatheCaps : sketchLatheCaps,
+        latheRadialSegments, latheProfileRings, latheSmoothing,
+      }
     )
   }, [
     points,
@@ -60,6 +93,12 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
     polyBudget,
     hairTipStyle,
     currentStrokePlane,
+    pathStartCap, pathEndCap, pathRadialSegments, pathRadiusScale,
+    ribbonStartTip, ribbonEndTip, ribbonTaper, ribbonWidthScale, ribbonFlat,
+    pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
+    pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
+    sketchLatheMode, penLatheMode, sketchLatheCaps, penLatheCaps,
+    latheRadialSegments, latheProfileRings, latheSmoothing, drawInputMode,
   ])
 
   useEffect(() => () => geometry?.dispose(), [geometry])

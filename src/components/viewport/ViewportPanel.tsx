@@ -25,6 +25,7 @@ import { ViewportDomOverlays } from './ViewportDomOverlays'
 import { ViewportStats } from './ViewportStats'
 import { resolvePrimaryNavigation } from './ViewportControls'
 import type { ViewportSlotProps } from './viewportTypes'
+import { isSceneObjectVisible } from '../../scene/objectVisibility'
 
 export function ViewportPanel({
   view,
@@ -165,6 +166,10 @@ export function ViewportPanel({
   })
 
   const selectedObj = objects.find((o) => o.id === selectedObjectId)
+  const selectedObjectsVisible = selectionObjectIds.every((id) => {
+    const object = objects.find((entry) => entry.id === id)
+    return object ? isSceneObjectVisible(object) : false
+  })
   const vertCount = useMemo(
     () => objects.reduce((s, o) => s + o.positions.length, 0),
     [objects]
@@ -191,6 +196,7 @@ export function ViewportPanel({
     !pixelPaintActive &&
     selectionMode === 'object' &&
     selectionObjectIds.length === 1 &&
+    selectedObjectsVisible &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
     !selectionHasComponents(meshSelection)
 
@@ -199,6 +205,7 @@ export function ViewportPanel({
     !pixelPaintActive &&
     selectionMode === 'object' &&
     selectionObjectIds.length > 1 &&
+    selectedObjectsVisible &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool) &&
     !selectionHasComponents(meshSelection)
 
@@ -207,6 +214,7 @@ export function ViewportPanel({
     !pixelPaintActive &&
     isComponentSelectionMode(selectionMode) &&
     componentGizmoObject != null &&
+    isSceneObjectVisible(componentGizmoObject) &&
     !componentGizmoObject.topologyLocked &&
     TRANSFORM_GIZMO_TOOLS.includes(activeTool)
 

@@ -123,6 +123,7 @@ export function mirrorSceneObject(
     // otherwise regenerate the unmirrored original when edited later.
     sketchSource: undefined,
     vectorSource: undefined,
+    latheSource: undefined,
     primitiveSource: undefined,
   }
   return prepareSceneObject(mirrored)

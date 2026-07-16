@@ -28,6 +28,7 @@ import { SidePanelPixelEditorMenu } from './SidePanelPixelEditorMenu'
 import { SideButtonDropdown } from './SideButtonDropdown'
 import { resolveTargetObjectIds } from '../material/materialEditorSlice'
 import { computeSelectionFitFrame } from '../viewport/fitViewports'
+import { useOutlinerUiStore } from '../store/outlinerUiStore'
 import { boxCenterSize } from '../primitives/primitiveBoxMath'
 import { HairTextureDialog } from './HairTextureDialog'
 import { listSceneTextures } from '../uv/sceneTextures'
@@ -270,6 +271,9 @@ function PanelResizeHandle({ onResize, width }: { onResize: (width: number) => v
 }
 
 export function SidePanel() {
+  const outlinerOpen = useOutlinerUiStore((state) => state.open)
+  const outlinerMinimized = useOutlinerUiStore((state) => state.panel.minimized)
+  const openOutliner = useOutlinerUiStore((state) => state.toggle)
   const {
     activeTool,
     setActiveTool,
@@ -290,6 +294,14 @@ export function SidePanel() {
     setDrawDoubleSided,
     hairTipStyle,
     setHairTipStyle,
+    pathStartCap, pathEndCap, pathRadialSegments, pathRadiusScale,
+    setPathStartCap, setPathEndCap, setPathRadialSegments, setPathRadiusScale,
+    pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
+    pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed, setPathOutputSettings,
+    pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
+    pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
+    ribbonStartTip, ribbonEndTip, ribbonTaper, ribbonWidthScale, ribbonFlat,
+    setRibbonStartTip, setRibbonEndTip, setRibbonTaper, setRibbonWidthScale, setRibbonFlat,
     sketchExtrudeMode,
     penExtrudeMode,
     sketchLatheMode,
@@ -299,6 +311,10 @@ export function SidePanel() {
     toggleExtrudeMode,
     toggleLatheMode,
     setLatheCaps,
+    latheRadialSegments,
+    latheProfileRings,
+    latheSmoothing,
+    setLatheSettings,
     extrudeAmount,
     setExtrudeAmount,
     blobInflation,
@@ -369,6 +385,8 @@ export function SidePanel() {
     setSymmetryAxis,
     symmetryPlane,
     setSymmetryPlane,
+    centerSymmetryPlaneOnSelection,
+    applySymmetryToSelection,
     copySelection,
     pasteClipboard,
     clipboard,
@@ -423,6 +441,47 @@ export function SidePanel() {
       setDrawDoubleSided: s.setDrawDoubleSided,
       hairTipStyle: s.hairTipStyle,
       setHairTipStyle: s.setHairTipStyle,
+      pathStartCap: s.pathStartCap,
+      pathEndCap: s.pathEndCap,
+      pathRadialSegments: s.pathRadialSegments,
+      pathRadiusScale: s.pathRadiusScale,
+      setPathStartCap: s.setPathStartCap,
+      setPathEndCap: s.setPathEndCap,
+      setPathRadialSegments: s.setPathRadialSegments,
+      setPathRadiusScale: s.setPathRadiusScale,
+      pathOutput: s.pathOutput,
+      pathStartScale: s.pathStartScale,
+      pathEndScale: s.pathEndScale,
+      pathTwist: s.pathTwist,
+      pathSpacing: s.pathSpacing,
+      pathOffset: s.pathOffset,
+      pathProfile: s.pathProfile,
+      pathProfileWidth: s.pathProfileWidth,
+      pathProfileHeight: s.pathProfileHeight,
+      pathChainAlternating: s.pathChainAlternating,
+      pathCardCrossed: s.pathCardCrossed,
+      setPathOutputSettings: s.setPathOutputSettings,
+      pathDistributionMode: s.pathDistributionMode,
+      pathCount: s.pathCount,
+      pathStartPadding: s.pathStartPadding,
+      pathEndPadding: s.pathEndPadding,
+      pathRandomScale: s.pathRandomScale,
+      pathRotation: s.pathRotation,
+      pathRandomRotation: s.pathRandomRotation,
+      pathAlternateRotation: s.pathAlternateRotation,
+      pathMirrorAlternate: s.pathMirrorAlternate,
+      pathSeed: s.pathSeed,
+      pathKeepInstances: s.pathKeepInstances,
+      ribbonStartTip: s.ribbonStartTip,
+      ribbonEndTip: s.ribbonEndTip,
+      ribbonTaper: s.ribbonTaper,
+      ribbonWidthScale: s.ribbonWidthScale,
+      ribbonFlat: s.ribbonFlat,
+      setRibbonStartTip: s.setRibbonStartTip,
+      setRibbonEndTip: s.setRibbonEndTip,
+      setRibbonTaper: s.setRibbonTaper,
+      setRibbonWidthScale: s.setRibbonWidthScale,
+      setRibbonFlat: s.setRibbonFlat,
       sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
       sketchLatheMode: s.sketchLatheMode,
@@ -432,6 +491,10 @@ export function SidePanel() {
       toggleExtrudeMode: s.toggleExtrudeMode,
       toggleLatheMode: s.toggleLatheMode,
       setLatheCaps: s.setLatheCaps,
+      latheRadialSegments: s.latheRadialSegments,
+      latheProfileRings: s.latheProfileRings,
+      latheSmoothing: s.latheSmoothing,
+      setLatheSettings: s.setLatheSettings,
       extrudeAmount: s.extrudeAmount,
       setExtrudeAmount: s.setExtrudeAmount,
       blobInflation: s.blobInflation,
@@ -502,6 +565,8 @@ export function SidePanel() {
       setSymmetryAxis: s.setSymmetryAxis,
       symmetryPlane: s.symmetryPlane,
       setSymmetryPlane: s.setSymmetryPlane,
+      centerSymmetryPlaneOnSelection: s.centerSymmetryPlaneOnSelection,
+      applySymmetryToSelection: s.applySymmetryToSelection,
       copySelection: s.copySelection,
       pasteClipboard: s.pasteClipboard,
       clipboard: s.clipboard,
@@ -556,6 +621,7 @@ export function SidePanel() {
 
   const selectedObj = objects.find((o) => o.id === selectedObjectId)
   const selectionCount = selectionObjectIds.length
+  const hasObjectSelection = selectionCount > 0 || !!selectedObjectId
   const overBudget = selectedObj && selectedObj.positions.length > polyBudget
   const isSketchOrPen =
     drawInputMode === 'regular' ||
@@ -582,6 +648,11 @@ export function SidePanel() {
     sketchLatheCaps,
     penLatheCaps,
   })
+  const selectedLatheSource = selectionCount === 1 ? selectedObj?.latheSource ?? null : null
+  const shownLatheRadialSegments = selectedLatheSource?.radialSegments ?? latheRadialSegments
+  const shownLatheProfileRings = selectedLatheSource?.profileRings ?? latheProfileRings
+  const shownLatheSmoothing = selectedLatheSource?.smoothing ?? latheSmoothing
+  const shownLatheCaps = selectedLatheSource?.caps ?? activeLatheCapsOn
 
   const selectedSketchDoodle =
     selectedObj?.sketchSource?.isClosed ? selectedObj.sketchSource : null
@@ -755,6 +826,13 @@ export function SidePanel() {
             </button>
             <TransformToolbarToggle />
             <PrimitivesToolbarToggle />
+            <button
+              className={`side-btn side-btn-wide ${outlinerOpen ? 'active' : ''}`}
+              onClick={openOutliner}
+              title={outlinerMinimized ? 'Restore scene Outliner' : 'Open scene Outliner'}
+            >
+              Outliner{outlinerOpen && outlinerMinimized ? ' ▾' : ''}
+            </button>
           </SideSection>
 
           <SideSection title="View" columns={2} order={40}>
@@ -999,7 +1077,93 @@ export function SidePanel() {
                 </button>
               ))}
             </SideBtnGroup>
-            {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || strokeMode === 'tapered-tube') && (
+            {strokeMode === 'centerline' && !activeExtrudeOn && !activeLatheOn && (
+              <div className="hair-draw-options path-draw-options">
+                <div className="hair-draw-options-heading"><span>Path settings</span><span className="muted">New strokes</span></div>
+                <div className="side-create-label">Path output</div>
+                <select className="side-select" value={pathOutput} onChange={(e) => setPathOutputSettings({ pathOutput: e.target.value as typeof pathOutput })}>
+                  <option value="tube">Tube</option><option value="ribbon">Ribbon</option><option value="chain">Chain</option><option value="vine">Vine</option>
+                  <option value="rope">Rope</option><option value="cards">2D Cards</option><option value="object-array">Object Array</option><option value="profile-sweep">Profile Sweep</option>
+                </select>
+                {pathOutput === 'object-array' && <p className="side-color-hint muted">Select an object before drawing. Its mesh is distributed along the new path; otherwise a box placeholder is used.</p>}
+                {(pathOutput === 'tube' || pathOutput === 'vine' || pathOutput === 'rope' || pathOutput === 'profile-sweep') && <>
+                <div className="side-create-label">Start cap</div>
+                <SideBtnGroup cols={4}>
+                  {(['flat', 'round', 'pointed', 'open'] as const).map((cap) => (
+                    <button key={cap} className={`side-btn ${pathStartCap === cap ? 'active' : ''}`} onClick={() => setPathStartCap(cap)}>{cap}</button>
+                  ))}
+                </SideBtnGroup>
+                <div className="side-create-label">End cap</div>
+                <SideBtnGroup cols={4}>
+                  {(['flat', 'round', 'pointed', 'open'] as const).map((cap) => (
+                    <button key={cap} className={`side-btn ${pathEndCap === cap ? 'active' : ''}`} onClick={() => setPathEndCap(cap)}>{cap}</button>
+                  ))}
+                </SideBtnGroup>
+                <SideSlider label="Radius" value={pathRadiusScale} display={`${Math.round(pathRadiusScale * 100)}%`} min={0.25} max={3} step={0.05} onChange={setPathRadiusScale} />
+                <SideSlider label="Round sides" value={pathRadialSegments} display={String(pathRadialSegments)} min={3} max={24} step={1} onChange={setPathRadialSegments} />
+                </>}
+                <SideSlider label="Start width" value={pathStartScale} display={`${Math.round(pathStartScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathStartScale:v})} />
+                <SideSlider label="End width" value={pathEndScale} display={`${Math.round(pathEndScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathEndScale:v})} />
+                <SideSlider label="Offset" value={pathOffset} display={pathOffset.toFixed(1)} min={-64} max={64} step={.5} onChange={(v) => setPathOutputSettings({pathOffset:v})} />
+                {(pathOutput === 'rope' || pathOutput === 'profile-sweep') && <SideSlider label="Twist" value={pathTwist} display={`${Math.round(pathTwist)}°`} min={-1080} max={1080} step={5} onChange={(v) => setPathOutputSettings({pathTwist:v})} />}
+                {(pathOutput === 'chain' || pathOutput === 'cards' || pathOutput === 'object-array') && <SideSlider label="Spacing" value={pathSpacing} display={`${Math.round(pathSpacing)}px`} min={2} max={128} step={1} onChange={(v) => setPathOutputSettings({pathSpacing:v})} />}
+                {(pathOutput === 'cards' || pathOutput === 'object-array') && <div className="hair-draw-options">
+                  <div className="hair-draw-options-heading"><span>Distribution</span><span className="muted">Deterministic</span></div>
+                  <SideBtnGroup cols={3}>{(['spacing','count','fit'] as const).map((mode)=><button key={mode} className={`side-btn ${pathDistributionMode===mode?'active':''}`} onClick={()=>setPathOutputSettings({pathDistributionMode:mode})}>{mode}</button>)}</SideBtnGroup>
+                  {pathDistributionMode === 'count' && (
+                    <SideSlider label="Count" value={pathCount} display={String(pathCount)} min={1} max={200} step={1} onChange={(v)=>setPathOutputSettings({pathCount:v})}/>
+                  )}
+                  <SideSlider label="Start padding" value={pathStartPadding} display={`${Math.round(pathStartPadding)}px`} min={0} max={128} step={1} onChange={(v)=>setPathOutputSettings({pathStartPadding:v})}/>
+                  <SideSlider label="End padding" value={pathEndPadding} display={`${Math.round(pathEndPadding)}px`} min={0} max={128} step={1} onChange={(v)=>setPathOutputSettings({pathEndPadding:v})}/>
+                  <SideSlider label="Rotation" value={pathRotation} display={`${Math.round(pathRotation)}°`} min={-180} max={180} step={1} onChange={(v)=>setPathOutputSettings({pathRotation:v})}/>
+                  <SideSlider label="Random rotation" value={pathRandomRotation} display={`±${Math.round(pathRandomRotation)}°`} min={0} max={180} step={1} onChange={(v)=>setPathOutputSettings({pathRandomRotation:v})}/>
+                  <SideSlider label="Random scale" value={pathRandomScale} display={`±${Math.round(pathRandomScale*100)}%`} min={0} max={1} step={.01} onChange={(v)=>setPathOutputSettings({pathRandomScale:v})}/>
+                  <SideSlider label="Seed" value={pathSeed} display={String(pathSeed)} min={1} max={9999} step={1} onChange={(v)=>setPathOutputSettings({pathSeed:v})}/>
+                  <label className="side-checkbox"><input type="checkbox" checked={pathAlternateRotation} onChange={(e)=>setPathOutputSettings({pathAlternateRotation:e.target.checked})}/><span>Alternate rotation 90°</span></label>
+                  <label className="side-checkbox"><input type="checkbox" checked={pathMirrorAlternate} onChange={(e)=>setPathOutputSettings({pathMirrorAlternate:e.target.checked})}/><span>Mirror alternating pieces</span></label>
+                  <label className="side-checkbox"><input type="checkbox" checked={pathKeepInstances} onChange={(e)=>setPathOutputSettings({pathKeepInstances:e.target.checked})}/><span>Keep procedural instances</span></label>
+                </div>}
+                {pathOutput === 'chain' && <label className="side-checkbox"><input type="checkbox" checked={pathChainAlternating} onChange={(e)=>setPathOutputSettings({pathChainAlternating:e.target.checked})}/><span>Alternate links 90°</span></label>}
+                {pathOutput === 'cards' && <label className="side-checkbox"><input type="checkbox" checked={pathCardCrossed} onChange={(e)=>setPathOutputSettings({pathCardCrossed:e.target.checked})}/><span>Crossed foliage cards</span></label>}
+                {pathOutput === 'profile-sweep' && <>
+                  <div className="side-create-label">Profile</div><SideBtnGroup cols={4}>{(['round','square','rectangle','rail'] as const).map((p)=><button key={p} className={`side-btn ${pathProfile===p?'active':''}`} onClick={()=>setPathOutputSettings({pathProfile:p})}>{p}</button>)}</SideBtnGroup>
+                  <SideSlider label="Profile width" value={pathProfileWidth} display={`${Math.round(pathProfileWidth*100)}%`} min={.1} max={4} step={.05} onChange={(v)=>setPathOutputSettings({pathProfileWidth:v})}/>
+                  <SideSlider label="Profile height" value={pathProfileHeight} display={`${Math.round(pathProfileHeight*100)}%`} min={.1} max={4} step={.05} onChange={(v)=>setPathOutputSettings({pathProfileHeight:v})}/>
+                </>}
+                {pathOutput === 'ribbon' && <p className="side-color-hint muted">Ribbon output uses the Ribbon width, taper, end, texture, and card settings below.</p>}
+              </div>
+            )}
+            {strokeMode === 'capsule' && !activeLatheOn && (
+              <div className="hair-draw-options path-draw-options">
+                <div className="hair-draw-options-heading"><span>Capsule settings</span><span className="muted">New strokes</span></div>
+                <SideSlider label="Radius" value={Math.abs(extrudeAmount)} display={String(Math.round(Math.abs(extrudeAmount)))} min={2} max={128} step={1} onChange={setExtrudeAmount}/>
+                <SideSlider label="Round sides" value={Math.max(12,pathRadialSegments)} display={String(Math.max(12,pathRadialSegments))} min={12} max={24} step={1} onChange={setPathRadialSegments}/>
+                <p className="side-color-hint muted">Open strokes become rounded capsule sweeps. Closed strokes become rounded capsule volumes.</p>
+              </div>
+            )}
+            {(strokeMode === 'ribbon' || (strokeMode === 'centerline' && pathOutput === 'ribbon')) && !activeExtrudeOn && !activeLatheOn && (
+              <div className="hair-draw-options ribbon-draw-options">
+                <div className="hair-draw-options-heading"><span>Ribbon settings</span><span className="muted">New strokes</span></div>
+                <div className="side-create-label">Start end</div>
+                <SideBtnGroup cols={2}>
+                  <button className={`side-btn ${ribbonStartTip === 'square' ? 'active' : ''}`} onClick={() => setRibbonStartTip('square')}>Square</button>
+                  <button className={`side-btn ${ribbonStartTip === 'pointed' ? 'active' : ''}`} onClick={() => setRibbonStartTip('pointed')}>Pointed</button>
+                </SideBtnGroup>
+                <div className="side-create-label">Finish end</div>
+                <SideBtnGroup cols={2}>
+                  <button className={`side-btn ${ribbonEndTip === 'square' ? 'active' : ''}`} onClick={() => setRibbonEndTip('square')}>Square</button>
+                  <button className={`side-btn ${ribbonEndTip === 'pointed' ? 'active' : ''}`} onClick={() => setRibbonEndTip('pointed')}>Pointed</button>
+                </SideBtnGroup>
+                <SideSlider label="Width" value={ribbonWidthScale} display={`${Math.round(ribbonWidthScale * 100)}%`} min={0.25} max={3} step={0.05} onChange={setRibbonWidthScale} />
+                <SideSlider label="End taper" value={ribbonTaper} display={`${Math.round(ribbonTaper * 100)}%`} min={0.05} max={0.49} step={0.01} onChange={setRibbonTaper} />
+                <label className="side-checkbox" title="Create a zero-thickness double-sided image card instead of a solid ribbon">
+                  <input type="checkbox" checked={ribbonFlat} onChange={(event) => setRibbonFlat(event.target.checked)} />
+                  <span>Flat double-sided card</span>
+                </label>
+                {!ribbonFlat && <p className="side-color-hint muted">Extrude depth controls solid ribbon thickness.</p>}
+              </div>
+            )}
+            {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || (strokeMode === 'centerline' && (pathOutput === 'ribbon' || pathOutput === 'cards')) || strokeMode === 'tapered-tube') && (
               <div className="hair-draw-options">
                 <div className="hair-draw-options-heading">
                   <span>Appearance</span>
@@ -1019,7 +1183,7 @@ export function SidePanel() {
                     ? `Texture · ${hairTextureLabel?.split(' (')[0] ?? 'On'}`
                     : 'Texture · Use current color'}
                 </button>
-                <div className="side-checkbox-row">
+                {strokeMode !== 'ribbon' && <div className="side-checkbox-row">
                   <label className="side-checkbox" title="Taper hair to a point at both ends">
                     <input type="radio" name="hair-tip" checked={hairTipStyle === 'pointed'} onChange={() => setHairTipStyle('pointed')} />
                     <span>Pointed tips</span>
@@ -1028,7 +1192,7 @@ export function SidePanel() {
                     <input type="radio" name="hair-tip" checked={hairTipStyle === 'square'} onChange={() => setHairTipStyle('square')} />
                     <span>Square tips</span>
                   </label>
-                </div>
+                </div>}
                 <p className="side-color-hint muted">
                   Draw in a viewport to create the stroke. Texture, mapping, and tip settings are saved on the new object.
                 </p>
@@ -1061,17 +1225,48 @@ export function SidePanel() {
                 Lathe
               </button>
             </SideBtnGroup>
-            {activeLatheOn && (
+            {(activeLatheOn || selectedLatheSource) && (
               <>
+                <div className="side-create-label">{selectedLatheSource ? 'Selected lathe' : 'Lathe precision'}</div>
+                <SideSlider
+                  label="Round sides"
+                  value={shownLatheRadialSegments}
+                  display={`${shownLatheRadialSegments}`}
+                  min={8}
+                  max={64}
+                  step={1}
+                  onChange={(value) => setLatheSettings({ latheRadialSegments: value })}
+                  onCommit={commitSketchSourceEdit}
+                />
+                <SideSlider
+                  label="Profile detail"
+                  value={shownLatheProfileRings}
+                  display={`${shownLatheProfileRings}`}
+                  min={8}
+                  max={128}
+                  step={1}
+                  onChange={(value) => setLatheSettings({ latheProfileRings: value })}
+                  onCommit={commitSketchSourceEdit}
+                />
+                <SideSlider
+                  label="Profile smoothing"
+                  value={shownLatheSmoothing}
+                  display={`${Math.round(shownLatheSmoothing * 100)}%`}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  onChange={(value) => setLatheSettings({ latheSmoothing: value })}
+                  onCommit={commitSketchSourceEdit}
+                />
                 <label className="side-checkbox" title="Add flat caps at the top and bottom of the lathe">
                   <input
                     type="checkbox"
-                    checked={activeLatheCapsOn}
+                    checked={shownLatheCaps}
                     onChange={(e) => setLatheCaps(e.target.checked)}
                   />
                   <span>Top &amp; bottom caps</span>
                 </label>
-                <p className="side-color-hint muted">{getLatheViewHint(activeView)}</p>
+                {activeLatheOn && <p className="side-color-hint muted">{getLatheViewHint(activeView)}</p>}
               </>
             )}
             {selectedObj?.topologyLocked && (
@@ -1174,6 +1369,74 @@ export function SidePanel() {
                   }}
                   onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
                 />
+              )}
+              {selectedSketchSource?.kind === 'path' && (
+                <div className="hair-draw-options path-draw-options">
+                  <div className="hair-draw-options-heading"><span>Path output</span><span className="muted">Selected</span></div>
+                  <select className="side-select" value={selectedSketchSource.pathOutput ?? 'tube'} onChange={(e)=>{updateSelectedSketchSource({pathOutput:e.target.value as NonNullable<typeof selectedSketchSource.pathOutput>});commitSketchSourceEdit()}}>
+                    <option value="tube">Tube</option><option value="ribbon">Ribbon</option><option value="chain">Chain</option><option value="vine">Vine</option><option value="rope">Rope</option><option value="cards">2D Cards</option><option value="object-array">Object Array</option><option value="profile-sweep">Profile Sweep</option>
+                  </select>
+                  <SideSlider label="Start width" value={selectedSketchSource.pathStartScale ?? 1} display={`${Math.round((selectedSketchSource.pathStartScale ?? 1)*100)}%`} min={.05} max={3} step={.05} onChange={(v)=>updateSelectedSketchSource({pathStartScale:v})} onCommit={commitSketchSourceEdit}/>
+                  <SideSlider label="End width" value={selectedSketchSource.pathEndScale ?? 1} display={`${Math.round((selectedSketchSource.pathEndScale ?? 1)*100)}%`} min={.05} max={3} step={.05} onChange={(v)=>updateSelectedSketchSource({pathEndScale:v})} onCommit={commitSketchSourceEdit}/>
+                  {(['chain','cards','object-array'] as const).includes((selectedSketchSource.pathOutput ?? 'tube') as any) && (
+                    <SideSlider label="Spacing" value={selectedSketchSource.pathSpacing ?? 16} display={`${Math.round(selectedSketchSource.pathSpacing ?? 16)}px`} min={2} max={128} step={1} onChange={(v)=>updateSelectedSketchSource({pathSpacing:v})} onCommit={commitSketchSourceEdit}/>
+                  )}
+                  {(selectedSketchSource.pathOutput === 'cards' || selectedSketchSource.pathOutput === 'object-array') && <>
+                    <SideBtnGroup cols={3}>{(['spacing','count','fit'] as const).map((mode)=><button key={mode} className={`side-btn ${(selectedSketchSource.pathDistributionMode ?? 'spacing')===mode?'active':''}`} onClick={()=>{updateSelectedSketchSource({pathDistributionMode:mode});commitSketchSourceEdit()}}>{mode}</button>)}</SideBtnGroup>
+                    {(selectedSketchSource.pathDistributionMode ?? 'spacing') === 'count' && (
+                      <SideSlider label="Count" value={selectedSketchSource.pathCount ?? 8} display={String(selectedSketchSource.pathCount ?? 8)} min={1} max={200} step={1} onChange={(v)=>updateSelectedSketchSource({pathCount:v})} onCommit={commitSketchSourceEdit}/>
+                    )}
+                    <SideSlider label="Start padding" value={selectedSketchSource.pathStartPadding ?? 0} display={`${Math.round(selectedSketchSource.pathStartPadding ?? 0)}px`} min={0} max={128} step={1} onChange={(v)=>updateSelectedSketchSource({pathStartPadding:v})} onCommit={commitSketchSourceEdit}/>
+                    <SideSlider label="End padding" value={selectedSketchSource.pathEndPadding ?? 0} display={`${Math.round(selectedSketchSource.pathEndPadding ?? 0)}px`} min={0} max={128} step={1} onChange={(v)=>updateSelectedSketchSource({pathEndPadding:v})} onCommit={commitSketchSourceEdit}/>
+                    <SideSlider label="Random scale" value={selectedSketchSource.pathRandomScale ?? 0} display={`±${Math.round((selectedSketchSource.pathRandomScale ?? 0)*100)}%`} min={0} max={1} step={.01} onChange={(v)=>updateSelectedSketchSource({pathRandomScale:v})} onCommit={commitSketchSourceEdit}/>
+                    <SideSlider label="Random rotation" value={selectedSketchSource.pathRandomRotation ?? 0} display={`±${Math.round(selectedSketchSource.pathRandomRotation ?? 0)}°`} min={0} max={180} step={1} onChange={(v)=>updateSelectedSketchSource({pathRandomRotation:v})} onCommit={commitSketchSourceEdit}/>
+                    <SideSlider label="Seed" value={selectedSketchSource.pathSeed ?? 1} display={String(selectedSketchSource.pathSeed ?? 1)} min={1} max={9999} step={1} onChange={(v)=>updateSelectedSketchSource({pathSeed:v})} onCommit={commitSketchSourceEdit}/>
+                    <label className="side-checkbox"><input type="checkbox" checked={selectedSketchSource.pathAlternateRotation ?? false} onChange={(e)=>{updateSelectedSketchSource({pathAlternateRotation:e.target.checked});commitSketchSourceEdit()}}/><span>Alternate rotation 90°</span></label>
+                    <label className="side-checkbox"><input type="checkbox" checked={selectedSketchSource.pathMirrorAlternate ?? false} onChange={(e)=>{updateSelectedSketchSource({pathMirrorAlternate:e.target.checked});commitSketchSourceEdit()}}/><span>Mirror alternating pieces</span></label>
+                  </>}
+                  {(selectedSketchSource.pathOutput === 'rope' || selectedSketchSource.pathOutput === 'profile-sweep') && (
+                    <SideSlider label="Twist" value={selectedSketchSource.pathTwist ?? 360} display={`${Math.round(selectedSketchSource.pathTwist ?? 360)}°`} min={-1080} max={1080} step={5} onChange={(v)=>updateSelectedSketchSource({pathTwist:v})} onCommit={commitSketchSourceEdit}/>
+                  )}
+                  {(selectedSketchSource.pathOutput ?? 'tube') === 'tube' && <>
+                  <div className="side-create-label">Start cap</div>
+                  <SideBtnGroup cols={4}>
+                    {(['flat', 'round', 'pointed', 'open'] as const).map((cap) => (
+                      <button key={cap} className={`side-btn ${(selectedSketchSource.pathStartCap ?? 'flat') === cap ? 'active' : ''}`} onClick={() => { updateSelectedSketchSource({ pathStartCap: cap }); commitSketchSourceEdit() }}>{cap}</button>
+                    ))}
+                  </SideBtnGroup>
+                  <div className="side-create-label">End cap</div>
+                  <SideBtnGroup cols={4}>
+                    {(['flat', 'round', 'pointed', 'open'] as const).map((cap) => (
+                      <button key={cap} className={`side-btn ${(selectedSketchSource.pathEndCap ?? 'flat') === cap ? 'active' : ''}`} onClick={() => { updateSelectedSketchSource({ pathEndCap: cap }); commitSketchSourceEdit() }}>{cap}</button>
+                    ))}
+                  </SideBtnGroup>
+                  <SideSlider label="Radius" value={selectedSketchSource.pathRadiusScale ?? 1} display={`${Math.round((selectedSketchSource.pathRadiusScale ?? 1) * 100)}%`} min={0.25} max={3} step={0.05} onChange={(value) => updateSelectedSketchSource({ pathRadiusScale: value })} onCommit={commitSketchSourceEdit} />
+                  <SideSlider label="Round sides" value={selectedSketchSource.pathRadialSegments ?? 8} display={String(selectedSketchSource.pathRadialSegments ?? 8)} min={3} max={24} step={1} onChange={(value) => updateSelectedSketchSource({ pathRadialSegments: value })} onCommit={commitSketchSourceEdit} />
+                  </>}
+                </div>
+              )}
+              {(selectedSketchSource?.kind === 'capsule-path' || selectedSketchSource?.kind === 'capsule-shape') && (
+                <div className="hair-draw-options path-draw-options">
+                  <div className="hair-draw-options-heading"><span>Capsule precision</span><span className="muted">Selected</span></div>
+                  <SideSlider label="Radius" value={Math.abs(selectedSketchSource.extrudeDepth)} display={String(Math.round(Math.abs(selectedSketchSource.extrudeDepth)))} min={2} max={128} step={1} onChange={(value)=>updateSelectedSketchSource({extrudeDepth:value})} onCommit={commitSketchSourceEdit}/>
+                  <SideSlider label="Round sides" value={Math.max(12,selectedSketchSource.pathRadialSegments ?? 12)} display={String(Math.max(12,selectedSketchSource.pathRadialSegments ?? 12))} min={12} max={24} step={1} onChange={(value)=>updateSelectedSketchSource({pathRadialSegments:value})} onCommit={commitSketchSourceEdit}/>
+                </div>
+              )}
+              {selectedSketchSource?.kind === 'ribbon' && (
+                <div className="hair-draw-options ribbon-draw-options">
+                  <div className="hair-draw-options-heading"><span>Ribbon shape</span><span className="muted">Selected</span></div>
+                  <div className="side-create-label">Start end</div>
+                  <SideBtnGroup cols={2}>
+                    {(['square', 'pointed'] as const).map((tip) => <button key={tip} className={`side-btn ${(selectedSketchSource.ribbonStartTip ?? 'square') === tip ? 'active' : ''}`} onClick={() => { updateSelectedSketchSource({ ribbonStartTip: tip }); commitSketchSourceEdit() }}>{tip}</button>)}
+                  </SideBtnGroup>
+                  <div className="side-create-label">Finish end</div>
+                  <SideBtnGroup cols={2}>
+                    {(['square', 'pointed'] as const).map((tip) => <button key={tip} className={`side-btn ${(selectedSketchSource.ribbonEndTip ?? 'square') === tip ? 'active' : ''}`} onClick={() => { updateSelectedSketchSource({ ribbonEndTip: tip }); commitSketchSourceEdit() }}>{tip}</button>)}
+                  </SideBtnGroup>
+                  <SideSlider label="Width" value={selectedSketchSource.ribbonWidthScale ?? 1} display={`${Math.round((selectedSketchSource.ribbonWidthScale ?? 1) * 100)}%`} min={0.25} max={3} step={0.05} onChange={(value) => updateSelectedSketchSource({ ribbonWidthScale: value })} onCommit={commitSketchSourceEdit} />
+                  <SideSlider label="End taper" value={selectedSketchSource.ribbonTaper ?? 0.35} display={`${Math.round((selectedSketchSource.ribbonTaper ?? 0.35) * 100)}%`} min={0.05} max={0.49} step={0.01} onChange={(value) => updateSelectedSketchSource({ ribbonTaper: value })} onCommit={commitSketchSourceEdit} />
+                  <label className="side-checkbox"><input type="checkbox" checked={selectedSketchSource.ribbonFlat ?? false} onChange={(event) => { updateSelectedSketchSource({ ribbonFlat: event.target.checked }); commitSketchSourceEdit() }} /><span>Flat double-sided card</span></label>
+                </div>
               )}
               {activeExtrudeOn && !selectedExtrudableDoodle && drawInputMode === 'regular' && (
                 <p className="side-color-hint muted">
@@ -1540,13 +1803,24 @@ export function SidePanel() {
               step={1}
               onChange={setSymmetryPlane}
             />
+            <SideBtnGroup cols={3}>
+              <button className="side-btn" onClick={() => setSymmetryPlane(0)} title="Move the mirror plane to the world origin">
+                Origin
+              </button>
+              <button className="side-btn" onClick={centerSymmetryPlaneOnSelection} disabled={!hasObjectSelection} title="Center the mirror plane on the selected objects">
+                Selection
+              </button>
+              <button className="side-btn side-btn-primary" onClick={applySymmetryToSelection} disabled={!hasObjectSelection} title="Create mirrored copies of the selected objects now">
+                Apply
+              </button>
+            </SideBtnGroup>
             <p className="side-color-hint muted">
               Drag the dashed line in ortho views to move the mirror plane.
             </p>
           </SideSection>
 
-          <SideSection title="Geometry" columns={2} order={22}>
-            <div className="side-create-label">Topology</div>
+          <SideSection title="Geometry" order={22}>
+            <div className="side-create-label">Normals</div>
             <SideBtnGroup cols={2}>
               <button
                 className="side-btn"
@@ -1566,7 +1840,7 @@ export function SidePanel() {
                 disabled={!selectedObj || !!selectedObj.topologyLocked}
                 title="Recalculate winding order to make selected faces (or all faces if nothing selected) face outward"
               >
-                Recalc Outward
+                Recalculate
               </button>
               <button
                 className="side-btn"
@@ -1580,26 +1854,67 @@ export function SidePanel() {
               >
                 Double Sided
               </button>
-              <button
-                className="side-btn"
-                onClick={subdivideSelected}
-                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
-                title="Subdivide selected faces — edit-mode topology split (not SubD smooth)"
-              >
-                Subdivide
-              </button>
-              <button
-                className={`side-btn ${selectedSubDActive ? 'active' : ''}`}
-                onClick={toggleSubDSelected}
-                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
-                title="Subdivision Surface preview — Catmull-Clark smooth (Ctrl+2 / Ctrl+Shift+2 levels)"
-              >
-                SubD
-              </button>
+            </SideBtnGroup>
+            <div className="side-create-label">Subdivide</div>
+            <button
+              className="side-btn"
+              onClick={subdivideSelected}
+              disabled={!hasObjectSelection || !!selectedObj?.topologyLocked}
+              title="Split selected faces into smaller editable faces without smoothing"
+            >
+              Subdivide Faces
+            </button>
+            <div className="side-create-label">Subdivision Surface</div>
+            <button
+              className={`side-btn ${selectedSubDActive ? 'active' : ''}`}
+              onClick={toggleSubDSelected}
+              disabled={!hasObjectSelection || !!selectedObj?.topologyLocked}
+              title="Toggle a non-destructive Catmull-Clark smoothing preview"
+            >
+              {selectedSubDActive ? 'Disable Preview' : 'Enable Preview'}
+            </button>
+            {hasObjectSelection && !selectedObj?.topologyLocked && (
+              <>
+                <SideSlider
+                  label="Viewport level"
+                  value={selectedSubDLevel}
+                  display={String(selectedSubDLevel)}
+                  min={0}
+                  max={3}
+                  step={1}
+                  onChange={setSubDLevelsSelected}
+                />
+                <SideBtnGroup cols={2}>
+                  <button
+                    className="side-btn side-btn-primary"
+                    onClick={applySubDSelected}
+                    disabled={!selectedSubDActive || selectedSubDLevel <= 0}
+                    title="Bake the visible smooth result into editable geometry"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="side-btn"
+                    onClick={() => setSubDLevelsSelected(0)}
+                    disabled={!selectedSubDActive}
+                    title="Remove the non-destructive preview without changing the base mesh"
+                  >
+                    Clear
+                  </button>
+                </SideBtnGroup>
+              </>
+            )}
+            <p className="side-color-hint muted">
+              Non-destructive smoothing preview until Apply is pressed.
+            </p>
+          </SideSection>
+
+          <SideSection title="Topology Tools" order={19}>
+            <SideBtnGroup cols={2}>
               <button
                 className={`side-btn ${activeTool === 'knife' ? 'active' : ''}`}
                 onClick={() => setActiveTool('knife')}
-                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
+                disabled={!hasObjectSelection || !!selectedObj?.topologyLocked}
                 title="Knife — click points on the mesh (snaps to verts/edges); Enter confirms cut; Esc cancels; Shift = 45° (K)"
               >
                 Knife
@@ -1607,7 +1922,7 @@ export function SidePanel() {
               <button
                 className={`side-btn ${activeTool === 'mirror-knife' ? 'active' : ''}`}
                 onClick={() => setActiveTool('mirror-knife')}
-                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
+                disabled={!hasObjectSelection || !!selectedObj?.topologyLocked}
                 title="Mirror Knife — symmetrically cuts on both sides of the symmetry plane (Shift+K)"
               >
                 Mirror Knife
@@ -1618,7 +1933,7 @@ export function SidePanel() {
                   setSelectionMode('edge')
                   setActiveTool('loop-cut')
                 }}
-                disabled={selectionCount === 0 || !!selectedObj?.topologyLocked}
+                disabled={!hasObjectSelection || !!selectedObj?.topologyLocked}
                 title="Loop cut — click edge, scroll to slide, click to confirm (Ctrl+R)"
               >
                 Loop Cut
@@ -1648,38 +1963,6 @@ export function SidePanel() {
                   </button>
                   <button className="side-btn" onClick={knifeCancel} disabled={!knifeDraft}>
                     Cancel
-                  </button>
-                </SideBtnGroup>
-              </>
-            )}
-            {selectionCount > 0 && !selectedObj?.topologyLocked && (
-              <>
-                <div className="side-create-label">Subdivision</div>
-                <SideSlider
-                  label="SubD viewport"
-                  value={selectedSubDLevel}
-                  display={String(selectedSubDLevel)}
-                  min={0}
-                  max={3}
-                  step={1}
-                  onChange={setSubDLevelsSelected}
-                />
-                <SideBtnGroup cols={2}>
-                  <button
-                    className="side-btn"
-                    onClick={applySubDSelected}
-                    disabled={!selectedSubDActive || selectedSubDLevel <= 0}
-                    title="Apply subdivision — bake smooth mesh to geometry (like Blender modifier Apply)"
-                  >
-                    Apply SubD
-                  </button>
-                  <button
-                    className="side-btn"
-                    onClick={() => setSubDLevelsSelected(0)}
-                    disabled={!selectedSubDActive}
-                    title="Disable subdivision preview"
-                  >
-                    Clear SubD
                   </button>
                 </SideBtnGroup>
               </>

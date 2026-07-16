@@ -9,6 +9,8 @@ import {
 } from '../stroke/sketchDoodle'
 import { polylineToMesh, type PolylineInput } from '../stroke/polylineToMesh'
 import type { HairTipStyle } from '../mesh/hairRibbon'
+import type { SweepCapStyle } from '../mesh/extrusion'
+import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
 import { flattenVectorPath } from './bezier'
 import type { VectorPath } from './types'
 import {
@@ -33,8 +35,42 @@ export interface VectorPathMeshOptions {
   extrudeMode?: boolean
   latheMode?: boolean
   latheCaps?: boolean
+  latheRadialSegments?: number
+  latheProfileRings?: number
+  latheSmoothing?: number
   extrudeAmount?: number
   hairTipStyle?: HairTipStyle
+  pathStartCap?: SweepCapStyle
+  pathEndCap?: SweepCapStyle
+  pathRadialSegments?: number
+  pathRadiusScale?: number
+  ribbonStartTip?: HairTipStyle
+  ribbonEndTip?: HairTipStyle
+  ribbonTaper?: number
+  ribbonWidthScale?: number
+  ribbonFlat?: boolean
+  pathOutput?: PathOutput
+  pathStartScale?: number
+  pathEndScale?: number
+  pathTwist?: number
+  pathSpacing?: number
+  pathOffset?: number
+  pathProfile?: PathProfile
+  pathProfileWidth?: number
+  pathProfileHeight?: number
+  pathChainAlternating?: boolean
+  pathCardCrossed?: boolean
+  pathDistributionMode?: PathDistributionMode
+  pathCount?: number
+  pathStartPadding?: number
+  pathEndPadding?: number
+  pathRandomScale?: number
+  pathRotation?: number
+  pathRandomRotation?: number
+  pathAlternateRotation?: boolean
+  pathMirrorAlternate?: boolean
+  pathSeed?: number
+  pathKeepInstances?: boolean
 }
 
 function meshPointsFromPath(path: VectorPath, latheMode = false): { x: number; y: number }[] {
@@ -108,11 +144,37 @@ export function vectorPathToMesh(
     extrudeMode: options.extrudeMode,
     latheMode: options.latheMode,
     latheCaps: options.latheCaps,
+    latheRadialSegments: options.latheRadialSegments,
+    latheProfileRings: options.latheProfileRings,
+    latheSmoothing: options.latheSmoothing,
     extrudeAmount: options.extrudeAmount,
     name,
     pathClosed: path.closed,
     preserveDetail: true,
     hairTipStyle: options.hairTipStyle,
+    pathStartCap: options.pathStartCap,
+    pathEndCap: options.pathEndCap,
+    pathRadialSegments: options.pathRadialSegments,
+    pathRadiusScale: options.pathRadiusScale,
+    ribbonStartTip: options.ribbonStartTip,
+    ribbonEndTip: options.ribbonEndTip,
+    ribbonTaper: options.ribbonTaper,
+    ribbonWidthScale: options.ribbonWidthScale,
+    ribbonFlat: options.ribbonFlat,
+    pathOutput: options.pathOutput,
+    pathStartScale: options.pathStartScale,
+    pathEndScale: options.pathEndScale,
+    pathTwist: options.pathTwist,
+    pathSpacing: options.pathSpacing,
+    pathOffset: options.pathOffset,
+    pathProfile: options.pathProfile,
+    pathProfileWidth: options.pathProfileWidth,
+    pathProfileHeight: options.pathProfileHeight,
+    pathChainAlternating: options.pathChainAlternating,
+    pathCardCrossed: options.pathCardCrossed,
+    pathDistributionMode: options.pathDistributionMode, pathCount: options.pathCount, pathStartPadding: options.pathStartPadding, pathEndPadding: options.pathEndPadding,
+    pathRandomScale: options.pathRandomScale, pathRotation: options.pathRotation, pathRandomRotation: options.pathRandomRotation,
+    pathAlternateRotation: options.pathAlternateRotation, pathMirrorAlternate: options.pathMirrorAlternate, pathSeed: options.pathSeed, pathKeepInstances: options.pathKeepInstances,
   }
 
   if (options.latheMode) {

@@ -2,6 +2,8 @@ import type { SceneObject } from '../mesh/HalfEdgeMesh'
 import { IDENTITY_TRANSFORM } from '../mesh/objectTransform'
 import type { StrokeMode } from '../store/appStore'
 import type { HairTipStyle } from '../mesh/hairRibbon'
+import type { SweepCapStyle } from '../mesh/extrusion'
+import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
 import { cloneAnchors } from './autoConnect'
 import type { VectorPath } from './types'
 import { vectorPathToMesh } from './vectorPathToMesh'
@@ -20,6 +22,37 @@ export interface VectorSource {
   extrudeDepth: number
   /** Hair tip shape for hair stroke modes. Defaults to pointed when missing. */
   hairTipStyle?: HairTipStyle
+  pathStartCap?: SweepCapStyle
+  pathEndCap?: SweepCapStyle
+  pathRadialSegments?: number
+  pathRadiusScale?: number
+  ribbonStartTip?: HairTipStyle
+  ribbonEndTip?: HairTipStyle
+  ribbonTaper?: number
+  ribbonWidthScale?: number
+  ribbonFlat?: boolean
+  pathOutput?: PathOutput
+  pathStartScale?: number
+  pathEndScale?: number
+  pathTwist?: number
+  pathSpacing?: number
+  pathOffset?: number
+  pathProfile?: PathProfile
+  pathProfileWidth?: number
+  pathProfileHeight?: number
+  pathChainAlternating?: boolean
+  pathCardCrossed?: boolean
+  pathDistributionMode?: PathDistributionMode
+  pathCount?: number
+  pathStartPadding?: number
+  pathEndPadding?: number
+  pathRandomScale?: number
+  pathRotation?: number
+  pathRandomRotation?: number
+  pathAlternateRotation?: boolean
+  pathMirrorAlternate?: boolean
+  pathSeed?: number
+  pathKeepInstances?: boolean
 }
 
 export function isVectorDoodleObject(
@@ -72,6 +105,29 @@ export function regenerateVectorObject(
     extrudeMode: source.extrudeMode,
     extrudeAmount: extrudeDepth,
     hairTipStyle: source.hairTipStyle,
+    pathStartCap: source.pathStartCap,
+    pathEndCap: source.pathEndCap,
+    pathRadialSegments: source.pathRadialSegments,
+    pathRadiusScale: source.pathRadiusScale,
+    ribbonStartTip: source.ribbonStartTip,
+    ribbonEndTip: source.ribbonEndTip,
+    ribbonTaper: source.ribbonTaper,
+    ribbonWidthScale: source.ribbonWidthScale,
+    ribbonFlat: source.ribbonFlat,
+    pathOutput: source.pathOutput,
+    pathStartScale: source.pathStartScale,
+    pathEndScale: source.pathEndScale,
+    pathTwist: source.pathTwist,
+    pathSpacing: source.pathSpacing,
+    pathOffset: source.pathOffset,
+    pathProfile: source.pathProfile,
+    pathProfileWidth: source.pathProfileWidth,
+    pathProfileHeight: source.pathProfileHeight,
+    pathChainAlternating: source.pathChainAlternating,
+    pathCardCrossed: source.pathCardCrossed,
+    pathDistributionMode: source.pathDistributionMode, pathCount: source.pathCount, pathStartPadding: source.pathStartPadding, pathEndPadding: source.pathEndPadding,
+    pathRandomScale: source.pathRandomScale, pathRotation: source.pathRotation, pathRandomRotation: source.pathRandomRotation,
+    pathAlternateRotation: source.pathAlternateRotation, pathMirrorAlternate: source.pathMirrorAlternate, pathSeed: source.pathSeed, pathKeepInstances: source.pathKeepInstances,
   })
   if (!rebuilt) return null
 

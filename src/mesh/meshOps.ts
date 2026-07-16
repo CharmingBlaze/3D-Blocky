@@ -11,7 +11,6 @@ import {
   add3,
   faceNormal,
   normalize3,
-  scale3,
   type Vec3,
 } from '../utils/math'
 import { transformMeshSelectionWithGizmo } from './meshSelection'
@@ -124,13 +123,65 @@ function collectBevelEdges(
   return []
 }
 
-/** Region extrude — duplicates selected-region verts and adds side faces. */
+function faceAreaNormal(obj: SceneObject, face: number[]): Vec3 {
+  if (face.length < 3) return { x: 0, y: 0, z: 0 }
+  const origin = obj.positions[face[0]]!
+  const sum = { x: 0, y: 0, z: 0 }
+  for (let i = 1; i < face.length - 1; i++) {
+    const a = obj.positions[face[i]]!
+    const b = obj.positions[face[i + 1]]!
+    const ax = a.x - origin.x, ay = a.y - origin.y, az = a.z - origin.z
+    const bx = b.x - origin.x, by = b.y - origin.y, bz = b.z - origin.z
+    sum.x += ay * bz - az * by
+    sum.y += az * bx - ax * bz
+    sum.z += ax * by - ay * bx
+  }
+  return sum
+}
+
+/** Connected face islands, joined only through a shared edge (Blender-style regions). */
+function selectedFaceRegions(obj: SceneObject, selected: Set<number>): number[][] {
+  const edgeFaces = new Map<string, number[]>()
+  for (const fi of selected) {
+    const face = obj.faces[fi]
+    if (!face) continue
+    for (let i = 0; i < face.length; i++) {
+      const key = edgeKey(face[i]!, face[(i + 1) % face.length]!)
+      const list = edgeFaces.get(key) ?? []
+      list.push(fi)
+      edgeFaces.set(key, list)
+    }
+  }
+  const neighbors = new Map<number, Set<number>>()
+  for (const fi of selected) neighbors.set(fi, new Set())
+  for (const list of edgeFaces.values()) for (const a of list) for (const b of list) if (a !== b) neighbors.get(a)?.add(b)
+  const remaining = new Set(selected)
+  const regions: number[][] = []
+  while (remaining.size) {
+    const start = remaining.values().next().value as number
+    const stack = [start], region: number[] = []
+    remaining.delete(start)
+    while (stack.length) {
+      const fi = stack.pop()!
+      region.push(fi)
+      for (const next of neighbors.get(fi) ?? []) if (remaining.delete(next)) stack.push(next)
+    }
+    regions.push(region)
+  }
+  return regions
+}
+
+/** Blender-like Extrude Region: replace selected caps and bridge only island boundaries. */
 export function extrudeMeshSelection(
   obj: SceneObject,
   selection: MeshComponentSelection,
   mode: SelectionMode,
-  distance: number
-): SceneObject {
+  distance: number,
+  direction?: Vec3
+): SceneObject & { resultingSelection?: MeshComponentSelection } {
+  if (mode === 'edge' && selection.edges.length > 0) {
+    return extrudeSelectedEdges(obj, selection, distance, direction)
+  }
   const faceSet = collectExtrudeFaces(obj, selection, mode)
   if (faceSet.size === 0 || Math.abs(distance) < 1e-8) return cloneSceneObject(obj)
 
@@ -138,70 +189,117 @@ export function extrudeMeshSelection(
   const faces = obj.faces.map((f) => [...f])
   const faceColors = [...obj.faceColors]
 
-  const selectedVerts = new Set<number>()
-  for (const fi of faceSet) {
-    for (const vi of faces[fi]) selectedVerts.add(vi)
-  }
+  const hasUvs = !!obj.uvs?.length && obj.faceUvIndices?.length === obj.faces.length
+  const uvs = obj.uvs?.map((uv) => ({ ...uv })) ?? []
+  const faceUvIndices = obj.faceUvIndices?.map((face) => [...face]) ?? []
+  const faceGroups = obj.faceGroups?.map((group) => [...group])
 
-  const edgeInSelected = new Map<string, number>()
-  for (const fi of faceSet) {
-    const face = faces[fi]
-    for (let i = 0; i < face.length; i++) {
-      const key = edgeKey(face[i], face[(i + 1) % face.length])
-      edgeInSelected.set(key, (edgeInSelected.get(key) ?? 0) + 1)
+  for (const region of selectedFaceRegions(obj, faceSet)) {
+    let normalSum: Vec3 = { x: 0, y: 0, z: 0 }
+    for (const fi of region) normalSum = add3(normalSum, faceAreaNormal(obj, obj.faces[fi]!))
+    let regionNormal = direction ? normalize3(direction) : normalize3(normalSum)
+    if (Math.hypot(regionNormal.x, regionNormal.y, regionNormal.z) < 1e-8) {
+      const first = obj.faces[region[0]!]!
+      regionNormal = faceNormal(obj.positions[first[0]]!, obj.positions[first[1]]!, obj.positions[first[2]]!)
+    }
+
+    const regionVerts = new Set<number>()
+    const boundary = new Map<string, { count: number; a: number; b: number; color: number; group?: number[] }>()
+    for (const fi of region) {
+      const face = obj.faces[fi]!
+      for (const vi of face) regionVerts.add(vi)
+      for (let i = 0; i < face.length; i++) {
+        const a = face[i]!, b = face[(i + 1) % face.length]!, key = edgeKey(a, b)
+        const entry = boundary.get(key)
+        if (entry) entry.count++
+        else boundary.set(key, { count: 1, a, b, color: faceColors[fi] ?? obj.color, group: faceGroups?.[fi] })
+      }
+    }
+
+    const oldToNew = new Map<number, number>()
+    for (const vi of regionVerts) {
+      const p = positions[vi]!
+      oldToNew.set(vi, positions.length)
+      positions.push({ x: p.x + regionNormal.x * distance, y: p.y + regionNormal.y * distance, z: p.z + regionNormal.z * distance })
+    }
+
+    // The selected face indices remain selected and become the translated cap.
+    for (const fi of region) faces[fi] = obj.faces[fi]!.map((vi) => oldToNew.get(vi)!)
+
+    for (const edge of boundary.values()) {
+      if (edge.count !== 1) continue
+      const na = oldToNew.get(edge.a)!, nb = oldToNew.get(edge.b)!
+      faces.push([edge.a, edge.b, nb, na])
+      faceColors.push(edge.color)
+      if (faceGroups) faceGroups.push(edge.group ? [...edge.group] : [])
+      if (hasUvs) {
+        const base = uvs.length
+        uvs.push({ u: 0, v: 0 }, { u: 1, v: 0 }, { u: 1, v: 1 }, { u: 0, v: 1 })
+        faceUvIndices.push([base, base + 1, base + 2, base + 3])
+      }
     }
   }
 
-  const vertAccum = new Map<number, { sum: Vec3; count: number }>()
-  for (const fi of faceSet) {
-    const face = faces[fi]
-    const n = faceNormal(
-      positions[face[0]],
-      positions[face[1]],
-      positions[face[2] ?? face[0]]
-    )
-    for (const vi of face) {
-      const entry = vertAccum.get(vi) ?? { sum: { x: 0, y: 0, z: 0 }, count: 0 }
-      entry.sum = add3(entry.sum, n)
-      entry.count++
-      vertAccum.set(vi, entry)
+  return { ...obj, positions, faces, faceColors, faceGroups, uvs: hasUvs ? uvs : obj.uvs, faceUvIndices: hasUvs ? faceUvIndices : obj.faceUvIndices }
+}
+
+function extrudeSelectedEdges(
+  obj: SceneObject,
+  selection: MeshComponentSelection,
+  distance: number,
+  direction?: Vec3
+): SceneObject & { resultingSelection?: MeshComponentSelection } {
+  if (Math.abs(distance) < 1e-8) return cloneSceneObject(obj)
+  const selectedEdges = selection.edges
+    .map((key) => ({ key, pair: parseEdgeKey(key) }))
+    .filter(({ pair: [a,b] }) => a >= 0 && b >= 0 && a < obj.positions.length && b < obj.positions.length && a !== b)
+  if (!selectedEdges.length) return cloneSceneObject(obj)
+
+  // Edge islands are joined through vertices, matching Blender's connected edge-region behavior.
+  const remaining = new Set(selectedEdges.map((edge) => edge.key))
+  const byVertex = new Map<number, string[]>()
+  for (const edge of selectedEdges) for (const vi of edge.pair) { const list=byVertex.get(vi)??[];list.push(edge.key);byVertex.set(vi,list) }
+  const edgeByKey = new Map(selectedEdges.map((edge) => [edge.key, edge]))
+  const islands: typeof selectedEdges[] = []
+  while (remaining.size) {
+    const first=remaining.values().next().value as string, stack=[first], island: typeof selectedEdges=[]
+    remaining.delete(first)
+    while(stack.length){const key=stack.pop()!,edge=edgeByKey.get(key);if(!edge)continue;island.push(edge);for(const vi of edge.pair)for(const next of byVertex.get(vi)??[])if(remaining.delete(next))stack.push(next)}
+    islands.push(island)
+  }
+
+  const positions=obj.positions.map((p)=>({...p})),faces=obj.faces.map((f)=>[...f]),faceColors=[...obj.faceColors]
+  const hasUvs=!!obj.uvs?.length&&obj.faceUvIndices?.length===obj.faces.length
+  const uvs=obj.uvs?.map((uv)=>({...uv}))??[],faceUvIndices=obj.faceUvIndices?.map((f)=>[...f])??[]
+  const faceGroups=obj.faceGroups?.map((g)=>[...g])
+  const resultingEdges: string[]=[]
+
+  for(const island of islands){
+    const islandVerts=new Set<number>(island.flatMap((edge)=>edge.pair))
+    let normalSum:Vec3={x:0,y:0,z:0}
+    const adjacentFaces=new Set<number>()
+    for(const {pair:[a,b]} of island) for(let fi=0;fi<obj.faces.length;fi++){
+      const face=obj.faces[fi]!
+      for(let i=0;i<face.length;i++)if((face[i]===a&&face[(i+1)%face.length]===b)||(face[i]===b&&face[(i+1)%face.length]===a)){adjacentFaces.add(fi);break}
+    }
+    for(const fi of adjacentFaces)normalSum=add3(normalSum,faceAreaNormal(obj,obj.faces[fi]!))
+    let normal=direction?normalize3(direction):normalize3(normalSum)
+    if(Math.hypot(normal.x,normal.y,normal.z)<1e-8)normal={x:0,y:1,z:0}
+    const oldToNew=new Map<number,number>()
+    for(const vi of islandVerts){const p=positions[vi]!;oldToNew.set(vi,positions.length);positions.push({x:p.x+normal.x*distance,y:p.y+normal.y*distance,z:p.z+normal.z*distance})}
+    for(const {pair:[rawA,rawB]} of island){
+      let a=rawA,b=rawB,color=obj.color
+      for(const fi of adjacentFaces){const face=obj.faces[fi]!;for(let i=0;i<face.length;i++){const x=face[i]!,y=face[(i+1)%face.length]!;if((x===rawA&&y===rawB)||(x===rawB&&y===rawA)){a=x;b=y;color=obj.faceColors[fi]??obj.color;break}}}
+      const na=oldToNew.get(a)!,nb=oldToNew.get(b)!
+      faces.push([a,b,nb,na]);faceColors.push(color);if(faceGroups)faceGroups.push([])
+      resultingEdges.push(edgeKey(na,nb))
+      if(hasUvs){const base=uvs.length;uvs.push({u:0,v:0},{u:1,v:0},{u:1,v:1},{u:0,v:1});faceUvIndices.push([base,base+1,base+2,base+3])}
     }
   }
-
-  const vertNormal = new Map<number, Vec3>()
-  for (const [vi, entry] of vertAccum) {
-    vertNormal.set(vi, normalize3(scale3(entry.sum, 1 / entry.count)))
+  return {
+    ...obj,positions,faces,faceColors,faceGroups,uvs:hasUvs?uvs:obj.uvs,faceUvIndices:hasUvs?faceUvIndices:obj.faceUvIndices,
+    resultingSelection:{objectId:obj.id,vertices:[],edges:resultingEdges,faces:[]},
   }
-
-  const oldToNew = new Map<number, number>()
-  for (const vi of selectedVerts) {
-    const n = vertNormal.get(vi) ?? { x: 0, y: 1, z: 0 }
-    const p = positions[vi]
-    oldToNew.set(vi, positions.length)
-    positions.push({
-      x: p.x + n.x * distance,
-      y: p.y + n.y * distance,
-      z: p.z + n.z * distance,
-    })
-  }
-
-  for (const fi of faceSet) {
-    const topFace = faces[fi].map((vi) => oldToNew.get(vi)!)
-    faces.push(topFace)
-    faceColors.push(faceColors[fi] ?? obj.color)
-  }
-
-  const sideColor = faceColors[[...faceSet][0]] ?? obj.color
-  for (const [key, count] of edgeInSelected) {
-    if (count !== 1) continue
-    const [a, b] = parseEdgeKey(key)
-    const na = oldToNew.get(a)!
-    const nb = oldToNew.get(b)!
-    faces.push([a, b, nb, na])
-    faceColors.push(sideColor)
-  }
-
-  return { ...obj, positions, faces, faceColors }
 }
 
 export function bevelMeshSelection(
@@ -334,13 +432,14 @@ export function scaleMeshSelection(
 
   _pivot.set(pivotWorld.x, pivotWorld.y, pivotWorld.z)
   
+  const safeScale = (value: number) => Math.abs(value) < 0.001 ? (value < 0 ? -0.001 : 0.001) : value
   let scaleVec = new THREE.Vector3(1, 1, 1)
   if (isUniform) {
-    const s = Math.max(factor as number, 0.001)
+    const s = safeScale(factor as number)
     scaleVec.set(s, s, s)
   } else {
     const v = factor as Vec3
-    scaleVec.set(Math.max(v.x, 0.001), Math.max(v.y, 0.001), Math.max(v.z, 0.001))
+    scaleVec.set(safeScale(v.x), safeScale(v.y), safeScale(v.z))
   }
 
   const positions = transformMeshSelectionWithGizmo(
@@ -419,10 +518,16 @@ export function applyMeshModalOp(
   deltaWorldY: number = 0,
   axisLock?: 'x' | 'y' | 'z' | null,
   view: string = 'perspective'
-): SceneObject {
+): SceneObject & { resultingSelection?: MeshComponentSelection } {
   switch (op) {
     case 'extrude':
-      return extrudeMeshSelection(baseObject, selection, selectionMode, value)
+      return extrudeMeshSelection(
+        baseObject,
+        selection,
+        selectionMode,
+        value,
+        axisLock === 'x' ? {x:1,y:0,z:0} : axisLock === 'y' ? {x:0,y:1,z:0} : axisLock === 'z' ? {x:0,y:0,z:1} : undefined
+      )
     case 'bevel':
       return bevelMeshSelection(baseObject, selection, selectionMode, value)
     case 'rotate': {
