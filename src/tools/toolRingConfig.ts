@@ -45,7 +45,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'stroke', mode: 'hair-paths', label: 'Stroke · Hair Paths' },
     { kind: 'stroke', mode: 'hair-strips', label: 'Stroke · Hair Strips' },
     { kind: 'stroke', mode: 'hair-round', label: 'Stroke · Rounded Hair' },
-    { kind: 'action', id: 'extrude', label: 'Extrude Sketch' },
+    { kind: 'action', id: 'extrude', label: 'Extrude' },
   ],
   create: [
     { kind: 'primitive', primitive: 'box', label: 'Box' },
@@ -95,6 +95,7 @@ export const TOOL_RING_BRANCHES: Record<ToolCategory, ToolRingEntry[]> = {
     { kind: 'tool', tool: 'rotate', label: 'Rotate (R)' },
     { kind: 'tool', tool: 'scale', label: 'Scale (S)' },
     { kind: 'tool', tool: 'bend', label: 'Bend' },
+    { kind: 'tool', tool: 'round', label: 'Rounded' },
     { kind: 'action', id: 'select-tool', label: 'Select (G)' },
   ],
   mesh: [
@@ -125,7 +126,7 @@ const SCULPT_TOOLS: ActiveTool[] = ['push', 'pull', 'inflate', 'deflate', 'relax
 export function categoryForActiveTool(tool: ActiveTool, fallback: ToolCategory): ToolCategory {
   if (tool === 'smart') return 'select'
   if (tool === 'extrude') return 'mesh'
-  if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'bend') return 'transform'
+  if (tool === 'move' || tool === 'rotate' || tool === 'scale' || tool === 'bend' || tool === 'round') return 'transform'
   if (SCULPT_TOOLS.includes(tool)) return 'sculpt'
   if (tool === 'boolean-hole') return 'boolean'
   if (tool === 'knife' || tool === 'mirror-knife' || tool === 'loop-cut') return 'mesh'
@@ -193,6 +194,9 @@ export function isToolRingEntryDisabled(state: ToolRingStateSlice, entry: ToolRi
 
   if (entry.kind === 'tool' && (entry.tool === 'knife' || entry.tool === 'loop-cut' || entry.tool === 'bend')) {
     return !hasObjectSelection
+  }
+  if (entry.kind === 'tool' && entry.tool === 'round') {
+    return (!hasObjectSelection && !hasMeshComponents) || topologyLocked
   }
 
   return false

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { SceneObject } from './HalfEdgeMesh'
-import { applyMeshModalOp, extrudeMeshSelection } from './meshOps'
+import {
+  applyMeshModalOp,
+  bevelMeshSelection,
+  extrudeMeshSelection,
+  modalValueFromMouseDelta,
+  roundMeshSelection,
+} from './meshOps'
 
 function object(positions: SceneObject['positions'], faces: number[][]): SceneObject {
   return {
@@ -60,6 +66,77 @@ describe('Blender-style component transforms',()=>{
     const result=applyMeshModalOp(source,{objectId:'mesh',vertices:[],edges:['0-1'],faces:[]},'edge','scale',-1,{x:0,y:0,z:0})
     expect(result.positions[0]!.x).toBeCloseTo(1)
     expect(result.positions[1]!.x).toBeCloseTo(-1)
+  })
+})
+
+describe('Blender-style bevel modal', () => {
+  it('uses pointer distance for width in any screen direction', () => {
+    expect(modalValueFromMouseDelta('bevel', 25, 0)).toBeCloseTo(1)
+    expect(modalValueFromMouseDelta('bevel', 0, 25)).toBeCloseTo(1)
+    expect(modalValueFromMouseDelta('bevel', 25, 0, true)).toBeCloseTo(0.15)
+  })
+
+  it('adds the requested rounded profile segments to both sides of an edge', () => {
+    const source = object(
+      [
+        { x: -1, y: 0, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      [[0, 1, 2], [1, 0, 3]]
+    )
+    const result = bevelMeshSelection(
+      source,
+      { objectId: 'mesh', vertices: [], edges: ['0-1'], faces: [] },
+      'edge',
+      0.25,
+      3
+    )
+
+    expect(result.positions).toHaveLength(source.positions.length + 3)
+    expect(result.faces[0]).toHaveLength(6)
+    expect(result.faces[1]).toHaveLength(6)
+    expect(result.faces[1]!.slice(1, 4)).toEqual([...result.faces[0]!.slice(1, 4)].reverse())
+  })
+})
+
+describe('Rounded To Sphere', () => {
+  const source = object(
+    [
+      { x: -3, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 2, z: 0 },
+      { x: 0, y: 0, z: 5 },
+      { x: 20, y: 20, z: 20 },
+    ],
+    [[0, 1, 2, 3]]
+  )
+  const selection = { objectId: 'mesh', vertices: [0, 1, 2, 3], edges: [], faces: [] }
+
+  it('blends selected vertices to one common radius at full strength', () => {
+    const result = roundMeshSelection(source, selection, 1)
+    const center = source.positions.slice(0, 4).reduce(
+      (sum, p) => ({ x: sum.x + p.x / 4, y: sum.y + p.y / 4, z: sum.z + p.z / 4 }),
+      { x: 0, y: 0, z: 0 }
+    )
+    const radii = result.positions.slice(0, 4).map((p) =>
+      Math.hypot(p.x - center.x, p.y - center.y, p.z - center.z)
+    )
+    for (const radius of radii.slice(1)) expect(radius).toBeCloseTo(radii[0]!, 5)
+    expect(result.positions[4]).toEqual(source.positions[4])
+    expect(result.smoothShading).toBe(true)
+  })
+
+  it('preserves the original geometry at zero strength', () => {
+    const result = roundMeshSelection(source, selection, 0)
+    expect(result.positions).toEqual(source.positions)
+  })
+
+  it('maps mouse distance to a clamped 0-100% strength', () => {
+    expect(modalValueFromMouseDelta('round', 100, 0)).toBeCloseTo(0.5)
+    expect(modalValueFromMouseDelta('round', 300, 0)).toBe(1)
+    expect(modalValueFromMouseDelta('round', 100, 0, true)).toBeCloseTo(0.075)
   })
 })
 

@@ -9,7 +9,9 @@ import { pathEndpoints } from '../vector/autoConnect'
 import { generateShapeMesh } from '../mesh/lowPolyPrimitives'
 import { projectMeshToView } from '../stroke/worldProjection'
 import { PenVisuals } from './PenVisuals'
+import { VectorPenVolumePreview } from './VectorPenVolumePreview'
 import { useTheme } from '../theme/useTheme'
+import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
 
 interface VectorCanvasProps {
   view: ViewType
@@ -40,6 +42,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
     autoConnectPaths,
     vectorDocument,
     strokeMode,
+    sketchExtrudeMode,
     penExtrudeMode,
     polyBudget,
     roundedBoxRoundness,
@@ -57,12 +60,19 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
       autoConnectPaths: s.autoConnectPaths,
       vectorDocument: s.vectorDocument,
       strokeMode: s.strokeMode,
+      sketchExtrudeMode: s.sketchExtrudeMode,
       penExtrudeMode: s.penExtrudeMode,
       polyBudget: s.polyBudget,
       roundedBoxRoundness: s.roundedBoxRoundness,
       roundedBoxSubdivisions: s.roundedBoxSubdivisions,
     }))
   )
+
+  const extrudeOn = activeExtrudeMode({
+    drawInputMode: 'vector-pen',
+    sketchExtrudeMode,
+    penExtrudeMode,
+  })
 
   const color = useMemo(
     () => `#${activeColor.toString(16).padStart(6, '0')}`,
@@ -144,7 +154,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
   }, [autoConnectPaths, activeTool, vectorDocument.paths, view, defaultDepth])
 
   const showFillPreview =
-    strokeMode === 'outline' || strokeMode === 'blob' || strokeMode === 'capsule' || penExtrudeMode
+    strokeMode === 'outline' || strokeMode === 'blob' || strokeMode === 'capsule' || extrudeOn
 
   if (roundedBoxPreviewGeometry) {
     return (
@@ -172,11 +182,12 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
     )
   }
 
-  if (activeTool !== 'vector-pen') return null
+  if (activeTool !== 'vector-pen' && !vectorPenDraft) return null
 
   return (
     <>
-      {snapLine && (
+      <VectorPenVolumePreview view={view} />
+      {activeTool === 'vector-pen' && snapLine && (
         <Line
           points={snapLine}
           color={accentGreen}
@@ -191,7 +202,7 @@ export function VectorCanvas({ view }: VectorCanvasProps) {
           view={view}
           depth={defaultDepth}
           showFillPreview={showFillPreview}
-          extrudeMode={penExtrudeMode}
+          extrudeMode={extrudeOn}
           strokeMode={strokeMode}
         />
       )}

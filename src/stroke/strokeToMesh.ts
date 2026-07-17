@@ -23,6 +23,15 @@ export function strokeToMesh(input: StrokeInput): SceneObject | null {
       name: input.name ?? 'Lathe',
     })
   }
+  // Capsule is a complete stroke shape with its own open-sweep and closed-volume
+  // behavior. Never let a stale/shared Extrude toggle divert it through the
+  // generic extrusion interpreter.
+  if (input.strokeMode === 'capsule') {
+    return capsuleSketchDoodleToObject({
+      ...input,
+      extrudeMode: false,
+    })
+  }
   if (input.extrudeMode) {
     // Sketch Outline / Blob + Extrude: high-fidelity silhouette (not RDP + mesh simplify).
     if (input.strokeMode === 'outline' || input.strokeMode === 'blob') {
@@ -59,9 +68,6 @@ export function strokeToMesh(input: StrokeInput): SceneObject | null {
   }
   if (input.strokeMode === 'centerline') {
     return pathSketchDoodleToObject(input)
-  }
-  if (input.strokeMode === 'capsule') {
-    return capsuleSketchDoodleToObject(input)
   }
   if (input.strokeMode === 'ribbon') {
     return ribbonSketchDoodleToObject(input)

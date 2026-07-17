@@ -422,23 +422,24 @@ export function createInscribedStar(
   return finalize(b.build(), center)
 }
 
-/** Dome — hemisphere with flat base on world XZ, rising along +Y (correct in front/top/perspective). */
+/**
+ * Dome — a half-ellipsoid with a flat base. The CAD height drag controls the
+ * full rise independently of the drawn footprint and follows the active
+ * height axis, just like the other box-drawn CAD primitives.
+ */
 export function createInscribedDome(
   center: Vec3,
   size: Vec3,
-  _heightAxis: Axis,
+  heightAxis: Axis,
   segments = 8,
   _baseView?: ViewType | null
 ): MeshData {
-  const hx = size.x / 2
-  const hy = size.y / 2
-  const hz = size.z / 2
-  const R = Math.min(hx, hz, 2 * hy)
-  if (R < 1e-6) return emptyMeshData()
-
-  const baseY = center.y - hy
-  const cx = center.x
-  const cz = center.z
+  const [a0, a1] = crossAxes(heightAxis)
+  const radius0 = halfExtents(size, a0)
+  const radius1 = halfExtents(size, a1)
+  const halfHeight = halfExtents(size, heightAxis)
+  const height = halfHeight * 2
+  if (radius0 < 1e-6 || radius1 < 1e-6 || height < 1e-6) return emptyMeshData()
 
   const lonSegs = Math.max(8, segments)
   const latSegs = Math.max(3, Math.floor(segments * 0.55))
@@ -447,23 +448,25 @@ export function createInscribedDome(
 
   for (let lat = 0; lat < latSegs; lat++) {
     const theta = (lat / latSegs) * (Math.PI / 2)
-    const ringR = R * Math.cos(theta)
-    const y = baseY + R * Math.sin(theta)
+    const ringScale = Math.cos(theta)
+    const localHeight = -halfHeight + height * Math.sin(theta)
     const ring: number[] = []
     for (let lon = 0; lon < lonSegs; lon++) {
       const phi = (lon / lonSegs) * Math.PI * 2
       ring.push(
-        b.addVertex(
-          cx + ringR * Math.cos(phi),
-          y,
-          cz + ringR * Math.sin(phi)
-        )
+        b.addVertexVec(mapLocal(
+          radius0 * ringScale * Math.cos(phi),
+          localHeight,
+          radius1 * ringScale * Math.sin(phi),
+          heightAxis,
+          center
+        ))
       )
     }
     rings.push(ring)
   }
 
-  const apex = b.addVertex(cx, baseY + R, cz)
+  const apex = b.addVertexVec(mapLocal(0, halfHeight, 0, heightAxis, center))
   const lastRing = rings[latSegs - 1]!
   for (let i = 0; i < lonSegs; i++) {
     const j = (i + 1) % lonSegs
@@ -479,7 +482,7 @@ export function createInscribedDome(
     }
   }
 
-  const baseCenter = b.addVertex(cx, baseY, cz)
+  const baseCenter = b.addVertexVec(mapLocal(0, -halfHeight, 0, heightAxis, center))
   const baseRing = rings[0]!
   for (let i = 0; i < lonSegs; i++) {
     const j = (i + 1) % lonSegs

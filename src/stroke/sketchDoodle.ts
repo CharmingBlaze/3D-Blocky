@@ -26,6 +26,7 @@ import {
   preparePathCenterline,
   resolveSilhouetteDepth,
   capsuleProfileRingsForBudget,
+  capsuleRadialSegments,
   type SketchDoodleKind,
   type SketchSource,
 } from './sketchSource'
@@ -696,7 +697,7 @@ export function capsuleSketchDoodleToObject(input: PolylineInput): SceneObject |
     const boundary = prepareOutlineBoundary(prepared.relative, polyBudget, true)
     if (!boundary || boundary.length < 3) return null
     mesh = generateVerticalShapedCapsule(boundary, {
-      radialSegments: Math.max(12, Math.min(24, input.pathRadialSegments ?? 12)),
+      radialSegments: capsuleRadialSegments(input.pathRadialSegments),
       profileRings: capsuleProfileRingsForBudget(polyBudget),
       preserveBoundary: true,
       color,
@@ -707,7 +708,7 @@ export function capsuleSketchDoodleToObject(input: PolylineInput): SceneObject |
     if (!spine) return null
     mesh = generateCapsuleSweep(spine, {
       radius: depth,
-      radialSegments: Math.max(12, Math.min(24, input.pathRadialSegments ?? 12)),
+      radialSegments: capsuleRadialSegments(input.pathRadialSegments),
       closed: false,
       hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
       preserveSpine: true,

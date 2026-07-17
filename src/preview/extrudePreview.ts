@@ -23,6 +23,7 @@ import {
   preparePathCenterline,
   resolveSilhouetteDepth,
   capsuleProfileRingsForBudget,
+  capsuleRadialSegments,
 } from '../stroke/sketchSource'
 import type { StrokeMode, ViewType } from '../store/appStore'
 import type { Vec2 } from '../utils/math'
@@ -119,7 +120,7 @@ export function buildExtrudePreviewGeometry(
       })
       if (!lathe) return null
       const result = generateLathe(lathe.profile, {
-        radialSegments: Math.max(8, Math.min(64, Math.round(options.latheRadialSegments ?? 24))),
+        radialSegments: Math.max(8, Math.min(64, Math.round(options.latheRadialSegments ?? 16))),
         preserveProfile: true,
         capBottom: options.latheCaps,
         capTop: options.latheCaps,
@@ -165,7 +166,7 @@ export function buildExtrudePreviewGeometry(
         const boundary = prepareOutlineBoundary(prepared.relative, polyBudget, true)
         if (!boundary || boundary.length < 3) return null
         return generateVerticalShapedCapsule(boundary, {
-          radialSegments: Math.max(12, Math.min(24, options.pathRadialSegments ?? 12)),
+          radialSegments: capsuleRadialSegments(options.pathRadialSegments),
           profileRings: capsuleProfileRingsForBudget(polyBudget),
           preserveBoundary: true,
           color: 0x6ecbf5,
@@ -175,7 +176,7 @@ export function buildExtrudePreviewGeometry(
       if (!spine) return null
       return generateCapsuleSweep(spine, {
         radius,
-        radialSegments: Math.max(12, Math.min(24, options.pathRadialSegments ?? 12)),
+        radialSegments: capsuleRadialSegments(options.pathRadialSegments),
         preserveSpine: true,
         hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
         startCap: 'round',

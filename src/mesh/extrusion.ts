@@ -400,7 +400,10 @@ function appendSweepEndCap(
   mesh.positions.push(pole)
 
   const capRings: number[][] = []
-  for (let ri = bands - 1; ri >= 1; ri--) {
+  // Build from the pole outward to the equator. Reversing this order folds the
+  // hemisphere rings back through one another, which makes one end look open
+  // or spiked under single-sided rendering (especially on Vector Pen paths).
+  for (let ri = 1; ri < bands; ri++) {
     const t = ri / bands
     const scale = Math.sqrt(Math.max(0, t * (2 - t)))
     const ringCenter = add3(frame.center, scale3(frame.tangent, sign * radius * (1 - t)))

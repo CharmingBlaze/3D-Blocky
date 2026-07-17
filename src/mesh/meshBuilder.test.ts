@@ -281,6 +281,28 @@ describe('MeshBuilder', () => {
     expect(meshSignedVolume(mesh)).toBeGreaterThan(0)
   })
 
+  it.each([0, 1, 2] as const)(
+    'CAD dome fills its footprint and dragged height on axis %s',
+    (heightAxis) => {
+      const box = {
+        min: { x: 1, y: 2, z: 3 },
+        max: { x: 9, y: 14, z: 21 },
+      }
+      const obj = primitiveBoxToSceneObject(
+        'dome',
+        box,
+        heightAxis,
+        0x6ecbf5,
+        128
+      )
+
+      expect(obj).not.toBeNull()
+      expect(axisExtent(obj!, 'x')).toBeCloseTo(8, 5)
+      expect(axisExtent(obj!, 'y')).toBeCloseTo(12, 5)
+      expect(axisExtent(obj!, 'z')).toBeCloseTo(18, 5)
+    }
+  )
+
   it('CAD stairs have distinct tread and riser quads, not a ramp wedge', () => {
     const box = { min: { x: -2, y: 0, z: -4 }, max: { x: 2, y: 4, z: 4 } }
     const obj = primitiveBoxToSceneObject(

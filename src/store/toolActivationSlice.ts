@@ -47,6 +47,7 @@ export type ActiveTool =
   | 'move'
   | 'rotate'
   | 'scale'
+  | 'round'
   | 'bend'
   | 'select-vertex'
   | 'select-edge'
@@ -78,6 +79,7 @@ export interface MeshModalState {
   pivotWorld: Vec3
   axisLock?: 'x' | 'y' | 'z' | null
   numericInput?: string
+  bevelSegments?: number
 }
 
 export interface ObjectTransformModalState {
@@ -259,17 +261,18 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
           return true
         }
         case 'stroke': {
-          store().penCancelPath()
+          const keepPen = store().activeTool === 'vector-pen' || store().drawInputMode === 'vector-pen'
+          if (!keepPen) store().penCancelPath()
           setPartial({
             strokeMode: entry.mode,
-            drawInputMode: 'regular',
-            activeTool: 'draw',
-            toolCategory: 'draw',
+            drawInputMode: keepPen ? 'vector-pen' : 'regular',
+            activeTool: keepPen ? 'vector-pen' : 'draw',
+            toolCategory: keepPen ? 'vector' : 'draw',
             sketchExtrudeMode: false,
             sketchLatheMode: false,
             penExtrudeMode: false,
             penLatheMode: false,
-            ...clearVectorDraftState(),
+            ...(keepPen ? {} : clearVectorDraftState()),
             ...clearStrokeDraftState(),
           })
           return true
@@ -282,14 +285,18 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         case 'action': {
           switch (entry.id) {
             case 'extrude': {
-              store().penCancelPath()
+              const keepPen = store().activeTool === 'vector-pen' || store().drawInputMode === 'vector-pen'
+              if (!keepPen) store().penCancelPath()
               setPartial({
                 sketchExtrudeMode: true,
-                drawInputMode: 'regular',
-                activeTool: 'draw',
-                toolCategory: 'draw',
-                ...clearVectorDraftState(),
-            ...clearStrokeDraftState(),
+                penExtrudeMode: true,
+                sketchLatheMode: false,
+                penLatheMode: false,
+                drawInputMode: keepPen ? 'vector-pen' : 'regular',
+                activeTool: keepPen ? 'vector-pen' : 'draw',
+                toolCategory: keepPen ? 'vector' : 'draw',
+                ...(keepPen ? {} : clearVectorDraftState()),
+                ...clearStrokeDraftState(),
               })
               return true
             }
@@ -376,7 +383,8 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         modal.currentClientX - modal.startClientX,
         modal.startClientY - modal.currentClientY,
         modal.axisLock,
-        modal.view
+        modal.view,
+        modal.bevelSegments
       )
 
       store().updateObject(modal.objectId, {
@@ -386,12 +394,36 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         faceGroups: result.faceGroups,
         uvs: result.uvs,
         faceUvIndices: result.faceUvIndices,
+        smoothShading: result.smoothShading,
       })
       if (result.resultingSelection) setPartial({ meshSelection: result.resultingSelection })
     },
 
     beginMeshModal: (op, clientX, clientY, view = 'perspective') => {
-      const { meshSelection, objects, selectionMode } = store()
+      const state = store()
+      const { objects } = state
+      let meshSelection = state.meshSelection
+      let selectionMode = state.selectionMode
+      if (
+        op === 'round' &&
+        (state.selectionMode === 'object' ||
+          !meshSelection ||
+          !selectionHasComponents(meshSelection))
+      ) {
+        const objectId =
+          state.selectedObjectId ??
+          (state.selectionObjectIds.length === 1 ? state.selectionObjectIds[0]! : null)
+        const object = objectId ? objects.find((candidate) => candidate.id === objectId) : null
+        if (object) {
+          meshSelection = {
+            objectId: object.id,
+            vertices: object.positions.map((_, index) => index),
+            edges: [],
+            faces: [],
+          }
+          selectionMode = 'vertex'
+        }
+      }
       if (!meshSelection || !selectionHasComponents(meshSelection)) return
       if (store().meshModal) store().cancelMeshModal()
       if (store().objectTransformModal) store().cancelObjectTransformModal()
@@ -399,7 +431,7 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       const obj = objects.find((o) => o.id === meshSelection.objectId)
       if (!obj || obj.topologyLocked) return
 
-      store().captureUndoPoint('Mesh edit')
+      store().captureUndoPoint(op === 'round' ? 'Round selection' : 'Mesh edit')
       const pivotWorld = meshSelectionWorldCenter(obj, meshSelection)
 
       setPartial({
@@ -409,9 +441,10 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
           objectId: obj.id,
           baseObject: cloneSceneObject(obj),
           selection: {
-            vertices: new Set(meshSelection.vertices),
-            edges: new Set(meshSelection.edges),
-            faces: new Set(meshSelection.faces),
+            objectId: meshSelection.objectId,
+            vertices: [...meshSelection.vertices],
+            edges: [...meshSelection.edges],
+            faces: [...meshSelection.faces],
           },
           selectionMode,
           value: op === 'scale' ? 1 : 0,
@@ -421,6 +454,7 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
           currentClientY: clientY,
           pivotWorld,
           axisLock: null,
+          bevelSegments: op === 'bevel' ? 1 : undefined,
         },
       })
       store().applyMeshModalPreview()
@@ -453,6 +487,8 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
           value = Math.round(value / step) * step
         } else if (modal.op === 'scale') {
           value = Math.round(value / 0.1) * 0.1
+        } else if (modal.op === 'round') {
+          value = Math.round(value / 0.1) * 0.1
         }
       }
 
@@ -463,6 +499,14 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
     adjustMeshModalWheel: (deltaY) => {
       const modal = store().meshModal
       if (!modal) return
+
+      if (modal.op === 'bevel') {
+        const direction = deltaY > 0 ? -1 : 1
+        const bevelSegments = Math.max(1, Math.min(16, (modal.bevelSegments ?? 1) + direction))
+        setPartial({ meshModal: { ...modal, bevelSegments } })
+        store().applyMeshModalPreview()
+        return
+      }
 
       const value = modalValueFromWheel(modal.op, modal.value, deltaY)
       setPartial({ meshModal: { ...modal, value } })
@@ -479,13 +523,19 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
       else if (/^[0-9]$/.test(key)) input += key
       else return
       const parsed = input !== '' && input !== '-' && input !== '.' && input !== '-.' ? Number(input) : Number.NaN
-      const value = modal.op === 'rotate' ? parsed * Math.PI / 180 : parsed
+      const value =
+        modal.op === 'rotate'
+          ? parsed * Math.PI / 180
+          : modal.op === 'round'
+            ? Math.max(0, Math.min(1, parsed / 100))
+            : parsed
       setPartial({ meshModal: { ...modal, numericInput: input, value: Number.isFinite(value) ? value : modal.value } })
       if (Number.isFinite(value)) store().applyMeshModalPreview()
     },
 
     confirmMeshModal: () => {
-      store().replaceHistoryHead('Mesh edit')
+      const label = store().meshModal?.op === 'round' ? 'Round selection' : 'Mesh edit'
+      store().replaceHistoryHead(label)
       setPartial({ meshModal: null })
     },
 

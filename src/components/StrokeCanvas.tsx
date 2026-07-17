@@ -117,7 +117,12 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
 
   const showPlaneGuides = isDrawing && currentStrokeView === view
   const explicitlyVolumetric =
-    sketchExtrudeMode || penExtrudeMode || sketchLatheMode || penLatheMode || strokeMode.startsWith('hair-')
+    sketchExtrudeMode ||
+    penExtrudeMode ||
+    sketchLatheMode ||
+    penLatheMode ||
+    strokeMode === 'capsule' ||
+    strokeMode.startsWith('hair-')
   // Ordinary Sketch stays a clean line. Only explicitly volumetric tools show a
   // mesh preview, and the active drawing viewport remains unobstructed.
   const showVolumePreview =
@@ -125,7 +130,10 @@ export function StrokeCanvas({ view }: StrokeCanvasProps) {
     explicitlyVolumetric &&
     currentStrokeView != null &&
     !(currentStrokeView === 'perspective' && !currentStrokePlane) &&
-    currentStrokeView !== view &&
+    // Capsule needs WYSIWYG feedback in the drawing viewport; the guide line
+    // stays visible above the translucent mesh. Other volume tools retain the
+    // uncluttered active-plane behavior.
+    (strokeMode === 'capsule' || currentStrokeView !== view) &&
     previewPoints.length >= 2
 
   const strokePath = useMemo(() => {

@@ -9,6 +9,7 @@ const MESH_OP_LABELS = {
   scale: 'Scale',
   bevel: 'Bevel',
   move: 'Move',
+  round: 'Rounded',
 } as const
 
 const OBJECT_OP_LABELS = {
@@ -23,6 +24,7 @@ export function MeshModalController() {
   const updateMeshModalFromPointer = useAppStore((s) => s.updateMeshModalFromPointer)
   const adjustMeshModalWheel = useAppStore((s) => s.adjustMeshModalWheel)
   const confirmMeshModal = useAppStore((s) => s.confirmMeshModal)
+  const cancelMeshModal = useAppStore((s) => s.cancelMeshModal)
   const updateObjectTransformModalFromPointer = useAppStore(
     (s) => s.updateObjectTransformModalFromPointer
   )
@@ -55,15 +57,16 @@ export function MeshModalController() {
       if (e.target instanceof HTMLElement && e.target.closest('.side-panel, .tool-ring-overlay')) {
         return
       }
-      // Mesh modal tools (Push/Pull and other modal edits): right-click commits.
       if (e.button === 2 && meshModal) {
         e.preventDefault()
         e.stopPropagation()
-        confirmMeshModal()
+        if (meshModal.op === 'bevel' || meshModal.op === 'round') cancelMeshModal()
+        else confirmMeshModal()
         return
       }
       if (e.button !== 0) return
       e.preventDefault()
+      e.stopPropagation()
       if (meshModal) confirmMeshModal()
       else if (objectTransformModal) confirmObjectTransformModal()
     }
@@ -92,6 +95,7 @@ export function MeshModalController() {
     updateMeshModalFromPointer,
     adjustMeshModalWheel,
     confirmMeshModal,
+    cancelMeshModal,
     updateObjectTransformModalFromPointer,
     adjustObjectTransformModalWheel,
     confirmObjectTransformModal,
@@ -99,9 +103,12 @@ export function MeshModalController() {
 
   if (meshModal) {
     const label = MESH_OP_LABELS[meshModal.op]
-    const value = meshModal.numericInput != null
-      ? `${meshModal.numericInput}${meshModal.op === 'rotate' ? '°' : ''}`
+    const formattedValue = meshModal.numericInput != null
+      ? `${meshModal.numericInput}${meshModal.op === 'rotate' ? '°' : meshModal.op === 'round' ? '%' : ''}`
       : formatModalValue(meshModal.op, meshModal.value)
+    const value = meshModal.op === 'bevel'
+      ? `${formattedValue} · ${meshModal.bevelSegments ?? 1} segment${(meshModal.bevelSegments ?? 1) === 1 ? '' : 's'}`
+      : formattedValue
     const hint =
       meshModal.op === 'extrude'
         ? 'Move along the region normal · X/Y/Z constrain · type distance · Ctrl snap · Shift precision · click/right-click/Enter confirm · Esc cancel'
@@ -109,7 +116,11 @@ export function MeshModalController() {
           ? 'Move mouse or type degrees · X/Y/Z constrain axis · Ctrl snap · click/right-click/Enter confirm · Esc cancel'
           : meshModal.op === 'scale'
             ? 'Move mouse or type factor · X/Y/Z constrain axis · negative mirrors · click/right-click/Enter confirm · Esc cancel'
-            : 'Move mouse · scroll to adjust · click/right-click to confirm · Esc cancel'
+            : meshModal.op === 'bevel'
+              ? 'Move mouse for width · wheel changes segments · type exact width · Ctrl snap · click/Enter confirm · right-click/Esc cancel'
+              : meshModal.op === 'round'
+                ? 'Move mouse for strength · type percentage · Ctrl snap · Shift precision · click/Enter confirm · right-click/Esc cancel'
+                : 'Move mouse · scroll to adjust · click/right-click to confirm · Esc cancel'
 
     return (
       <div className="mesh-modal-hud" role="status">

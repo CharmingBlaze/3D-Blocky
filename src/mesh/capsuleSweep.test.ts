@@ -96,6 +96,38 @@ describe('generateCapsuleSweep topology', () => {
     expect(mesh.faces.some((f) => f.length === 4)).toBe(true)
   })
 
+  it('orders round-cap rings from each pole toward the body without folding', () => {
+    const segments = 8
+    const radius = 6
+    const mesh = generateCapsuleSweep(
+      [{ x: 0, y: 0 }, { x: 40, y: 0 }],
+      {
+        radius,
+        radialSegments: segments,
+        closed: false,
+        startCap: 'round',
+        endCap: 'round',
+        preserveSpine: true,
+      }
+    )
+
+    // Two body rings are emitted first, followed by the start pole and its
+    // four intermediate rings (roundRings = ceil(8 * 0.6) = 5).
+    const startPoleIndex = segments * 2
+    const orderedCenters = [mesh.positions[startPoleIndex]!.x]
+    for (let ring = 0; ring < 4; ring++) {
+      const first = startPoleIndex + 1 + ring * segments
+      let centerX = 0
+      for (let i = 0; i < segments; i++) centerX += mesh.positions[first + i]!.x
+      orderedCenters.push(centerX / segments)
+    }
+    orderedCenters.push(0) // start body-ring center
+
+    for (let i = 1; i < orderedCenters.length; i++) {
+      expect(orderedCenters[i]!).toBeGreaterThan(orderedCenters[i - 1]!)
+    }
+  })
+
   it('tapered pointed tube pinches to tip poles (not flat disk caps)', () => {
     expect(tubeTaperScale(0)).toBeCloseTo(0, 5)
     expect(tubeTaperScale(1)).toBeCloseTo(0, 5)

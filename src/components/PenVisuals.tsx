@@ -210,7 +210,7 @@ export function PenVisuals({
   const handleLines = useMemo(() => handleSegments(draft.anchors), [draft.anchors])
   const pendingIndex = draft.pendingAnchorIndex
 
-  // Keep draft 2D-only until Enter commits — no live 3D extrude mesh.
+  // Flat fill stays 2D; volumetric Extrude/Hair/Sweep uses VectorPenVolumePreview.
   const showFillPreviewBlob =
     showFillPreview && strokeMode === 'blob' && !extrudeMode && draft.anchors.length >= 3
 

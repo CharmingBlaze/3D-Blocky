@@ -27,7 +27,7 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
     pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
     pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
     sketchLatheMode, penLatheMode, sketchLatheCaps, penLatheCaps,
-    latheRadialSegments, latheProfileRings, latheSmoothing, drawInputMode,
+    latheRadialSegments, latheProfileRings, latheSmoothing,
   } = useAppStore(
     useShallow((s) => ({
       extrudeAmount: s.extrudeAmount,
@@ -56,7 +56,7 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
       sketchLatheMode: s.sketchLatheMode, penLatheMode: s.penLatheMode,
       sketchLatheCaps: s.sketchLatheCaps, penLatheCaps: s.penLatheCaps,
       latheRadialSegments: s.latheRadialSegments, latheProfileRings: s.latheProfileRings,
-      latheSmoothing: s.latheSmoothing, drawInputMode: s.drawInputMode,
+      latheSmoothing: s.latheSmoothing,
     }))
   )
 
@@ -76,8 +76,8 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
         ribbonStartTip, ribbonEndTip, ribbonTaper, ribbonWidthScale, ribbonFlat,
         pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
         pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
-        latheMode: drawInputMode === 'vector-pen' ? penLatheMode : sketchLatheMode,
-        latheCaps: drawInputMode === 'vector-pen' ? penLatheCaps : sketchLatheCaps,
+        latheMode: sketchLatheMode || penLatheMode,
+        latheCaps: sketchLatheCaps || penLatheCaps,
         latheRadialSegments, latheProfileRings, latheSmoothing,
       }
     )
@@ -98,7 +98,7 @@ export function ExtrudePreviewMesh({ points, view, closed }: ExtrudePreviewMeshP
     pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset, pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
     pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation, pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed,
     sketchLatheMode, penLatheMode, sketchLatheCaps, penLatheCaps,
-    latheRadialSegments, latheProfileRings, latheSmoothing, drawInputMode,
+    latheRadialSegments, latheProfileRings, latheSmoothing,
   ])
 
   useEffect(() => () => geometry?.dispose(), [geometry])

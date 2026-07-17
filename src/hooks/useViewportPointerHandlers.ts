@@ -759,6 +759,16 @@ export function useViewportPointerHandlers({
         return
       }
 
+      // Vector Pen: right-click commits like Enter / double-click.
+      if (store.activeTool === 'vector-pen' && e.button === 2) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (store.vectorPenDraft) {
+          store.penFinishPath()
+        }
+        return
+      }
+
       if (store.activeTool === 'loop-cut' && e.button === 2) {
         if (store.loopCutDraft) {
           e.preventDefault()
@@ -778,6 +788,16 @@ export function useViewportPointerHandlers({
       }
 
       if (e.button === 0) beginPointerInteraction()
+      if (
+        e.button === 2 &&
+        store.activeTool === 'bend' &&
+        store.bendDraft
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        store.bendCancel()
+        return
+      }
       if (
         e.button === 1 &&
         store.activeTool === 'primitive-box' &&
@@ -1190,6 +1210,13 @@ export function useViewportPointerHandlers({
         return
       }
 
+      if (activeTool === 'round' && e.button === 0 && rect && camera) {
+        e.preventDefault()
+        e.stopPropagation()
+        beginMeshModal('round', e.clientX, e.clientY, view)
+        return
+      }
+
       if (activeTool === 'bend' && e.button === 0 && rect && camera) {
         const store = useAppStore.getState()
         const draft = store.bendDraft
@@ -1222,9 +1249,16 @@ export function useViewportPointerHandlers({
         e.currentTarget.setPointerCapture(e.pointerId)
         selectObject(resolved.objectId)
         if (!draft) {
-          bendBegin(resolved.objectId, resolved.world, view, e.clientX, e.clientY)
+          bendBegin(
+            resolved.objectId,
+            resolved.world,
+            view,
+            getCameraViewForward(camera),
+            e.clientX,
+            e.clientY
+          )
         }
-        bendPointerMove(resolved.world, e.clientX, e.clientY)
+        bendPointerMove(resolved.world, e.clientX, e.clientY, e.shiftKey, e.ctrlKey)
         return
       }
 
@@ -1347,8 +1381,11 @@ export function useViewportPointerHandlers({
           strokeGestureViewRef.current = view
           startStroke(pt, view)
         }
-        if (useAppStore.getState().sketchExtrudeMode) {
-          beginExtrudeDrag(e.clientX, e.clientY)
+        {
+          const s = useAppStore.getState()
+          if (s.sketchExtrudeMode || s.penExtrudeMode) {
+            beginExtrudeDrag(e.clientX, e.clientY)
+          }
         }
         return
       }
@@ -1727,7 +1764,13 @@ export function useViewportPointerHandlers({
         const resolved = store.bendDraft.axisLocked
           ? null
           : resolveKnifeWorld(e.clientX, e.clientY, preferred, e.shiftKey)
-        bendPointerMove(resolved?.world ?? null, e.clientX, e.clientY)
+        bendPointerMove(
+          resolved?.world ?? null,
+          e.clientX,
+          e.clientY,
+          e.shiftKey,
+          e.ctrlKey
+        )
         return
       }
 
@@ -1826,7 +1869,7 @@ export function useViewportPointerHandlers({
       ) {
         const drawPt = getDrawPlanePoint(e)
         if (!drawPt) return
-        if (store.sketchExtrudeMode && store.extrudeDragAnchor) {
+        if ((store.sketchExtrudeMode || store.penExtrudeMode) && store.extrudeDragAnchor) {
           updateExtrudeFromPointer(e.clientX, e.clientY)
         }
         if ((e.buttons & 1) === 1) {

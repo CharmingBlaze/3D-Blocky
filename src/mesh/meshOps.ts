@@ -306,10 +306,12 @@ export function bevelMeshSelection(
   obj: SceneObject,
   selection: MeshComponentSelection,
   mode: SelectionMode,
-  width: number
+  width: number,
+  segments = 1
 ): SceneObject {
   const edgeKeys = collectBevelEdges(obj, selection, mode)
   if (edgeKeys.length === 0 || width <= 1e-8) return cloneSceneObject(obj)
+  const segmentCount = Math.max(1, Math.min(16, Math.round(segments)))
 
   const positions = obj.positions.map((p) => ({ ...p }))
   let faces = obj.faces.map((f) => [...f])
@@ -347,12 +349,17 @@ export function bevelMeshSelection(
       )
     }
 
-    const mid = positions.length
-    positions.push({
-      x: (pa.x + pb.x) / 2 + bevelDir.x * width,
-      y: (pa.y + pb.y) / 2 + bevelDir.y * width,
-      z: (pa.z + pb.z) / 2 + bevelDir.z * width,
-    })
+    const bevelVertices: number[] = []
+    for (let segment = 1; segment <= segmentCount; segment++) {
+      const t = segment / (segmentCount + 1)
+      const profile = Math.sin(Math.PI * t)
+      bevelVertices.push(positions.length)
+      positions.push({
+        x: pa.x + (pb.x - pa.x) * t + bevelDir.x * width * profile,
+        y: pa.y + (pb.y - pa.y) * t + bevelDir.y * width * profile,
+        z: pa.z + (pb.z - pa.z) * t + bevelDir.z * width * profile,
+      })
+    }
 
     const newFaces: number[][] = []
     for (let fi = 0; fi < faces.length; fi++) {
@@ -362,12 +369,12 @@ export function bevelMeshSelection(
         const va = face[i]
         const vb = face[(i + 1) % face.length]
         if (va === a && vb === b) {
-          newFaces.push([...face.slice(0, i + 1), mid, ...face.slice(i + 1)])
+          newFaces.push([...face.slice(0, i + 1), ...bevelVertices, ...face.slice(i + 1)])
           replaced = true
           break
         }
         if (va === b && vb === a) {
-          newFaces.push([...face.slice(0, i + 1), mid, ...face.slice(i + 1)])
+          newFaces.push([...face.slice(0, i + 1), ...[...bevelVertices].reverse(), ...face.slice(i + 1)])
           replaced = true
           break
         }
@@ -458,7 +465,54 @@ export function scaleMeshSelection(
   return { ...obj, positions }
 }
 
-export type MeshModalOpKind = 'extrude' | 'rotate' | 'scale' | 'bevel' | 'move'
+export type MeshModalOpKind = 'extrude' | 'rotate' | 'scale' | 'bevel' | 'move' | 'round'
+
+export function roundMeshSelection(
+  obj: SceneObject,
+  selection: MeshComponentSelection,
+  factor: number
+): SceneObject {
+  const vertices = getAffectedVertices(selection, obj)
+  if (vertices.size === 0) return cloneSceneObject(obj)
+  const amount = Math.max(0, Math.min(1, factor))
+  const indices = [...vertices]
+  const center = indices.reduce(
+    (sum, index) => {
+      const p = obj.positions[index]!
+      return { x: sum.x + p.x, y: sum.y + p.y, z: sum.z + p.z }
+    },
+    { x: 0, y: 0, z: 0 }
+  )
+  center.x /= indices.length
+  center.y /= indices.length
+  center.z /= indices.length
+
+  const radii = indices.map((index) => {
+    const p = obj.positions[index]!
+    return Math.hypot(p.x - center.x, p.y - center.y, p.z - center.z)
+  })
+  const targetRadius = radii.reduce((sum, radius) => sum + radius, 0) / radii.length
+  if (targetRadius < 1e-8) return cloneSceneObject(obj)
+
+  const positions = obj.positions.map((p) => ({ ...p }))
+  for (let i = 0; i < indices.length; i++) {
+    const index = indices[i]!
+    const p = obj.positions[index]!
+    const radius = radii[i]!
+    if (radius < 1e-8) continue
+    const target = {
+      x: center.x + ((p.x - center.x) / radius) * targetRadius,
+      y: center.y + ((p.y - center.y) / radius) * targetRadius,
+      z: center.z + ((p.z - center.z) / radius) * targetRadius,
+    }
+    positions[index] = {
+      x: p.x + (target.x - p.x) * amount,
+      y: p.y + (target.y - p.y) * amount,
+      z: p.z + (target.z - p.z) * amount,
+    }
+  }
+  return { ...obj, positions, smoothShading: amount > 0 ? true : obj.smoothShading }
+}
 
 export function moveMeshSelection(
   obj: SceneObject,
@@ -517,7 +571,8 @@ export function applyMeshModalOp(
   deltaWorldX: number = 0,
   deltaWorldY: number = 0,
   axisLock?: 'x' | 'y' | 'z' | null,
-  view: string = 'perspective'
+  view: string = 'perspective',
+  bevelSegments = 1
 ): SceneObject & { resultingSelection?: MeshComponentSelection } {
   switch (op) {
     case 'extrude':
@@ -529,7 +584,7 @@ export function applyMeshModalOp(
         axisLock === 'x' ? {x:1,y:0,z:0} : axisLock === 'y' ? {x:0,y:1,z:0} : axisLock === 'z' ? {x:0,y:0,z:1} : undefined
       )
     case 'bevel':
-      return bevelMeshSelection(baseObject, selection, selectionMode, value)
+      return bevelMeshSelection(baseObject, selection, selectionMode, value, bevelSegments)
     case 'rotate': {
       let ax: Vec3 = { x: 0, y: 1, z: 0 }
       if (axisLock === 'x') ax = { x: 1, y: 0, z: 0 }
@@ -559,6 +614,8 @@ export function applyMeshModalOp(
     }
     case 'move':
       return moveMeshSelection(baseObject, selection, value, deltaWorldX, deltaWorldY, axisLock, view)
+    case 'round':
+      return roundMeshSelection(baseObject, selection, value)
   }
 }
 
@@ -581,7 +638,7 @@ export function modalValueFromMouseDelta(
     case 'extrude':
       return extrudeValueFromScreenDelta(dx, dy, 0.15 * sensitivityScale)
     case 'bevel':
-      return dy * 0.04 * sensitivityScale
+      return Math.hypot(dx, dy) * 0.04 * sensitivityScale
     case 'rotate':
       return dx * 0.02 * sensitivityScale
     case 'scale':
@@ -589,6 +646,8 @@ export function modalValueFromMouseDelta(
       return Math.max(0.01, 1 + dyScaled)
     case 'move':
       return 0
+    case 'round':
+      return Math.max(0, Math.min(1, Math.hypot(dx, dy) * 0.005 * sensitivityScale))
   }
 }
 
@@ -609,6 +668,8 @@ export function modalValueFromWheel(
       return Math.max(0.01, current + step * 0.05)
     case 'move':
       return current + step * 0.1
+    case 'round':
+      return Math.max(0, Math.min(1, current + step * 0.05))
   }
 }
 
@@ -624,5 +685,7 @@ export function formatModalValue(op: MeshModalOpKind, value: number): string {
       return value.toFixed(3)
     case 'move':
       return value.toFixed(3)
+    case 'round':
+      return `${Math.round(value * 100)}%`
   }
 }

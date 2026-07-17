@@ -251,9 +251,21 @@ export default function App() {
           state.loopCutCommit()
           return
         }
+        if (state.bendDraft?.axisLocked) {
+          e.preventDefault()
+          state.bendCommit()
+          return
+        }
         if ((state.activeTool === 'knife' || state.activeTool === 'mirror-knife') && state.knifeDraft && (state.knifeDraft.points.length >= 2 || state.knifeDraft.completedPaths?.length)) {
           e.preventDefault()
           state.knifeApply()
+        }
+      }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && !ctrlOrMeta) {
+        const state = store()
+        if (state.vectorPenDraft && !isTypingTarget(e.target)) {
+          e.preventDefault()
+          state.penRemoveLastAnchor()
         }
       }
       if (e.code === 'KeyC' && !ctrlOrMeta && !e.altKey) {
@@ -430,7 +442,14 @@ export default function App() {
           }
           if (e.key === 'b' || e.key === 'B') {
             e.preventDefault()
-            state.beginMeshModal('bevel', lastMousePosRef.current.x, lastMousePosRef.current.y)
+            const hoverIndex = state.hoveredViewportSlot ?? 0
+            const activeView = state.viewportSlotViews[hoverIndex] || 'perspective'
+            state.beginMeshModal(
+              'bevel',
+              lastMousePosRef.current.x,
+              lastMousePosRef.current.y,
+              activeView
+            )
             return
           }
         }

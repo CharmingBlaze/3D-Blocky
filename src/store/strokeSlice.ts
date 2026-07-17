@@ -31,6 +31,7 @@ import { DEFAULT_HAIR_TEXTURE_SETTINGS, type HairTextureSettings } from '../stro
 import type { SweepCapStyle } from '../mesh/extrusion'
 import type { PathDistributionMode, PathOutput, PathProfile } from '../mesh/pathOutputs'
 import { isLatheObject, regenerateLatheObject } from '../stroke/latheSource'
+import { activeExtrudeMode } from '../stroke/drawExtrudeMode'
 
 export type StrokeMode =
   | 'outline'
@@ -186,8 +187,8 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   penLatheMode: false,
   sketchLatheCaps: false,
   penLatheCaps: false,
-  latheRadialSegments: 24,
-  latheProfileRings: 48,
+  latheRadialSegments: 16,
+  latheProfileRings: 32,
   latheSmoothing: 0.15,
   extrudeAmount: 16,
   blobInflation: 0.65,
@@ -283,37 +284,43 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
   const patch = (partial: object) => partial as unknown as Partial<T>
   return {
     setExtrudeMode: (on) =>
-      set((s) =>
-        s.drawInputMode === 'vector-pen'
-          ? ({ penExtrudeMode: on, penLatheMode: on ? false : s.penLatheMode } as Partial<T>)
-          : ({ sketchExtrudeMode: on, sketchLatheMode: on ? false : s.sketchLatheMode } as Partial<T>)
+      set(
+        () =>
+          ({
+            sketchExtrudeMode: on,
+            penExtrudeMode: on,
+            ...(on ? { sketchLatheMode: false, penLatheMode: false } : {}),
+          }) as Partial<T>
       ),
 
     toggleExtrudeMode: () =>
       set((s) => {
-        if (s.drawInputMode === 'vector-pen') {
-          const next = !s.penExtrudeMode
-          return { penExtrudeMode: next, penLatheMode: next ? false : s.penLatheMode } as Partial<T>
-        }
-        const next = !s.sketchExtrudeMode
-        return { sketchExtrudeMode: next, sketchLatheMode: next ? false : s.sketchLatheMode } as Partial<T>
+        const next = !activeExtrudeMode(s)
+        return {
+          sketchExtrudeMode: next,
+          penExtrudeMode: next,
+          ...(next ? { sketchLatheMode: false, penLatheMode: false } : {}),
+        } as Partial<T>
       }),
 
     setLatheMode: (on) =>
-      set((s) =>
-        s.drawInputMode === 'vector-pen'
-          ? ({ penLatheMode: on, penExtrudeMode: on ? false : s.penExtrudeMode } as Partial<T>)
-          : ({ sketchLatheMode: on, sketchExtrudeMode: on ? false : s.sketchExtrudeMode } as Partial<T>)
+      set(
+        () =>
+          ({
+            sketchLatheMode: on,
+            penLatheMode: on,
+            ...(on ? { sketchExtrudeMode: false, penExtrudeMode: false } : {}),
+          }) as Partial<T>
       ),
 
     toggleLatheMode: () =>
       set((s) => {
-        if (s.drawInputMode === 'vector-pen') {
-          const next = !s.penLatheMode
-          return { penLatheMode: next, penExtrudeMode: next ? false : s.penExtrudeMode } as Partial<T>
-        }
-        const next = !s.sketchLatheMode
-        return { sketchLatheMode: next, sketchExtrudeMode: next ? false : s.sketchExtrudeMode } as Partial<T>
+        const next = !(s.sketchLatheMode || s.penLatheMode)
+        return {
+          sketchLatheMode: next,
+          penLatheMode: next,
+          ...(next ? { sketchExtrudeMode: false, penExtrudeMode: false } : {}),
+        } as Partial<T>
       }),
 
     setLatheCaps: (on) => {
@@ -322,18 +329,21 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         ? objects.find((object) => object.id === selectedObjectId)
         : null
       const rebuilt = isLatheObject(selected) ? regenerateLatheObject(selected, { caps: on }) : null
-      set((s) => ({
-        ...(s.drawInputMode === 'vector-pen' ? { penLatheCaps: on } : { sketchLatheCaps: on }),
-        ...(rebuilt ? { objects: objects.map((object) => object.id === rebuilt.id ? rebuilt : object) } : {}),
-      } as Partial<T>))
+      set(
+        () =>
+          ({
+            sketchLatheCaps: on,
+            penLatheCaps: on,
+            ...(rebuilt ? { objects: objects.map((object) => (object.id === rebuilt.id ? rebuilt : object)) } : {}),
+          }) as Partial<T>
+      )
     },
 
     toggleLatheCaps: () =>
-      set((s) =>
-        s.drawInputMode === 'vector-pen'
-          ? ({ penLatheCaps: !s.penLatheCaps } as Partial<T>)
-          : ({ sketchLatheCaps: !s.sketchLatheCaps } as Partial<T>)
-      ),
+      set((s) => {
+        const next = !(s.sketchLatheCaps || s.penLatheCaps)
+        return { sketchLatheCaps: next, penLatheCaps: next } as Partial<T>
+      }),
 
     setLatheSettings: (settings) => {
       const nextRadial = settings.latheRadialSegments == null ? undefined : Math.max(8, Math.min(64, Math.round(settings.latheRadialSegments)))
@@ -396,10 +406,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     },
 
     beginExtrudeDrag: (clientX, clientY) => {
-      const state = get()
-      const extrudeOn =
-        state.drawInputMode === 'vector-pen' ? state.penExtrudeMode : state.sketchExtrudeMode
-      if (!extrudeOn) return
+      if (!activeExtrudeMode(get())) return
       set({
         extrudeDragAnchor: {
           clientX,
@@ -410,9 +417,9 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     },
 
     updateExtrudeFromPointer: (clientX, clientY) => {
-      const { extrudeDragAnchor, drawInputMode, sketchExtrudeMode, penExtrudeMode } = get()
-      const extrudeOn = drawInputMode === 'vector-pen' ? penExtrudeMode : sketchExtrudeMode
-      if (!extrudeOn || !extrudeDragAnchor) return
+      const state = get()
+      const { extrudeDragAnchor } = state
+      if (!activeExtrudeMode(state) || !extrudeDragAnchor) return
       const dx = clientX - extrudeDragAnchor.clientX
       const dy = extrudeDragAnchor.clientY - clientY
       get().setExtrudeAmount(

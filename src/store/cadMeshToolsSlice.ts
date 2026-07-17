@@ -32,7 +32,7 @@ import {
 import { stampDrawMaterial } from '../material/materialEditorSlice'
 import type { SelectionMode } from './selectionSlice'
 import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
-import type { Vec3 } from '../utils/math'
+import { sub3, type Vec3 } from '../utils/math'
 import type { ViewType } from '../scene/viewTypes'
 import {
   polyDrawShapeHasArea,
@@ -109,6 +109,7 @@ export interface BendDraft {
   axisLocked: boolean
   baseObject: SceneObject
   view: ViewType
+  viewNormal: Vec3
   startClientX: number
   startClientY: number
   startAngle: number
@@ -162,8 +163,8 @@ export interface CadMeshToolsLayoutActions {
   knifePointerDown: (objectId: string, world: Vec3, view: ViewType) => void
   knifePointerMove: (world: Vec3) => void
   knifeCommit: (viewForward: Vec3) => void
-  bendBegin: (objectId: string, origin: Vec3, view: ViewType, clientX: number, clientY: number) => void
-  bendPointerMove: (world: Vec3 | null, clientX: number, clientY: number) => void
+  bendBegin: (objectId: string, origin: Vec3, view: ViewType, viewNormal: Vec3, clientX: number, clientY: number) => void
+  bendPointerMove: (world: Vec3 | null, clientX: number, clientY: number, shiftKey?: boolean, ctrlKey?: boolean) => void
   bendPointerUp: () => void
   bendStartAngleDrag: (clientX: number, clientY: number) => void
   bendCommit: () => void
@@ -816,7 +817,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       get().knifeApply(viewForward)
     },
 
-    bendBegin: (objectId, origin, view, clientX, clientY) => {
+    bendBegin: (objectId, origin, view, viewNormal, clientX, clientY) => {
       const obj = get().objects.find((o) => o.id === objectId)
       if (!obj || obj.topologyLocked) return
       get().captureUndoPoint('Bend')
@@ -829,6 +830,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
           axisLocked: false,
           baseObject: cloneSceneObject(obj),
           view,
+          viewNormal: { ...viewNormal },
           startClientX: clientX,
           startClientY: clientY,
           startAngle: 0,
@@ -837,14 +839,22 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       } as unknown as Partial<S>)
     },
 
-    bendPointerMove: (world, _clientX, clientY) => {
+    bendPointerMove: (world, _clientX, clientY, shiftKey = false, ctrlKey = false) => {
       const { bendDraft } = get()
       if (!bendDraft) return
 
-      const axisEnd = world ? { ...world } : bendDraft.axisEnd
-      const angle = bendDraft.axisLocked
-        ? bendDraft.startAngle + bendAngleFromScreenDelta(bendDraft.startClientY, clientY)
-        : bendAngleFromScreenDelta(bendDraft.startClientY, clientY)
+      const axisEnd = bendDraft.axisLocked
+        ? bendDraft.axisEnd
+        : world ? { ...world } : bendDraft.axisEnd
+      let angle = bendDraft.axisLocked
+        ? bendDraft.startAngle +
+          bendAngleFromScreenDelta(bendDraft.startClientY, clientY) * (shiftKey ? 0.15 : 1)
+        : 0
+      if (ctrlKey) {
+        const snap = Math.PI / 12
+        angle = Math.round(angle / snap) * snap
+      }
+      angle = Math.max(-Math.PI * 2, Math.min(Math.PI * 2, angle))
 
       const next: BendDraft = {
         ...bendDraft,
@@ -857,9 +867,15 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       if (!obj) return
       const fallback = { x: 1, y: 0, z: 0 }
       const axisDirection = bendAxisDirection(next.axisOrigin, next.axisEnd, fallback)
+      const axisDelta = next.axisEnd
+        ? sub3(next.axisEnd, next.axisOrigin)
+        : { x: 0, y: 0, z: 0 }
+      const span = Math.hypot(axisDelta.x, axisDelta.y, axisDelta.z)
       const positions = applyBendToObject(next.baseObject, {
         axisOrigin: next.axisOrigin,
         axisDirection,
+        span,
+        bendNormal: next.viewNormal,
         angle: next.angle,
       })
       get().updateObject(obj.id, { positions })

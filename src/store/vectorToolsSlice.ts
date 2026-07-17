@@ -1,4 +1,5 @@
-import { attachVectorSource } from '../vector/vectorSource'
+import * as vectorSourceApi from '../vector/vectorSource'
+import type { EditableVectorSourcePatch } from '../vector/vectorSource'
 import { vectorPathToMesh } from '../vector/vectorPathToMesh'
 import { applyActiveHairTexture } from '../material/materialEditorSlice'
 import { applyHairUvTransformToObject } from '../stroke/hairUvTransform'
@@ -76,6 +77,8 @@ export interface VectorPenDraft {
   previewPoint: { x: number; y: number } | null
   pendingAnchorIndex: number | null
   continuePathId: string | null
+  /** When reopening a committed doodle, the scene object id being edited. */
+  editingObjectId: string | null
   closeTargetActive: boolean
   /** Loop marked closed in 2D — mesh is not created until Enter commits. */
   closed: boolean
@@ -110,8 +113,24 @@ export interface VectorToolsLayoutActions {
   penPointerUp: (point: { x: number; y: number }, options?: { altKey?: boolean }) => void
   penFinishPath: () => void
   penCancelPath: () => void
+  /** Drop the last uncommitted anchor (Backspace). */
+  penRemoveLastAnchor: () => void
+  /** Opt-in Illustrator reopen of a committed vector doodle. */
+  beginEditVectorPath: (objectId: string) => void
+  updateSelectedVectorSource: (changes: import('../vector/vectorSource').EditableVectorSourcePatch) => void
+  commitVectorSourceEdit: () => void
+  convertSelectedVectorToMesh: () => void
   commitPenPath: (closed: boolean) => void
-  commitVectorPath: (path: VectorPath, options?: { skipHistory?: boolean; skipSymmetry?: boolean }) => void
+  commitVectorPath: (
+    path: VectorPath,
+    options?: {
+      skipHistory?: boolean
+      skipSymmetry?: boolean
+      /** Replace this object in place (same id/transform). */
+      replaceObjectId?: string
+      historyLabel?: string
+    }
+  ) => void
   commitVectorShape: (
     kind: ShapeKind,
     a: { x: number; y: number },
@@ -208,13 +227,19 @@ type VectorStore = VectorToolsLayoutState & {
   rdpTolerance: number
   defaultDepth: number
   facetExaggeration: number
+  /** Shared with Sketch; pen* mirrors are kept in sync. */
+  sketchExtrudeMode: boolean
   penExtrudeMode: boolean
+  sketchLatheMode: boolean
   penLatheMode: boolean
+  sketchLatheCaps: boolean
   penLatheCaps: boolean
   latheRadialSegments: number
   latheProfileRings: number
   latheSmoothing: number
   extrudeAmount: number
+  blobInflation: number
+  drawInputMode: import('./strokeSlice').DrawInputMode
   activeColor: number
   activeTool: string
   toolCategory: string
@@ -405,6 +430,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
                   previewPoint: pt,
                   pendingAnchorIndex: null,
                   continuePathId: hit.pathId,
+                  editingObjectId: hit.path.objectId ?? null,
                   closeTargetActive: true,
                   closed: true,
                 },
@@ -430,13 +456,15 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
           }
         }
 
+        // First point is pending so click-drag can create curves (same as later points).
         setPartial({
           vectorPenDraft: {
             anchors,
             view,
             previewPoint: pt,
-            pendingAnchorIndex: null,
+            pendingAnchorIndex: anchors.length - 1,
             continuePathId,
+            editingObjectId: null,
             closeTargetActive: false,
             closed: false,
           },
@@ -642,8 +670,117 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       setPartial({ vectorPenDraft: null })
     },
 
+    penRemoveLastAnchor: () => {
+      const { vectorPenDraft } = store()
+      if (!vectorPenDraft || vectorPenDraft.editDrag) return
+      if (vectorPenDraft.pendingAnchorIndex !== null) {
+        // Cancel the in-progress point placement first.
+        const anchors = vectorPenDraft.anchors.slice(0, -1)
+        if (anchors.length === 0) {
+          setPartial({ vectorPenDraft: null })
+          return
+        }
+        setPartial({
+          vectorPenDraft: {
+            ...vectorPenDraft,
+            anchors,
+            pendingAnchorIndex: null,
+            previewPoint: anchors[anchors.length - 1]?.position ?? null,
+            closeTargetActive: false,
+          },
+        })
+        return
+      }
+      if (vectorPenDraft.anchors.length <= 1) {
+        setPartial({ vectorPenDraft: null })
+        return
+      }
+      const anchors = vectorPenDraft.anchors.slice(0, -1)
+      setPartial({
+        vectorPenDraft: {
+          ...vectorPenDraft,
+          anchors,
+          closed: false,
+          closeTargetActive: false,
+          previewPoint: anchors[anchors.length - 1]?.position ?? null,
+          pendingAnchorIndex: null,
+          editDrag: undefined,
+        },
+      })
+    },
+
+    beginEditVectorPath: (objectId) => {
+      const { objects } = store()
+      const object = objects.find((candidate) => candidate.id === objectId)
+      if (!vectorSourceApi.isVectorDoodleObject(object)) return
+      const source = object.vectorSource
+      const path = source.path
+      store().penCancelPath()
+      const latheOn = !!source.latheMode
+      const extrudeOn = !latheOn && !!source.extrudeMode
+      setPartial({
+        drawInputMode: 'vector-pen',
+        activeTool: 'vector-pen',
+        toolCategory: 'vector',
+        strokeMode: source.strokeMode,
+        extrudeAmount: source.extrudeDepth,
+        blobInflation: source.blobInflation ?? store().blobInflation,
+        polyBudget: source.polyBudget ?? store().polyBudget,
+        brushDensity: source.brushDensity,
+        sketchExtrudeMode: extrudeOn,
+        penExtrudeMode: extrudeOn,
+        sketchLatheMode: latheOn,
+        penLatheMode: latheOn,
+        sketchLatheCaps: !!source.latheCaps,
+        penLatheCaps: !!source.latheCaps,
+        vectorPenDraft: {
+          anchors: cloneAnchors(path),
+          view: path.view,
+          previewPoint: null,
+          pendingAnchorIndex: null,
+          continuePathId: path.id,
+          editingObjectId: objectId,
+          closeTargetActive: path.closed,
+          closed: path.closed,
+        },
+      })
+    },
+
+    updateSelectedVectorSource: (changes: EditableVectorSourcePatch) => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!vectorSourceApi.isVectorDoodleObject(object)) return
+      const updated = vectorSourceApi.regenerateVectorObjectFromSource(object, changes)
+      if (!updated) return
+      setPartial({
+        objects: objects.map((candidate) => (candidate.id === object.id ? updated : candidate)),
+      })
+    },
+
+    commitVectorSourceEdit: () => {
+      store().commitHistory('Edit vector')
+    },
+
+    convertSelectedVectorToMesh: () => {
+      const { selectedObjectId, selectionObjectIds, objects } = store()
+      if (!selectedObjectId || selectionObjectIds.length !== 1) return
+      const object = objects.find((candidate) => candidate.id === selectedObjectId)
+      if (!vectorSourceApi.isVectorDoodleObject(object)) return
+      const { vectorSource: _source, ...meshObject } = object
+      setPartial({
+        objects: objects.map((candidate) => (candidate.id === object.id ? meshObject : candidate)),
+        vectorPenDraft: null,
+        vectorDocument: {
+          ...store().vectorDocument,
+          paths: store().vectorDocument.paths.filter((p) => p.objectId !== object.id && p.id !== object.vectorSource.path.id),
+        },
+      })
+      store().commitHistory('Convert vector to mesh')
+    },
+
     commitPenPath: (closed: boolean) => {
-      const { vectorPenDraft, activeColor, commitVectorPath } = store()
+      const { vectorPenDraft, activeColor, commitVectorPath, objects } = store()
       if (!vectorPenDraft) return
       if (vectorPenDraft.pendingAnchorIndex !== null) return
 
@@ -654,9 +791,11 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       }
 
       const continuePathId = vectorPenDraft.continuePathId
-      const prev = continuePathId
+      const editingObjectId = vectorPenDraft.editingObjectId
+      const prevPath = continuePathId
         ? get().vectorDocument.paths.find((p) => p.id === continuePathId)
         : null
+      const replaceObjectId = editingObjectId ?? null
 
       const path: VectorPath = {
         id: continuePathId ?? generateId(),
@@ -670,20 +809,37 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         view: vectorPenDraft.view,
         color: activeColor,
         source: 'pen',
+        objectId: replaceObjectId ?? prevPath?.objectId,
       }
 
       const lastAnchor = path.anchors[path.anchors.length - 1].position
+
+      // Edit reopen: replace in place (preserve id/transform). Do not remove first.
+      if (replaceObjectId && objects.some((o) => o.id === replaceObjectId)) {
+        setPartial({ vectorPenDraft: null })
+        commitVectorPath(path, {
+          skipHistory: true,
+          skipSymmetry: true,
+          replaceObjectId,
+        })
+        store().commitHistory('Edit vector path')
+        store().clearExtrudeDrag()
+        setPartial({
+          lastPenEndpoint: { view: path.view, position: { ...lastAnchor } },
+        })
+        return
+      }
 
       if (continuePathId) {
         setPartial((s) => {
           const st = s as unknown as VectorStore
           return {
             vectorPenDraft: null,
-            objects: prev?.objectId
-              ? st.objects.filter((o) => o.id !== prev.objectId)
+            objects: prevPath?.objectId
+              ? st.objects.filter((o) => o.id !== prevPath.objectId)
               : st.objects,
-            objectTextures: prev?.objectId
-              ? withoutObjectTexture(st.objectTextures, prev.objectId)
+            objectTextures: prevPath?.objectId
+              ? withoutObjectTexture(st.objectTextures, prevPath.objectId)
               : st.objectTextures,
             vectorDocument: {
               ...s.vectorDocument,
@@ -743,7 +899,15 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
       setPartial({ vectorDraft: [], vectorIsDrawing: false, vectorDraftView: null })
     },
 
-    commitVectorPath: (path, options?: { skipHistory?: boolean; skipSymmetry?: boolean }) => {
+    commitVectorPath: (
+      path,
+      options?: {
+        skipHistory?: boolean
+        skipSymmetry?: boolean
+        replaceObjectId?: string
+        historyLabel?: string
+      }
+    ) => {
       const {
         polyBudget,
         brushDensity,
@@ -752,13 +916,19 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         closeThreshold,
         defaultDepth,
         facetExaggeration,
+        sketchExtrudeMode,
         penExtrudeMode,
+        sketchLatheMode,
         penLatheMode,
+        sketchLatheCaps,
         penLatheCaps,
         latheRadialSegments,
         latheProfileRings,
         latheSmoothing,
         extrudeAmount,
+        blobInflation,
+        objects,
+        selectedObjectId,
         hairTextureId,
         hairUvTransform,
         hairTextureSettings,
@@ -778,75 +948,178 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
       } = store()
 
+      const replaceId = options?.replaceObjectId
+      const prevObject = replaceId ? objects.find((o) => o.id === replaceId) : null
+      const prevSource = vectorSourceApi.isVectorDoodleObject(prevObject) ? prevObject.vectorSource : null
+
+      // Same Extrude / Lathe / Hair / Sweeps controls as Sketch (or preserved source when editing).
+      const latheMode = prevSource?.latheMode ?? (sketchLatheMode || penLatheMode)
+      const extrudeMode = latheMode
+        ? false
+        : (prevSource?.extrudeMode ?? (sketchExtrudeMode || penExtrudeMode))
+      const latheCaps = prevSource?.latheCaps ?? (sketchLatheCaps || penLatheCaps)
+      const useStrokeMode = prevSource?.strokeMode ?? strokeMode
+      const usePolyBudget = prevSource?.polyBudget ?? polyBudget
+      const useBrushDensity = prevSource?.brushDensity ?? brushDensity
+      const useExtrudeAmount = prevSource?.extrudeDepth ?? extrudeAmount
+      const useBlobInflation = prevSource?.blobInflation ?? blobInflation
+      const useHairTip = prevSource?.hairTipStyle ?? hairTipStyle
+
       let obj = vectorPathToMesh(path, {
         view: path.view,
-        polyBudget,
-        brushDensity,
-        strokeMode,
-        rdpTolerance,
-        closeThreshold,
-        defaultDepth,
+        polyBudget: usePolyBudget,
+        brushDensity: useBrushDensity,
+        strokeMode: useStrokeMode,
+        rdpTolerance: prevSource?.rdpTolerance ?? rdpTolerance,
+        closeThreshold: prevSource?.closeThreshold ?? closeThreshold,
+        defaultDepth: prevSource?.defaultDepth ?? defaultDepth,
         color: path.color,
-        stylize: facetExaggeration,
-        extrudeMode: penLatheMode ? false : penExtrudeMode,
-        latheMode: penLatheMode,
-        latheCaps: penLatheCaps,
-        latheRadialSegments,
-        latheProfileRings,
-        latheSmoothing,
-        extrudeAmount,
-        hairTipStyle,
-        pathStartCap,
-        pathEndCap,
-        pathRadialSegments,
-        pathRadiusScale,
-        ribbonStartTip,
-        ribbonEndTip,
-        ribbonTaper,
-        ribbonWidthScale,
-        ribbonFlat,
-        pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
-        pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
-        pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
-        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
+        stylize: prevSource?.stylize ?? facetExaggeration,
+        extrudeMode,
+        latheMode,
+        latheCaps,
+        latheRadialSegments: prevSource?.latheRadialSegments ?? latheRadialSegments,
+        latheProfileRings: prevSource?.latheProfileRings ?? latheProfileRings,
+        latheSmoothing: prevSource?.latheSmoothing ?? latheSmoothing,
+        extrudeAmount: useExtrudeAmount,
+        blobInflation: useBlobInflation,
+        hairTipStyle: useHairTip,
+        pathStartCap: prevSource?.pathStartCap ?? pathStartCap,
+        pathEndCap: prevSource?.pathEndCap ?? pathEndCap,
+        pathRadialSegments: prevSource?.pathRadialSegments ?? pathRadialSegments,
+        pathRadiusScale: prevSource?.pathRadiusScale ?? pathRadiusScale,
+        ribbonStartTip: prevSource?.ribbonStartTip ?? ribbonStartTip,
+        ribbonEndTip: prevSource?.ribbonEndTip ?? ribbonEndTip,
+        ribbonTaper: prevSource?.ribbonTaper ?? ribbonTaper,
+        ribbonWidthScale: prevSource?.ribbonWidthScale ?? ribbonWidthScale,
+        ribbonFlat: prevSource?.ribbonFlat ?? ribbonFlat,
+        pathOutput: prevSource?.pathOutput ?? pathOutput,
+        pathStartScale: prevSource?.pathStartScale ?? pathStartScale,
+        pathEndScale: prevSource?.pathEndScale ?? pathEndScale,
+        pathTwist: prevSource?.pathTwist ?? pathTwist,
+        pathSpacing: prevSource?.pathSpacing ?? pathSpacing,
+        pathOffset: prevSource?.pathOffset ?? pathOffset,
+        pathProfile: prevSource?.pathProfile ?? pathProfile,
+        pathProfileWidth: prevSource?.pathProfileWidth ?? pathProfileWidth,
+        pathProfileHeight: prevSource?.pathProfileHeight ?? pathProfileHeight,
+        pathChainAlternating: prevSource?.pathChainAlternating ?? pathChainAlternating,
+        pathCardCrossed: prevSource?.pathCardCrossed ?? pathCardCrossed,
+        pathDistributionMode: prevSource?.pathDistributionMode ?? pathDistributionMode,
+        pathCount: prevSource?.pathCount ?? pathCount,
+        pathStartPadding: prevSource?.pathStartPadding ?? pathStartPadding,
+        pathEndPadding: prevSource?.pathEndPadding ?? pathEndPadding,
+        pathRandomScale: prevSource?.pathRandomScale ?? pathRandomScale,
+        pathRotation: prevSource?.pathRotation ?? pathRotation,
+        pathRandomRotation: prevSource?.pathRandomRotation ?? pathRandomRotation,
+        pathAlternateRotation: prevSource?.pathAlternateRotation ?? pathAlternateRotation,
+        pathMirrorAlternate: prevSource?.pathMirrorAlternate ?? pathMirrorAlternate,
+        pathSeed: prevSource?.pathSeed ?? pathSeed,
+        pathKeepInstances: prevSource?.pathKeepInstances ?? pathKeepInstances,
+        pathSourceObject: (prevSource?.pathOutput ?? pathOutput) === 'object-array'
+          ? objects.find((o) => o.id === selectedObjectId) ?? null
+          : null,
+        pathSourceObjectId: (prevSource?.pathOutput ?? pathOutput) === 'object-array' ? selectedObjectId : null,
       })
 
-      if (obj && isHairStrokeMode(strokeMode)) {
+      if (obj && isHairStrokeMode(useStrokeMode)) {
         obj = applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
         obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 
-      const pathWithObject = { ...path, objectId: obj?.id }
+      const objectId = replaceId ?? obj?.id
+      const pathWithObject = { ...path, objectId }
 
-      const hairMode = isHairStrokeMode(strokeMode)
-      const objToAdd =
+      const hairMode = isHairStrokeMode(useStrokeMode)
+      let objToAdd =
         obj && path.source === 'pen'
-          ? attachVectorSource(obj, {
+          ? vectorSourceApi.attachVectorSource(obj, {
               path: pathWithObject,
-              strokeMode: penExtrudeMode && !hairMode ? 'outline' : strokeMode,
-              extrudeMode: penExtrudeMode && !hairMode,
-              brushDensity,
-              rdpTolerance,
-              closeThreshold,
-              defaultDepth,
-              stylize: facetExaggeration,
-              extrudeDepth: extrudeAmount,
-              hairTipStyle: hairMode ? hairTipStyle : undefined,
-              pathStartCap,
-              pathEndCap,
-              pathRadialSegments,
-              pathRadiusScale,
-              ribbonStartTip,
-              ribbonEndTip,
-              ribbonTaper,
-              ribbonWidthScale,
-              ribbonFlat,
-              pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
-              pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
-              pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
-              pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
+              strokeMode: useStrokeMode,
+              extrudeMode,
+              latheMode,
+              latheCaps,
+              latheRadialSegments: prevSource?.latheRadialSegments ?? latheRadialSegments,
+              latheProfileRings: prevSource?.latheProfileRings ?? latheProfileRings,
+              latheSmoothing: prevSource?.latheSmoothing ?? latheSmoothing,
+              brushDensity: useBrushDensity,
+              polyBudget: usePolyBudget,
+              rdpTolerance: prevSource?.rdpTolerance ?? rdpTolerance,
+              closeThreshold: prevSource?.closeThreshold ?? closeThreshold,
+              defaultDepth: prevSource?.defaultDepth ?? defaultDepth,
+              stylize: prevSource?.stylize ?? facetExaggeration,
+              extrudeDepth: useExtrudeAmount,
+              blobInflation: useBlobInflation,
+              hairTipStyle: hairMode ? useHairTip : undefined,
+              pathStartCap: prevSource?.pathStartCap ?? pathStartCap,
+              pathEndCap: prevSource?.pathEndCap ?? pathEndCap,
+              pathRadialSegments: prevSource?.pathRadialSegments ?? pathRadialSegments,
+              pathRadiusScale: prevSource?.pathRadiusScale ?? pathRadiusScale,
+              ribbonStartTip: prevSource?.ribbonStartTip ?? ribbonStartTip,
+              ribbonEndTip: prevSource?.ribbonEndTip ?? ribbonEndTip,
+              ribbonTaper: prevSource?.ribbonTaper ?? ribbonTaper,
+              ribbonWidthScale: prevSource?.ribbonWidthScale ?? ribbonWidthScale,
+              ribbonFlat: prevSource?.ribbonFlat ?? ribbonFlat,
+              pathOutput: prevSource?.pathOutput ?? pathOutput,
+              pathStartScale: prevSource?.pathStartScale ?? pathStartScale,
+              pathEndScale: prevSource?.pathEndScale ?? pathEndScale,
+              pathTwist: prevSource?.pathTwist ?? pathTwist,
+              pathSpacing: prevSource?.pathSpacing ?? pathSpacing,
+              pathOffset: prevSource?.pathOffset ?? pathOffset,
+              pathProfile: prevSource?.pathProfile ?? pathProfile,
+              pathProfileWidth: prevSource?.pathProfileWidth ?? pathProfileWidth,
+              pathProfileHeight: prevSource?.pathProfileHeight ?? pathProfileHeight,
+              pathChainAlternating: prevSource?.pathChainAlternating ?? pathChainAlternating,
+              pathCardCrossed: prevSource?.pathCardCrossed ?? pathCardCrossed,
+              pathDistributionMode: prevSource?.pathDistributionMode ?? pathDistributionMode,
+              pathCount: prevSource?.pathCount ?? pathCount,
+              pathStartPadding: prevSource?.pathStartPadding ?? pathStartPadding,
+              pathEndPadding: prevSource?.pathEndPadding ?? pathEndPadding,
+              pathRandomScale: prevSource?.pathRandomScale ?? pathRandomScale,
+              pathRotation: prevSource?.pathRotation ?? pathRotation,
+              pathRandomRotation: prevSource?.pathRandomRotation ?? pathRandomRotation,
+              pathAlternateRotation: prevSource?.pathAlternateRotation ?? pathAlternateRotation,
+              pathMirrorAlternate: prevSource?.pathMirrorAlternate ?? pathMirrorAlternate,
+              pathSeed: prevSource?.pathSeed ?? pathSeed,
+              pathKeepInstances: prevSource?.pathKeepInstances ?? pathKeepInstances,
             })
           : obj
+
+      if (objToAdd && prevObject && replaceId) {
+        objToAdd = {
+          ...objToAdd,
+          id: replaceId,
+          name: prevObject.name,
+          transform: prevObject.transform,
+          material: prevObject.material,
+          faceMaterials: prevObject.faceMaterials,
+          smoothShading: prevObject.smoothShading,
+          uvMappingMode: prevObject.uvMappingMode,
+          visible: prevObject.visible,
+          vectorSource: objToAdd.vectorSource
+            ? {
+                ...objToAdd.vectorSource,
+                path: { ...objToAdd.vectorSource.path, objectId: replaceId },
+              }
+            : objToAdd.vectorSource,
+        }
+        setPartial((s) => {
+          const st = s as unknown as VectorStore
+          const nextPaths = [
+            ...s.vectorDocument.paths.filter((p) => p.id !== path.id && p.objectId !== replaceId),
+            { ...pathWithObject, objectId: replaceId },
+          ]
+          return {
+            objects: st.objects.map((o) => (o.id === replaceId ? objToAdd! : o)),
+            selectedObjectId: replaceId,
+            selectionObjectIds: [replaceId],
+            vectorDocument: { ...s.vectorDocument, paths: nextPaths },
+          }
+        })
+        if (!options?.skipHistory) {
+          store().commitHistory(options?.historyLabel ?? 'Edit vector path')
+        }
+        return
+      }
 
       if (objToAdd) {
         store().addObject(objToAdd, { skipHistory: options?.skipHistory, skipSymmetry: options?.skipSymmetry })

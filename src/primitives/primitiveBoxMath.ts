@@ -250,11 +250,11 @@ export interface PrimitivePreviewDraft {
   box: WorldBox
 }
 
-const Y_UP_GROUND_PREVIEW_TYPES = new Set(['dome', 'stairs'])
+const SHAPED_HEIGHT_PREVIEW_TYPES = new Set(['dome', 'stairs'])
 
-/** Dome/stairs are Y-up on the ground — inflate thin extrusion axis while the box is still being drawn. */
+/** Give shaped primitives a useful provisional height while their base is being drawn. */
 export function primitivePreviewBox(type: string, draft: PrimitivePreviewDraft): WorldBox {
-  if (!Y_UP_GROUND_PREVIEW_TYPES.has(type)) return draft.box
+  if (!SHAPED_HEIGHT_PREVIEW_TYPES.has(type)) return draft.box
 
   const { box, heightAxis, phase } = draft
   const size = boundsSize(box.min, box.max)

@@ -124,8 +124,8 @@ export function collectProjectPreferences(state: ProjectStore): ProjectPreferenc
       strokeMode: state.strokeMode,
       blobInflation: state.blobInflation,
       extrudeAmount: state.extrudeAmount,
-      sketchExtrudeMode: state.sketchExtrudeMode,
-      penExtrudeMode: state.penExtrudeMode,
+      sketchExtrudeMode: state.sketchExtrudeMode || state.penExtrudeMode,
+      penExtrudeMode: state.sketchExtrudeMode || state.penExtrudeMode,
       latheRadialSegments: state.latheRadialSegments,
       latheProfileRings: state.latheProfileRings,
       latheSmoothing: state.latheSmoothing,
@@ -227,8 +227,9 @@ export function projectPreferencesToStorePartial(
     extra.strokeMode = preferences.stroke.strokeMode
     extra.blobInflation = preferences.stroke.blobInflation
     extra.extrudeAmount = preferences.stroke.extrudeAmount
-    extra.sketchExtrudeMode = preferences.stroke.sketchExtrudeMode
-    extra.penExtrudeMode = preferences.stroke.penExtrudeMode
+    const extrudeOn = preferences.stroke.sketchExtrudeMode || preferences.stroke.penExtrudeMode
+    extra.sketchExtrudeMode = extrudeOn
+    extra.penExtrudeMode = extrudeOn
     extra.latheRadialSegments = preferences.stroke.latheRadialSegments
     extra.latheProfileRings = preferences.stroke.latheProfileRings
     extra.latheSmoothing = preferences.stroke.latheSmoothing

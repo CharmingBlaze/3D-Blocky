@@ -2,7 +2,7 @@ import { Line } from '@react-three/drei'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store/appStore'
-import { bendAxisDirection } from '../mesh/bendDeform'
+import { bendArcPoint, bendAxisDirection } from '../mesh/bendDeform'
 import { useTheme } from '../theme/useTheme'
 
 export function BendVisuals() {
@@ -33,6 +33,28 @@ export function BendVisuals() {
     }
   }, [bendDraft])
 
+  const arcPoints = useMemo(() => {
+    if (!bendDraft?.axisEnd || !bendDraft.axisLocked) return []
+    const dx = bendDraft.axisEnd.x - bendDraft.axisOrigin.x
+    const dy = bendDraft.axisEnd.y - bendDraft.axisOrigin.y
+    const dz = bendDraft.axisEnd.z - bendDraft.axisOrigin.z
+    const span = Math.hypot(dx, dy, dz)
+    if (span < 1e-6) return []
+    const direction = { x: dx / span, y: dy / span, z: dz / span }
+    const steps = Math.max(12, Math.ceil(Math.abs(bendDraft.angle) * 10))
+    return Array.from({ length: steps + 1 }, (_, index) => {
+      const p = bendArcPoint(
+        bendDraft.axisOrigin,
+        direction,
+        span,
+        bendDraft.viewNormal,
+        bendDraft.angle,
+        index / steps
+      )
+      return [p.x, p.y, p.z] as [number, number, number]
+    })
+  }, [bendDraft])
+
   if (activeTool !== 'bend' || !bendDraft || !axisLine) return null
 
   return (
@@ -48,6 +70,15 @@ export function BendVisuals() {
         dashSize={4}
         gapSize={2}
       />
+
+      {arcPoints.length > 1 && (
+        <Line
+          points={arcPoints}
+          color={accent}
+          lineWidth={3}
+          depthTest={false}
+        />
+      )}
 
       <mesh position={[bendDraft.axisOrigin.x, bendDraft.axisOrigin.y, bendDraft.axisOrigin.z]} renderOrder={27}>
         <sphereGeometry args={[0.22, 10, 10]} />

@@ -118,7 +118,11 @@ export function ToolRing({ onClose }: ToolRingProps) {
         case 'polyMode':
           return activeTool === 'poly-draw' && polyDrawMode === entry.mode
         case 'stroke':
-          return activeTool === 'draw' && strokeMode === entry.mode && drawInputMode === 'regular'
+          return (
+            strokeMode === entry.mode &&
+            (activeTool === 'vector-pen' ||
+              (activeTool === 'draw' && drawInputMode === 'regular'))
+          )
         case 'drawInput':
           return entry.mode === 'vector-pen'
             ? activeTool === 'vector-pen'

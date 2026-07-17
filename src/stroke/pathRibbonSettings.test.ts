@@ -94,10 +94,24 @@ describe('updated Sketch Capsule',()=>{
     expect(capsule!.sketchSource?.relative).toHaveLength(2)
     expect(capsule!.uvs?.length).toBeGreaterThan(0)
   })
+  it('keeps Capsule semantics even when the shared Extrude toggle is on',()=>{
+    const capsule=strokeToMesh({
+      ...base,
+      points:[{x:0,y:0},{x:0,y:18}],
+      strokeMode:'capsule',
+      extrudeMode:true,
+      extrudeAmount:4,
+      pathRadialSegments:10,
+    })
+    expect(capsule).not.toBeNull()
+    expect(capsule!.name).toBe('Capsule')
+    expect(capsule!.sketchSource?.kind).toBe('capsule-path')
+  })
   it('retains and regenerates closed capsule volumes',()=>{
     const capsule=strokeToMesh({...base,points:[{x:0,y:0},{x:20,y:0},{x:20,y:20},{x:0,y:20},{x:0,y:0}],strokeMode:'capsule',extrudeAmount:6})!
     expect(capsule.sketchSource?.kind).toBe('capsule-shape')
-    expect(capsule.positions.length).toBeGreaterThan(60)
+    expect(capsule.positions.length).toBeGreaterThan(24)
+    expect(capsule.positions.length).toBeLessThan(200)
     const regenerated=regenerateSketchObjectFromSource(capsule,{extrudeDepth:10,pathRadialSegments:12})!
     expect(regenerated.id).toBe(capsule.id)
     expect(regenerated.sketchSource?.kind).toBe('capsule-shape')

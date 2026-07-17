@@ -124,9 +124,17 @@ export const HAIR_STRIP_SPINE_HARD_CAP = 14
 /** Slightly denser than Outline cleanup so short dense strokes don't over-ring. */
 export const PATH_CLEANUP_MIN_DISTANCE = 0.9
 
-/** Closed Capsule silhouette sampling. Kept dense enough to preserve necks and asymmetric curves. */
+/**
+ * Soft cap on closed-capsule longitudinal divisions (even meridian spacing).
+ * Kept modest so rings stay balanced with Round sides instead of packing the body.
+ */
 export function capsuleProfileRingsForBudget(polyBudget: number): number {
-  return Math.max(16, Math.min(48, Math.round(polyBudget / 4)))
+  return Math.max(10, Math.min(16, Math.round(polyBudget / 14)))
+}
+
+/** Capsule round-sides clamp. Keep the Sketch result round without becoming dense. */
+export function capsuleRadialSegments(segments?: number): number {
+  return Math.max(12, Math.min(20, Math.round(segments ?? 12)))
 }
 
 /**
@@ -276,7 +284,7 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     if (!spine) return null
     return generateCapsuleSweep(spine, {
       radius: depth,
-      radialSegments: Math.max(12, Math.min(24, source.pathRadialSegments ?? 12)),
+      radialSegments: capsuleRadialSegments(source.pathRadialSegments),
       closed: false,
       hemiRings: LOW_POLY_CAPSULE_HEMI_RINGS,
       preserveSpine: true,
@@ -290,7 +298,7 @@ function buildMeshFromSource(source: SketchSource, extrudeDepth: number, color: 
     const boundary = prepareOutlineBoundary(relative, polyBudget, true)
     if (!boundary || boundary.length < 3) return null
     return generateVerticalShapedCapsule(boundary, {
-      radialSegments: Math.max(12, Math.min(24, source.pathRadialSegments ?? 12)),
+      radialSegments: capsuleRadialSegments(source.pathRadialSegments),
       profileRings: capsuleProfileRingsForBudget(polyBudget),
       preserveBoundary: true,
       color,

@@ -356,7 +356,7 @@ describe('project serialize ↔ load round-trip', () => {
         blobInflation: 0.4,
         extrudeAmount: 22,
         sketchExtrudeMode: true,
-        penExtrudeMode: false,
+        penExtrudeMode: true,
       },
       sceneSettings: {
         polyBudget: 256,
@@ -393,6 +393,9 @@ describe('project serialize ↔ load round-trip', () => {
     expect(prefs.hair?.uvTransform.scaleV).toBe(3)
     expect(prefs.hair?.textureSettings.brightness).toBe(1.4)
     expect(prefs.stroke?.strokeMode).toBe('hair-paths')
+    // Extrude is shared: either legacy field on loads as both on.
+    expect(prefs.stroke?.sketchExtrudeMode).toBe(true)
+    expect(prefs.stroke?.penExtrudeMode).toBe(true)
     expect(prefs.sceneSettings?.polyBudget).toBe(256)
   })
 

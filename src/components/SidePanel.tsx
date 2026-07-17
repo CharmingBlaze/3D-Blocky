@@ -327,6 +327,12 @@ export function SidePanel() {
     updateSelectedSketchSource,
     commitSketchSourceEdit,
     convertSelectedSketchToMesh,
+    beginEditVectorPath,
+    updateSelectedVectorSource,
+    commitVectorSourceEdit,
+    convertSelectedVectorToMesh,
+    vectorPenDraft,
+    bendDraft,
     activeShapeKind,
     setActiveShapeKind,
     activePrimitiveKind,
@@ -507,6 +513,12 @@ export function SidePanel() {
       updateSelectedSketchSource: s.updateSelectedSketchSource,
       commitSketchSourceEdit: s.commitSketchSourceEdit,
       convertSelectedSketchToMesh: s.convertSelectedSketchToMesh,
+      beginEditVectorPath: s.beginEditVectorPath,
+      updateSelectedVectorSource: s.updateSelectedVectorSource,
+      commitVectorSourceEdit: s.commitVectorSourceEdit,
+      convertSelectedVectorToMesh: s.convertSelectedVectorToMesh,
+      vectorPenDraft: s.vectorPenDraft,
+      bendDraft: s.bendDraft,
       activeShapeKind: s.activeShapeKind,
       setActiveShapeKind: s.setActiveShapeKind,
       activePrimitiveKind: s.activePrimitiveKind,
@@ -663,8 +675,10 @@ export function SidePanel() {
   const selectedPrimitiveSize = selectedPrimitiveSource
     ? boxCenterSize(selectedPrimitiveSource.box).size
     : null
-  const selectedVectorDoodle = selectedObj?.vectorSource ?? null
+  const selectedVectorSource = selectedObj?.vectorSource ?? null
+  const selectedVectorDoodle = selectedVectorSource
   const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
+  const editingVectorPath = !!vectorPenDraft?.editingObjectId && vectorPenDraft.editingObjectId === selectedObj?.id
 
   const isSelectTool =
     activeTool === 'smart' ||
@@ -1086,8 +1100,9 @@ export function SidePanel() {
             </SideBtnGroup>
             {drawInputMode === 'vector-pen' && (
               <p className="side-color-hint muted">
-                Click to add points · drag for curves · click first point to close · edit
-                anchors/handles · Enter or double-click commits to 3D · Esc cancels
+                Click add · drag curves · Alt corner · click first to close · edit
+                anchors/handles · Enter/right-click/double-click commit · Backspace undo
+                point · Esc cancel
               </p>
             )}
             <div className="side-create-label">Stroke shape</div>
@@ -1189,7 +1204,7 @@ export function SidePanel() {
               <div className="hair-draw-options path-draw-options">
                 <div className="hair-draw-options-heading"><span>Capsule settings</span><span className="muted">New strokes</span></div>
                 <SideSlider label="Radius" value={Math.abs(extrudeAmount)} display={String(Math.round(Math.abs(extrudeAmount)))} min={2} max={128} step={1} onChange={setExtrudeAmount}/>
-                <SideSlider label="Round sides" value={Math.max(12,pathRadialSegments)} display={String(Math.max(12,pathRadialSegments))} min={12} max={24} step={1} onChange={setPathRadialSegments}/>
+                <SideSlider label="Round sides" value={Math.max(12, Math.min(20, pathRadialSegments))} display={String(Math.max(12, Math.min(20, pathRadialSegments)))} min={12} max={20} step={1} onChange={setPathRadialSegments}/>
                 <p className="side-color-hint muted">Open strokes become rounded capsule sweeps. Closed strokes become rounded capsule volumes.</p>
               </div>
             )}
@@ -1256,11 +1271,7 @@ export function SidePanel() {
                 type="button"
                 className={`side-btn ${activeExtrudeOn ? 'active' : ''}`}
                 onClick={toggleExtrudeMode}
-                title={
-                  drawInputMode === 'vector-pen'
-                    ? 'Extrude vector pen strokes into 3D capsule doodles'
-                    : 'Extrude sketch strokes into 3D capsule doodles'
-                }
+                title="Extrude Sketch or Vector Pen strokes into 3D capsule doodles"
               >
                 Extrude
               </button>
@@ -1268,11 +1279,7 @@ export function SidePanel() {
                 type="button"
                 className={`side-btn ${activeLatheOn ? 'active' : ''}`}
                 onClick={toggleLatheMode}
-                title={
-                  drawInputMode === 'vector-pen'
-                    ? 'Revolve vector pen profile — shape follows the orthographic view you draw in'
-                    : 'Revolve sketch profile — shape follows the orthographic view you draw in'
-                }
+                title="Revolve Sketch or Vector Pen profiles — shape follows the orthographic view you draw in"
               >
                 Lathe
               </button>
@@ -1357,6 +1364,43 @@ export function SidePanel() {
                   </SideBtnGroup>
                 </>
               )}
+              {selectedVectorSource && selectedObj && (
+                <>
+                  <div className="side-create-label">Source</div>
+                  <div className="side-chips">
+                    <span className="lock-indicator">Editable Vector</span>
+                  </div>
+                  <SideBtnGroup cols={2}>
+                    <button
+                      type="button"
+                      className={`side-btn ${editingVectorPath ? 'active' : ''}`}
+                      onClick={() => {
+                        if (editingVectorPath) {
+                          useAppStore.getState().penCancelPath()
+                        } else {
+                          beginEditVectorPath(selectedObj.id)
+                        }
+                      }}
+                      title="Reopen anchors and handles to edit the path"
+                    >
+                      {editingVectorPath ? 'Cancel Path Edit' : 'Edit Path'}
+                    </button>
+                    <button
+                      type="button"
+                      className="side-btn"
+                      onClick={convertSelectedVectorToMesh}
+                      title="Bake the current result into a regular editable mesh"
+                    >
+                      Convert to Mesh
+                    </button>
+                  </SideBtnGroup>
+                  {editingVectorPath && (
+                    <p className="side-color-hint muted">
+                      Edit anchors/handles · Enter/right-click commit · Esc cancel (keeps original)
+                    </p>
+                  )}
+                </>
+              )}
               <div className="side-create-label side-create-label-with-action">
                 <span>Shape</span>
                 <button
@@ -1376,6 +1420,14 @@ export function SidePanel() {
                         ...(selectedSketchSource.kind === 'soft' ? { inflation: 0.65 } : {}),
                       })
                       commitSketchSourceEdit()
+                    } else if (selectedVectorSource) {
+                      updateSelectedVectorSource({
+                        extrudeDepth: 16,
+                        polyBudget: 128,
+                        brushDensity: 12,
+                        blobInflation: 0.65,
+                      })
+                      commitVectorSourceEdit()
                     }
                   }}
                 >
@@ -1384,21 +1436,34 @@ export function SidePanel() {
               </div>
               <SideSlider
                 label="Extrude depth"
-                value={selectedSketchSource?.extrudeDepth ?? extrudeAmount}
-                display={String(Math.round(selectedSketchSource?.extrudeDepth ?? extrudeAmount))}
+                value={
+                  selectedSketchSource?.extrudeDepth ??
+                  selectedVectorSource?.extrudeDepth ??
+                  extrudeAmount
+                }
+                display={String(
+                  Math.round(
+                    selectedSketchSource?.extrudeDepth ??
+                      selectedVectorSource?.extrudeDepth ??
+                      extrudeAmount
+                  )
+                )}
                 min={-256}
                 max={256}
                 step={1}
                 onChange={(value) => {
                   setExtrudeAmount(value)
                   if (selectedSketchSource) updateSelectedSketchSource({ extrudeDepth: value })
+                  else if (selectedVectorSource) updateSelectedVectorSource({ extrudeDepth: value })
                 }}
                 onCommit={
                   selectedSketchSource
                     ? commitSketchSourceEdit
-                    : selectedExtrudableDoodle
-                      ? commitExtrudeDepth
-                      : undefined
+                    : selectedVectorSource
+                      ? commitVectorSourceEdit
+                      : selectedExtrudableDoodle
+                        ? commitExtrudeDepth
+                        : undefined
                 }
               />
               {selectedExtrudableDoodle && (
@@ -1407,19 +1472,35 @@ export function SidePanel() {
                 </p>
               )}
               {((selectedSketchSource?.kind === 'soft' && selectedSketchSource.isClosed) ||
-                (!selectedSketchSource && strokeMode === 'blob')) && (
+                (selectedVectorSource?.strokeMode === 'blob' && selectedVectorSource.path.closed) ||
+                (!selectedSketchSource && !selectedVectorSource && strokeMode === 'blob')) && (
                 <SideSlider
                   label="Inflation"
-                  value={selectedSketchSource?.inflation ?? blobInflation}
-                  display={`${Math.round((selectedSketchSource?.inflation ?? blobInflation) * 100)}%`}
+                  value={
+                    selectedSketchSource?.inflation ??
+                    selectedVectorSource?.blobInflation ??
+                    blobInflation
+                  }
+                  display={`${Math.round(
+                    (selectedSketchSource?.inflation ??
+                      selectedVectorSource?.blobInflation ??
+                      blobInflation) * 100
+                  )}%`}
                   min={0}
                   max={1}
                   step={0.05}
                   onChange={(value) => {
                     setBlobInflation(value)
                     if (selectedSketchSource) updateSelectedSketchSource({ inflation: value })
+                    else if (selectedVectorSource) updateSelectedVectorSource({ blobInflation: value })
                   }}
-                  onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
+                  onCommit={
+                    selectedSketchSource
+                      ? commitSketchSourceEdit
+                      : selectedVectorSource
+                        ? commitVectorSourceEdit
+                        : undefined
+                  }
                 />
               )}
               {selectedSketchSource?.kind === 'path' && (
@@ -1471,7 +1552,7 @@ export function SidePanel() {
                 <div className="hair-draw-options path-draw-options">
                   <div className="hair-draw-options-heading"><span>Capsule precision</span><span className="muted">Selected</span></div>
                   <SideSlider label="Radius" value={Math.abs(selectedSketchSource.extrudeDepth)} display={String(Math.round(Math.abs(selectedSketchSource.extrudeDepth)))} min={2} max={128} step={1} onChange={(value)=>updateSelectedSketchSource({extrudeDepth:value})} onCommit={commitSketchSourceEdit}/>
-                  <SideSlider label="Round sides" value={Math.max(12,selectedSketchSource.pathRadialSegments ?? 12)} display={String(Math.max(12,selectedSketchSource.pathRadialSegments ?? 12))} min={12} max={24} step={1} onChange={(value)=>updateSelectedSketchSource({pathRadialSegments:value})} onCommit={commitSketchSourceEdit}/>
+                  <SideSlider label="Round sides" value={Math.max(12, Math.min(20, selectedSketchSource.pathRadialSegments ?? 12))} display={String(Math.max(12, Math.min(20, selectedSketchSource.pathRadialSegments ?? 12)))} min={12} max={20} step={1} onChange={(value)=>updateSelectedSketchSource({pathRadialSegments:value})} onCommit={commitSketchSourceEdit}/>
                 </div>
               )}
               {selectedSketchSource?.kind === 'ribbon' && (
@@ -1502,31 +1583,105 @@ export function SidePanel() {
               )}
               <SideSlider
                 label="Poly budget"
-                value={selectedSketchSource?.polyBudget ?? polyBudget}
-                display={String(selectedSketchSource?.polyBudget ?? polyBudget)}
+                value={selectedSketchSource?.polyBudget ?? selectedVectorSource?.polyBudget ?? polyBudget}
+                display={String(selectedSketchSource?.polyBudget ?? selectedVectorSource?.polyBudget ?? polyBudget)}
                 min={24}
-                max={selectedSketchSource ? 512 : 256}
+                max={selectedSketchSource || selectedVectorSource ? 512 : 256}
                 step={4}
                 warn={!!overBudget}
                 onChange={(value) => {
                   setPolyBudget(value)
                   if (selectedSketchSource) updateSelectedSketchSource({ polyBudget: value })
+                  else if (selectedVectorSource) updateSelectedVectorSource({ polyBudget: value })
                 }}
-                onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
+                onCommit={
+                  selectedSketchSource
+                    ? commitSketchSourceEdit
+                    : selectedVectorSource
+                      ? commitVectorSourceEdit
+                      : undefined
+                }
               />
               <SideSlider
-                label={selectedSketchSource ? 'Sketch thickness' : 'Brush density'}
-                value={selectedSketchSource?.brushDensity ?? brushDensity}
-                display={String(selectedSketchSource?.brushDensity ?? brushDensity)}
+                label={selectedSketchSource || selectedVectorSource ? 'Stroke thickness' : 'Brush density'}
+                value={selectedSketchSource?.brushDensity ?? selectedVectorSource?.brushDensity ?? brushDensity}
+                display={String(selectedSketchSource?.brushDensity ?? selectedVectorSource?.brushDensity ?? brushDensity)}
                 min={2}
-                max={selectedSketchSource ? 48 : 24}
+                max={selectedSketchSource || selectedVectorSource ? 48 : 24}
                 step={1}
                 onChange={(value) => {
                   setBrushDensity(value)
                   if (selectedSketchSource) updateSelectedSketchSource({ brushDensity: value })
+                  else if (selectedVectorSource) updateSelectedVectorSource({ brushDensity: value })
                 }}
-                onCommit={selectedSketchSource ? commitSketchSourceEdit : undefined}
+                onCommit={
+                  selectedSketchSource
+                    ? commitSketchSourceEdit
+                    : selectedVectorSource
+                      ? commitVectorSourceEdit
+                      : undefined
+                }
               />
+              {selectedVectorSource?.strokeMode === 'centerline' && (
+                <div className="hair-draw-options path-draw-options">
+                  <div className="hair-draw-options-heading"><span>Path output</span><span className="muted">Selected</span></div>
+                  <select
+                    className="side-select"
+                    value={selectedVectorSource.pathOutput ?? 'tube'}
+                    onChange={(e) => {
+                      updateSelectedVectorSource({ pathOutput: e.target.value as NonNullable<typeof selectedVectorSource.pathOutput> })
+                      commitVectorSourceEdit()
+                    }}
+                  >
+                    <option value="tube">Tube</option>
+                    <option value="ribbon">Ribbon</option>
+                    <option value="chain">Chain</option>
+                    <option value="vine">Vine</option>
+                    <option value="rope">Rope</option>
+                    <option value="cards">2D Cards</option>
+                    <option value="profile-sweep">Profile Sweep</option>
+                  </select>
+                  <SideSlider label="Start width" value={selectedVectorSource.pathStartScale ?? 1} display={`${Math.round((selectedVectorSource.pathStartScale ?? 1) * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathStartScale: v })} onCommit={commitVectorSourceEdit} />
+                  <SideSlider label="End width" value={selectedVectorSource.pathEndScale ?? 1} display={`${Math.round((selectedVectorSource.pathEndScale ?? 1) * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathEndScale: v })} onCommit={commitVectorSourceEdit} />
+                  {(selectedVectorSource.pathOutput ?? 'tube') === 'tube' && (
+                    <>
+                      <SideSlider label="Radius" value={selectedVectorSource.pathRadiusScale ?? 1} display={`${Math.round((selectedVectorSource.pathRadiusScale ?? 1) * 100)}%`} min={0.25} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathRadiusScale: v })} onCommit={commitVectorSourceEdit} />
+                      <SideSlider label="Round sides" value={selectedVectorSource.pathRadialSegments ?? 8} display={String(selectedVectorSource.pathRadialSegments ?? 8)} min={3} max={24} step={1} onChange={(v) => updateSelectedVectorSource({ pathRadialSegments: v })} onCommit={commitVectorSourceEdit} />
+                    </>
+                  )}
+                </div>
+              )}
+              {(selectedVectorSource?.strokeMode === 'ribbon' || selectedVectorSource?.strokeMode === 'tapered-tube') && (
+                <div className="hair-draw-options ribbon-draw-options">
+                  <div className="hair-draw-options-heading"><span>Ribbon shape</span><span className="muted">Selected</span></div>
+                  <SideSlider label="Width" value={selectedVectorSource.ribbonWidthScale ?? 1} display={`${Math.round((selectedVectorSource.ribbonWidthScale ?? 1) * 100)}%`} min={0.25} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ ribbonWidthScale: v })} onCommit={commitVectorSourceEdit} />
+                  <SideSlider label="End taper" value={selectedVectorSource.ribbonTaper ?? 0.35} display={`${Math.round((selectedVectorSource.ribbonTaper ?? 0.35) * 100)}%`} min={0.05} max={0.49} step={0.01} onChange={(v) => updateSelectedVectorSource({ ribbonTaper: v })} onCommit={commitVectorSourceEdit} />
+                  <label className="side-checkbox">
+                    <input type="checkbox" checked={selectedVectorSource.ribbonFlat ?? false} onChange={(e) => { updateSelectedVectorSource({ ribbonFlat: e.target.checked }); commitVectorSourceEdit() }} />
+                    <span>Flat double-sided card</span>
+                  </label>
+                </div>
+              )}
+              {selectedVectorSource?.strokeMode?.startsWith('hair-') && (
+                <div className="hair-draw-options">
+                  <div className="hair-draw-options-heading"><span>Hair tip</span><span className="muted">Selected</span></div>
+                  <SideBtnGroup cols={2}>
+                    {(['pointed', 'square'] as const).map((tip) => (
+                      <button
+                        key={tip}
+                        type="button"
+                        className={`side-btn ${(selectedVectorSource.hairTipStyle ?? 'pointed') === tip ? 'active' : ''}`}
+                        onClick={() => {
+                          updateSelectedVectorSource({ hairTipStyle: tip })
+                          commitVectorSourceEdit()
+                        }}
+                      >
+                        {tip}
+                      </button>
+                    ))}
+                  </SideBtnGroup>
+                </div>
+              )}
               <p className="side-color-hint muted">
                 Poly budget caps mesh complexity. Brush density sets stroke thickness and default inflate depth.
               </p>
@@ -1780,6 +1935,14 @@ export function SidePanel() {
                 Bend
               </button>
               <button
+                className={`side-btn ${activeTool === 'round' ? 'active' : ''}`}
+                onClick={() => setActiveTool('round')}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title="Rounded — click in a viewport, then move the mouse to blend the selection toward a sphere"
+              >
+                Rounded
+              </button>
+              <button
                 className={`side-btn ${isSelectTool ? 'active' : ''}`}
                 onClick={activateSelectTool}
                 title="Select (G) · click and drag (1 for object mode)"
@@ -1789,8 +1952,15 @@ export function SidePanel() {
             </SideBtnGroup>
             {activeTool === 'bend' && (
               <p className="side-color-hint muted">
-                Click and drag on the object to place the bend axis. Drag vertically to set the angle.
-                Double-click to apply · Esc to cancel.
+                Drag the bend span across the object, then move vertically to set the arc.
+                Ctrl snaps 15° · Shift precision · Enter/double-click apply · right-click/Esc cancel.
+                {bendDraft ? ` Angle ${Math.round((bendDraft.angle * 180) / Math.PI)}°.` : ''}
+              </p>
+            )}
+            {activeTool === 'round' && (
+              <p className="side-color-hint muted">
+                Click in a viewport, then move the mouse to blend the selected object or components
+                toward a sphere. Type a percentage · Shift precision · Ctrl snap · click/Enter apply.
               </p>
             )}
             <div className="side-create-label">View plane</div>

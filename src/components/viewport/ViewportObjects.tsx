@@ -1,6 +1,6 @@
 import { ObjectNode } from '../ObjectNode'
 import type { SceneObject } from '../../mesh/HalfEdgeMesh'
-import type { SelectionMode } from '../../store/appStore'
+import { useAppStore, type SelectionMode } from '../../store/appStore'
 import type { ViewportDisplayMode } from '../../rendering/viewportDisplay'
 import { isSceneObjectVisible } from '../../scene/objectVisibility'
 
@@ -25,9 +25,15 @@ export function ViewportObjects({
   viewportDisplayMode: ViewportDisplayMode
   viewportXRay: boolean
 }) {
+  // Hide the doodle being path-edited so handles/preview are not doubled.
+  const editingVectorObjectId = useAppStore((s) => s.vectorPenDraft?.editingObjectId ?? null)
+
   return (
     <>
-      {objects.filter(isSceneObjectVisible).map((obj) => (
+      {objects
+        .filter(isSceneObjectVisible)
+        .filter((obj) => obj.id !== editingVectorObjectId)
+        .map((obj) => (
         <ObjectNode
           key={obj.id}
           object={obj}

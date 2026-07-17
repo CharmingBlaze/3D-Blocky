@@ -452,7 +452,7 @@ function generateForIntent(
       })
       if (!lathe || lathe.profile.length < 2) return null
       return generateLathe(lathe.profile, {
-        radialSegments: Math.max(8, Math.min(64, Math.round(latheRadialSegments ?? 24))),
+        radialSegments: Math.max(8, Math.min(64, Math.round(latheRadialSegments ?? 16))),
         preserveProfile: true,
         capBottom: latheCaps,
         capTop: latheCaps,
@@ -481,8 +481,8 @@ export function polylineToMesh(input: PolylineInput): SceneObject | null {
     extrudeMode = false,
     latheMode = false,
     latheCaps = false,
-    latheRadialSegments = 24,
-    latheProfileRings = 48,
+    latheRadialSegments = 16,
+    latheProfileRings = 32,
     latheSmoothing = 0.15,
     extrudeAmount,
     name,
