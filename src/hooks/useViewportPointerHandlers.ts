@@ -749,6 +749,16 @@ export function useViewportPointerHandlers({
         return
       }
 
+      // Create Mesh tools (Line / Rectangle / Polygon): right-click commits like Enter.
+      if (store.activeTool === 'poly-draw' && e.button === 2) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (store.polyDrawDraft) {
+          store.polyDrawFinish()
+        }
+        return
+      }
+
       if (store.activeTool === 'loop-cut' && e.button === 2) {
         if (store.loopCutDraft) {
           e.preventDefault()

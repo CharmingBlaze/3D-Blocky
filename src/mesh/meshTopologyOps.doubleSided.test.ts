@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { expandFaceToPlanarRegion } from './faceGroups'
 import { prepareSceneObject } from './objectTransform'
 import { makeSelectionDoubleSided } from './meshTopologyOps'
 
@@ -44,7 +45,22 @@ describe('makeSelectionDoubleSided', () => {
     expect(out.faces[0]).toEqual([0, 1, 2, 3])
     expect(out.faces[1]).toEqual([3, 2, 1, 0])
     expect(out.faceUvIndices?.[1]).toEqual([3, 2, 1, 0])
-    expect(out.faceGroups?.[0]).toEqual([0, 1])
+    // Front and reverse stay in separate groups so either side can be selected alone.
+    expect(out.faceGroups?.[0]).toEqual([0])
+    expect(out.faceGroups?.[1]).toEqual([1])
+  })
+
+  it('keeps front and reverse faces independently selectable after doubling', () => {
+    const obj = planeQuad()
+    const { object: out } = makeSelectionDoubleSided(
+      obj,
+      { objectId: obj.id, vertices: [], edges: [], faces: [0] },
+      'face'
+    )
+    expect(expandFaceToPlanarRegion(out, 0)).toEqual([0])
+    expect(expandFaceToPlanarRegion(out, 1)).toEqual([1])
+    expect(makeSelectionDoubleSided(out, { objectId: obj.id, vertices: [], edges: [], faces: [0] }, 'face').addedFaces).toEqual([])
+    expect(makeSelectionDoubleSided(out, { objectId: obj.id, vertices: [], edges: [], faces: [1] }, 'face').addedFaces).toEqual([])
   })
 
   it('supports multi-face selection', () => {

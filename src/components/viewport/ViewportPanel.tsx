@@ -341,7 +341,11 @@ export function ViewportPanel({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onContextMenu={
-        view === 'perspective' || activeTool === 'knife' || activeTool === 'mirror-knife'
+        view === 'perspective' ||
+        activeTool === 'knife' ||
+        activeTool === 'mirror-knife' ||
+        activeTool === 'poly-draw' ||
+        activeTool === 'extrude'
           ? (e) => e.preventDefault()
           : undefined
       }

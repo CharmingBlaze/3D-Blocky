@@ -49,26 +49,41 @@ export function MeshModalController() {
     }
 
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return
       }
       if (e.target instanceof HTMLElement && e.target.closest('.side-panel, .tool-ring-overlay')) {
         return
       }
+      // Mesh modal tools (Push/Pull and other modal edits): right-click commits.
+      if (e.button === 2 && meshModal) {
+        e.preventDefault()
+        e.stopPropagation()
+        confirmMeshModal()
+        return
+      }
+      if (e.button !== 0) return
       e.preventDefault()
       if (meshModal) confirmMeshModal()
       else if (objectTransformModal) confirmObjectTransformModal()
     }
 
+    const onContextMenu = (e: MouseEvent) => {
+      if (!meshModal) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
     window.addEventListener('pointermove', onMove)
     window.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('contextmenu', onContextMenu, true)
 
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('wheel', onWheel)
       window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('contextmenu', onContextMenu, true)
     }
   }, [
     activeModal,
@@ -89,12 +104,12 @@ export function MeshModalController() {
       : formatModalValue(meshModal.op, meshModal.value)
     const hint =
       meshModal.op === 'extrude'
-        ? 'Move along the region normal · X/Y/Z constrain · type distance · Ctrl snap · Shift precision · click/Enter confirm · Esc cancel'
+        ? 'Move along the region normal · X/Y/Z constrain · type distance · Ctrl snap · Shift precision · click/right-click/Enter confirm · Esc cancel'
         : meshModal.op === 'rotate'
-          ? 'Move mouse or type degrees · X/Y/Z constrain axis · Ctrl snap · click/Enter confirm · Esc cancel'
+          ? 'Move mouse or type degrees · X/Y/Z constrain axis · Ctrl snap · click/right-click/Enter confirm · Esc cancel'
           : meshModal.op === 'scale'
-            ? 'Move mouse or type factor · X/Y/Z constrain axis · negative mirrors · click/Enter confirm · Esc cancel'
-            : 'Move mouse · scroll to adjust · click to confirm · Esc cancel'
+            ? 'Move mouse or type factor · X/Y/Z constrain axis · negative mirrors · click/right-click/Enter confirm · Esc cancel'
+            : 'Move mouse · scroll to adjust · click/right-click to confirm · Esc cancel'
 
     return (
       <div className="mesh-modal-hud" role="status">

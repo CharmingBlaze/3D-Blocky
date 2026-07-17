@@ -199,34 +199,64 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
     },
 
     makeSelectedDoubleSided: () => {
-      const { meshSelection, objects, selectionMode } = store()
-      if (!meshSelection || selectionMode === 'object') return
-      const obj = objects.find((o) => o.id === meshSelection.objectId)
-      if (!obj || obj.topologyLocked) return
-      const { object: updated, addedFaces } = makeSelectionDoubleSided(
-        obj,
+      const {
         meshSelection,
-        selectionMode
-      )
-      if (addedFaces.length === 0) return
-      store().updateObject(obj.id, {
-        faces: updated.faces,
-        faceUvIndices: updated.faceUvIndices,
-        faceColorIndices: updated.faceColorIndices,
-        faceColors: updated.faceColors,
-        faceGroups: updated.faceGroups,
-        faceMaterials: updated.faceMaterials,
-      })
-      // Keep original selection and include the new back faces for multi-select follow-up.
-      if (selectionMode === 'face') {
-        setPartial({
-          meshSelection: {
-            ...meshSelection,
-            faces: [...new Set([...meshSelection.faces, ...addedFaces])],
-          },
+        objects,
+        selectionMode,
+        selectionObjectIds,
+        selectedObjectId,
+      } = store()
+
+      const applyToObject = (
+        obj: SceneObject,
+        selection: MeshComponentSelection,
+        mode: SelectionMode
+      ): boolean => {
+        if (obj.topologyLocked) return false
+        const { object: updated, addedFaces } = makeSelectionDoubleSided(obj, selection, mode)
+        if (addedFaces.length === 0) return false
+        store().updateObject(obj.id, {
+          faces: updated.faces,
+          faceUvIndices: updated.faceUvIndices,
+          faceColorIndices: updated.faceColorIndices,
+          faceColors: updated.faceColors,
+          faceGroups: updated.faceGroups,
+          faceMaterials: updated.faceMaterials,
         })
+        return true
       }
-      store().commitHistory('Make double sided')
+
+      // Face/edge/vertex selection: duplicate only the picked components so a single
+      // front or back face can be made double-sided without touching the rest.
+      if (meshSelection && selectionMode !== 'object' && selectionHasComponents(meshSelection)) {
+        const obj = objects.find((o) => o.id === meshSelection.objectId)
+        if (!obj) return
+        if (!applyToObject(obj, meshSelection, selectionMode)) return
+        // Keep the original front/back selection; reverse faces stay independently pickable.
+        store().commitHistory('Make double sided')
+        return
+      }
+
+      // Object selection fallback: make every face on the selected objects double-sided.
+      const ids =
+        selectionObjectIds.length > 0
+          ? selectionObjectIds
+          : selectedObjectId
+            ? [selectedObjectId]
+            : []
+      let changed = false
+      for (const id of ids) {
+        const obj = objects.find((o) => o.id === id)
+        if (!obj || obj.faces.length === 0) continue
+        const allFaces: MeshComponentSelection = {
+          objectId: id,
+          vertices: [],
+          edges: [],
+          faces: obj.faces.map((_, fi) => fi),
+        }
+        if (applyToObject(obj, allFaces, 'face')) changed = true
+      }
+      if (changed) store().commitHistory('Make double sided')
     },
 
     transformSelectionInViewPlane: (op) => {

@@ -929,7 +929,7 @@ export function SidePanel() {
 
           <SideSection title="Create" columns={2} order={10}>
             <div className="side-create-label">Mesh tools</div>
-            <SideBtnGroup cols={4}>
+            <SideBtnGroup cols={3}>
               <button
                 type="button"
                 className={`side-btn ${activeTool === 'smart' ? 'active' : ''}`}
@@ -946,10 +946,10 @@ export function SidePanel() {
                   onClick={() => setPolyDrawMode(m.id)}
                   title={
                     m.id === 'poly'
-                      ? 'Draw connected lines; close a loop to create a face'
+                      ? 'Draw connected lines; close a loop or right-click/Enter to create a face'
                       : m.id === 'rectangle'
-                        ? 'Click two opposite corners to create a rectangle face'
-                        : 'Click a centre, then click the radius to create a polygon face'
+                        ? 'Click two opposite corners to create a rectangle face; right-click/Enter commits'
+                        : 'Click a centre, then click the radius to create a polygon face; right-click/Enter commits'
                   }
                 >
                   {m.label}
@@ -962,14 +962,31 @@ export function SidePanel() {
                   setSelectionMode('face')
                   setActiveTool('extrude')
                 }}
-                title="Click and drag a face to push or pull it; Escape cancels"
+                title="Click and drag a face to push or pull it; left- or right-click confirms, Escape cancels"
               >
                 Push/Pull
               </button>
+              <button
+                type="button"
+                className="side-btn"
+                onClick={() => {
+                  if (selectionMode === 'object') setSelectionMode('face')
+                  makeSelectedDoubleSided()
+                }}
+                disabled={
+                  !!selectedObj?.topologyLocked ||
+                  (!selectionHasComponents(meshSelection) && !hasObjectSelection)
+                }
+                title="Duplicate the selected face (or all faces on the selected object) with a reverse side so it renders from front and back. Front and back stay separately selectable."
+              >
+                Double Sided
+              </button>
             </SideBtnGroup>
-            <p className="side-color-hint muted">
-              Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face.
-            </p>
+            {(activeTool === 'smart' || activeTool === 'poly-draw' || activeTool === 'extrude') && (
+              <p className="side-color-hint muted">
+                Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face. Right-click commits in-progress mesh tools. Select a face, then Double Sided to see both sides.
+              </p>
+            )}
             <div className="side-create-label">Drawing options</div>
             <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
@@ -1725,7 +1742,7 @@ export function SidePanel() {
             )}
             {selectionMode === 'face' && (
               <p className="side-color-hint muted">
-                Select faces and pick a color from the palette to recolor them.
+                Select faces and pick a color from the palette to recolor them. Double Sided duplicates a selected front or back face so it renders from both sides.
               </p>
             )}
           </SideSection>
@@ -1884,11 +1901,10 @@ export function SidePanel() {
                 className="side-btn"
                 onClick={makeSelectedDoubleSided}
                 disabled={
-                  selectionMode === 'object' ||
-                  !selectionHasComponents(meshSelection) ||
-                  !!selectedObj?.topologyLocked
+                  !!selectedObj?.topologyLocked ||
+                  (!selectionHasComponents(meshSelection) && !hasObjectSelection)
                 }
-                title="Face mode: select one or more faces, then duplicate them with reversed normals (shared UVs) so they render from both sides"
+                title="Duplicate selected faces (or all faces on the selected object) with reversed normals so they render from both sides. Front and back remain separately selectable."
               >
                 Double Sided
               </button>

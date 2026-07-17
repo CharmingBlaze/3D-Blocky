@@ -969,16 +969,8 @@ export function makeSelectionDoubleSided(
     }
 
     if (newFaceGroups) {
-      // Keep front+back in the same authored group when present; otherwise own group.
-      let grouped = false
-      for (const group of newFaceGroups) {
-        if (group.includes(fi)) {
-          group.push(newFi)
-          grouped = true
-          break
-        }
-      }
-      if (!grouped) newFaceGroups.push([newFi])
+      // Keep the reverse face as its own group so front and back stay independently selectable.
+      newFaceGroups.push([newFi])
     }
   }
 
