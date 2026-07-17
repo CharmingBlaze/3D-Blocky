@@ -184,7 +184,7 @@ export const cadMeshToolsInitialState: CadMeshToolsLayoutState = {
   polyDrawMode: 'rectangle',
   polyDrawDraft: null,
   polyDrawHover: null,
-  polyDrawSnapVertex: false,
+  polyDrawSnapVertex: true,
   polyDrawSnapEdge: false,
   polyDrawSnapGrid: false,
   lastPolyDrawFace: null,

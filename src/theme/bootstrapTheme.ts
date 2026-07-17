@@ -9,6 +9,6 @@ export function readStoredThemeId(): ThemeId {
   } catch {
     /* ignore */
   }
-  // Fresh installs and cleared storage always start on Quadlo Default.
+  // Fresh installs and cleared storage always start on Quadlo Pro.
   return DEFAULT_THEME_ID
 }
