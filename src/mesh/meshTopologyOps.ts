@@ -718,8 +718,15 @@ export function subdivideObject(
   selection: MeshComponentSelection | null,
   mode: SelectionMode
 ): SceneObject {
-  const faceSet = facesToSubdivide(obj, selection, mode)
-  if (faceSet.size === 0) return cloneSceneObject(obj)
+  const selected = facesToSubdivide(obj, selection, mode)
+  if (selected.size === 0) return cloneSceneObject(obj)
+
+  // Keep double-sided twins in lockstep so reverse children share verts/centers.
+  const faceSet = new Set(selected)
+  for (const fi of selected) {
+    const twin = findReverseWoundFaceIndex(obj.faces, fi)
+    if (twin >= 0) faceSet.add(twin)
+  }
 
   const positions = obj.positions.map((p) => ({ ...p }))
   const faces = obj.faces.map((f) => [...f])
@@ -743,24 +750,39 @@ export function subdivideObject(
   const outColors: number[] = []
   const outMaterials = obj.faceMaterials ? [] as NonNullable<SceneObject['faceMaterials']> : undefined
   const oldToNew = new Map<number, number[]>()
+  const emitted = new Set<number>()
   let nextFi = 0
 
+  const pushFace = (face: number[], sourceFi: number) => {
+    outFaces.push(face)
+    outColors.push(faceColors[sourceFi] ?? obj.color)
+    outMaterials?.push(obj.faceMaterials?.[sourceFi] ? cloneMaterial(obj.faceMaterials[sourceFi]!) : null)
+    return nextFi++
+  }
+
   for (let fi = 0; fi < faces.length; fi++) {
-    const color = faceColors[fi]
-    if (faceSet.has(fi)) {
-      const replacements: number[] = []
-      for (const part of subdivideFaceLoop(faces[fi], positions)) {
-        outFaces.push(part)
-        outColors.push(color)
-        outMaterials?.push(obj.faceMaterials?.[fi] ? cloneMaterial(obj.faceMaterials[fi]!) : null)
-        replacements.push(nextFi++)
-      }
-      oldToNew.set(fi, replacements)
-    } else {
-      outFaces.push(faces[fi])
-      outColors.push(color)
-      outMaterials?.push(obj.faceMaterials?.[fi] ? cloneMaterial(obj.faceMaterials[fi]!) : null)
-      oldToNew.set(fi, [nextFi++])
+    if (emitted.has(fi)) continue
+
+    if (!faceSet.has(fi)) {
+      oldToNew.set(fi, [pushFace(faces[fi]!, fi)])
+      emitted.add(fi)
+      continue
+    }
+
+    const parts = subdivideFaceLoop(faces[fi]!, positions)
+    const replacements: number[] = []
+    for (const part of parts) replacements.push(pushFace(part, fi))
+    oldToNew.set(fi, replacements)
+    emitted.add(fi)
+
+    // Emit the reverse twin from the same parts (shared center + midpoints) so the
+    // sheet stays a true double-sided pair after subdivide.
+    const twin = findReverseWoundFaceIndex(faces, fi)
+    if (twin >= 0 && faceSet.has(twin) && !emitted.has(twin)) {
+      const twinReplacements: number[] = []
+      for (const part of parts) twinReplacements.push(pushFace([...part].reverse(), twin))
+      oldToNew.set(twin, twinReplacements)
+      emitted.add(twin)
     }
   }
 
@@ -882,11 +904,14 @@ export function mergeVertices(
   }
 }
 
-/** True if `faces` already contains a reverse-wound copy of `face` (any start corner). */
-function hasReverseWoundFace(faces: number[][], face: number[]): boolean {
-  if (face.length < 3) return false
+/** Index of a reverse-wound twin of `faceIndex`, or -1. */
+function findReverseWoundFaceIndex(faces: number[][], faceIndex: number): number {
+  const face = faces[faceIndex]
+  if (!face || face.length < 3) return -1
   const rev = [...face].reverse()
-  for (const other of faces) {
+  for (let fi = 0; fi < faces.length; fi++) {
+    if (fi === faceIndex) continue
+    const other = faces[fi]!
     if (other.length !== rev.length) continue
     for (let start = 0; start < other.length; start++) {
       let match = true
@@ -896,10 +921,17 @@ function hasReverseWoundFace(faces: number[][], face: number[]): boolean {
           break
         }
       }
-      if (match) return true
+      if (match) return fi
     }
   }
-  return false
+  return -1
+}
+
+/** True if `faces` already contains a reverse-wound copy of `face` (any start corner). */
+function hasReverseWoundFace(faces: number[][], face: number[]): boolean {
+  // Probe with a synthetic index against the existing list.
+  const probe = faces.length
+  return findReverseWoundFaceIndex([...faces, face], probe) >= 0
 }
 
 export interface MakeDoubleSidedResult {

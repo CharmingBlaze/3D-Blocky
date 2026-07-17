@@ -291,14 +291,26 @@ function extrudeSelectedEdges(
       let a=rawA,b=rawB,color=obj.color
       for(const fi of adjacentFaces){const face=obj.faces[fi]!;for(let i=0;i<face.length;i++){const x=face[i]!,y=face[(i+1)%face.length]!;if((x===rawA&&y===rawB)||(x===rawB&&y===rawA)){a=x;b=y;color=obj.faceColors[fi]??obj.color;break}}}
       const na=oldToNew.get(a)!,nb=oldToNew.get(b)!
-      faces.push([a,b,nb,na]);faceColors.push(color);if(faceGroups)faceGroups.push([])
+      // Edge extrude walls are zero-thickness sheets — emit front + reverse so they
+      // render and pick from both sides without a separate Make Double Sided step.
+      const front=[a,b,nb,na]
+      const frontFi=faces.length
+      faces.push(front);faceColors.push(color);if(faceGroups)faceGroups.push([frontFi])
+      const revFi=faces.length
+      faces.push([...front].reverse());faceColors.push(color);if(faceGroups)faceGroups.push([revFi])
       resultingEdges.push(edgeKey(na,nb))
-      if(hasUvs){const base=uvs.length;uvs.push({u:0,v:0},{u:1,v:0},{u:1,v:1},{u:0,v:1});faceUvIndices.push([base,base+1,base+2,base+3])}
+      if(hasUvs){
+        const base=uvs.length
+        uvs.push({u:0,v:0},{u:1,v:0},{u:1,v:1},{u:0,v:1})
+        const frontUv=[base,base+1,base+2,base+3]
+        faceUvIndices.push(frontUv,[...frontUv].reverse())
+      }
     }
   }
+  const tipVertices = [...new Set(resultingEdges.flatMap((key) => parseEdgeKey(key)))]
   return {
     ...obj,positions,faces,faceColors,faceGroups,uvs:hasUvs?uvs:obj.uvs,faceUvIndices:hasUvs?faceUvIndices:obj.faceUvIndices,
-    resultingSelection:{objectId:obj.id,vertices:[],edges:resultingEdges,faces:[]},
+    resultingSelection:{objectId:obj.id,vertices:tipVertices,edges:resultingEdges,faces:[]},
   }
 }
 

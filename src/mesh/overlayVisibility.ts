@@ -90,6 +90,39 @@ export function isFaceFrontFacing(
   return _normal.dot(_viewDir) > threshold
 }
 
+/** True when `b` is the same loop as `a` with opposite winding (double-sided twin). */
+export function facesAreReverseWinding(a: number[], b: number[]): boolean {
+  if (a.length < 3 || a.length !== b.length) return false
+  const rev = a.slice().reverse()
+  for (let start = 0; start < b.length; start++) {
+    let match = true
+    for (let i = 0; i < rev.length; i++) {
+      if (b[(start + i) % b.length] !== rev[i]) {
+        match = false
+        break
+      }
+    }
+    if (match) return true
+  }
+  return false
+}
+
+/**
+ * Naked edges, or thin double-sided sheets (exactly two reverse-wound faces).
+ * Used so extruded tip verts/edges stay pickable after Make Double Sided.
+ */
+export function isBoundaryOrDoubleSidedEdge(
+  object: SceneObject,
+  edgeFaceIndices: number[] | undefined
+): boolean {
+  if (!edgeFaceIndices || edgeFaceIndices.length <= 1) return true
+  if (edgeFaceIndices.length !== 2) return false
+  const fa = object.faces[edgeFaceIndices[0]!]
+  const fb = object.faces[edgeFaceIndices[1]!]
+  if (!fa || !fb) return false
+  return facesAreReverseWinding(fa, fb)
+}
+
 export function buildVertexToFacesMap(object: SceneObject): Map<number, number[]> {
   return getMeshAdjacency(object).vertexToFaces
 }

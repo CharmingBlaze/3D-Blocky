@@ -11,7 +11,9 @@ import {
   validateCutTopology,
   subdivideObject,
 } from './meshTopologyOps'
+import { extrudeMeshSelection } from './meshOps'
 import { edgeKey } from './meshSelection'
+import { getMeshAdjacency } from './meshAdjacencyCache'
 import { identityFaceGroups } from './faceGroups'
 
 function makeBox() {
@@ -99,6 +101,95 @@ describe('meshTopologyOps - Blender-style subdivide', () => {
     expect(subdivided.faces.length).toBe(9)
     expect(subdivided.faces.slice(0, 4).every((face) => face.length === 4)).toBe(true)
     expect(validateCutTopology(subdivided)).toEqual([])
+  })
+
+  it('keeps double-sided edge-extrude walls as reverse twins after subdivide', () => {
+    const source = makeBox()
+    const { uniqueEdges } = getMeshAdjacency(source)
+    const topEdge = uniqueEdges.find(([a, b]) => {
+      const pa = source.positions[a]!
+      const pb = source.positions[b]!
+      return Math.abs(pa.y - 1) < 1e-6 && Math.abs(pb.y - 1) < 1e-6
+    })!
+    const extruded = extrudeMeshSelection(
+      source,
+      { objectId: source.id, vertices: [], edges: [edgeKey(topEdge[0], topEdge[1])], faces: [] },
+      'edge',
+      1
+    )
+    const tipEdge = extruded.resultingSelection!.edges[0]!
+    const tipVerts = extruded.resultingSelection!.vertices
+    const wallFront = extruded.faces.length - 2
+    const wallBack = extruded.faces.length - 1
+    expect(extruded.faces[wallBack]).toEqual([...(extruded.faces[wallFront] ?? [])].reverse())
+    expect(extruded.faceGroups?.flat().sort((a, b) => a - b)).toEqual(
+      extruded.faces.map((_, i) => i)
+    )
+
+    // Selecting only one side still pulls the reverse twin through subdivide.
+    const oneSide = subdivideObject(
+      extruded,
+      { objectId: source.id, vertices: [], edges: [], faces: [wallFront] },
+      'face'
+    )
+    expect(oneSide.faces.length).toBe(extruded.faces.length - 2 + 8)
+    expect(oneSide.faceGroups?.flat().sort((a, b) => a - b)).toEqual(
+      oneSide.faces.map((_, i) => i)
+    )
+
+    let twinPairs = 0
+    for (let fi = 0; fi < oneSide.faces.length; fi++) {
+      for (let fj = fi + 1; fj < oneSide.faces.length; fj++) {
+        const a = oneSide.faces[fi]!
+        const b = oneSide.faces[fj]!
+        if (a.length !== b.length) continue
+        const rev = [...a].reverse()
+        for (let start = 0; start < b.length; start++) {
+          if (rev.every((vi, i) => b[(start + i) % b.length] === vi)) {
+            twinPairs++
+            break
+          }
+        }
+      }
+    }
+    expect(twinPairs).toBe(4)
+
+    // Tip verts stay on thin double-sided silhouette edges after subdivide.
+    const byEdge = subdivideObject(
+      extruded,
+      { objectId: source.id, vertices: [], edges: [tipEdge], faces: [] },
+      'edge'
+    )
+    const { edgeToFaces } = getMeshAdjacency(byEdge)
+    for (const vi of tipVerts) {
+      const remapped = byEdge.positions.findIndex(
+        (p) =>
+          Math.abs(p.x - extruded.positions[vi]!.x) < 1e-9 &&
+          Math.abs(p.y - extruded.positions[vi]!.y) < 1e-9 &&
+          Math.abs(p.z - extruded.positions[vi]!.z) < 1e-9
+      )
+      expect(remapped).toBeGreaterThanOrEqual(0)
+      let hasTwinEdge = false
+      for (const face of byEdge.faces) {
+        for (let i = 0; i < face.length; i++) {
+          const a = face[i]!
+          const b = face[(i + 1) % face.length]!
+          if (a !== remapped && b !== remapped) continue
+          const adj = edgeToFaces.get(edgeKey(a, b)) ?? []
+          if (adj.length !== 2) continue
+          const fa = byEdge.faces[adj[0]!]!
+          const fb = byEdge.faces[adj[1]!]!
+          const rev = [...fa].reverse()
+          for (let start = 0; start < fb.length; start++) {
+            if (rev.every((v, idx) => fb[(start + idx) % fb.length] === v)) {
+              hasTwinEdge = true
+              break
+            }
+          }
+        }
+      }
+      expect(hasTwinEdge).toBe(true)
+    }
   })
 })
 

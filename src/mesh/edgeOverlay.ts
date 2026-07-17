@@ -1,7 +1,11 @@
 import type { SceneObject } from './HalfEdgeMesh'
 import { edgeKey, parseEdgeKey } from './meshSelection'
 import { collectUniqueEdges } from './meshTopology'
-import { buildEdgeToFacesMap, isFaceFrontFacing } from './overlayVisibility'
+import {
+  buildEdgeToFacesMap,
+  isBoundaryOrDoubleSidedEdge,
+  isFaceFrontFacing,
+} from './overlayVisibility'
 import type * as THREE from 'three'
 
 export type EdgeOverlay = {
@@ -37,5 +41,8 @@ export function isEdgeOverlayPickable(
   const pair = 'edge' in edge ? edge.edge : edge
   const faces = edgeFaces.get(edgeKey(pair[0], pair[1]))
   if (!faces || faces.length === 0) return true
-  return faces.some((fi) => isFaceFrontFacing(object, fi, camera))
+  if (faces.some((fi) => isFaceFrontFacing(object, fi, camera))) return true
+  // Thin double-sided sheets share one "outward" facing for both twins, so keep
+  // their silhouette edges pickable the same way naked boundary edges are.
+  return isBoundaryOrDoubleSidedEdge(object, faces)
 }

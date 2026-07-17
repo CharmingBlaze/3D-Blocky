@@ -305,9 +305,22 @@ export function remapFaceGroupsAfterReplace(
   oldToNew: Map<number, number[]>
 ): number[][] {
   const base = faceGroups ?? identityFaceGroups(faceCount)
-  return base
+  const remapped = base
     .map((group) => group.flatMap((fi) => oldToNew.get(fi) ?? []))
     .filter((g) => g.length > 0)
+
+  // Cover replacement faces whose source was missing from authored groups
+  // (empty edge-extrude groups, etc.) so Subdivide keeps every face selectable.
+  const covered = new Set<number>()
+  for (const group of remapped) for (const fi of group) covered.add(fi)
+  let maxNew = -1
+  for (const replacements of oldToNew.values()) {
+    for (const fi of replacements) maxNew = Math.max(maxNew, fi)
+  }
+  for (let fi = 0; fi <= maxNew; fi++) {
+    if (!covered.has(fi)) remapped.push([fi])
+  }
+  return remapped
 }
 
 /** Split groups when knife/loop-cut produces multiple pieces from one face. */

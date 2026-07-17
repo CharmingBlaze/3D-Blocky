@@ -141,21 +141,23 @@ describe('Rounded To Sphere', () => {
 })
 
 describe('Blender-style edge extrusion',()=>{
-  it('duplicates a boundary edge, bridges it with one quad, and selects the new edge',()=>{
+  it('duplicates a boundary edge, bridges it with a double-sided quad, and selects the new edge',()=>{
     const source=object([{x:0,y:0,z:0},{x:2,y:0,z:0},{x:2,y:2,z:0},{x:0,y:2,z:0}],[[0,1,2,3]])
     source.uvs=[{u:0,v:0},{u:1,v:0},{u:1,v:1},{u:0,v:1}]
     source.faceUvIndices=[[0,1,2,3]]
     const result=extrudeMeshSelection(source,{objectId:'mesh',vertices:[],edges:['0-1'],faces:[]},'edge',1)
     expect(result.positions).toHaveLength(6)
-    expect(result.faces).toEqual([[0,1,2,3],[0,1,5,4]])
+    expect(result.faces).toEqual([[0,1,2,3],[0,1,5,4],[4,5,1,0]])
     expect(result.resultingSelection?.edges).toEqual(['4-5'])
-    expect(result.faceUvIndices).toHaveLength(2)
+    expect(result.resultingSelection?.vertices.sort((a, b) => a - b)).toEqual([4, 5])
+    expect(result.faceUvIndices).toHaveLength(3)
+    expect(result.faceUvIndices?.[2]).toEqual([...(result.faceUvIndices?.[1] ?? [])].reverse())
   })
   it('extrudes a connected edge chain without changing its neighboring face',()=>{
     const source=object([{x:0,y:0,z:0},{x:1,y:0,z:0},{x:2,y:0,z:0},{x:2,y:1,z:0},{x:0,y:1,z:0}],[[0,1,2,3,4]])
     const result=extrudeMeshSelection(source,{objectId:'mesh',vertices:[],edges:['0-1','1-2'],faces:[]},'edge',2)
     expect(result.positions).toHaveLength(8)
-    expect(result.faces).toHaveLength(3)
+    expect(result.faces).toHaveLength(5)
     expect(result.faces[0]).toEqual(source.faces[0])
     expect(result.resultingSelection?.edges).toHaveLength(2)
   })

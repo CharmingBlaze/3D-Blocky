@@ -2,7 +2,13 @@ import * as THREE from 'three'
 import type { SceneObject } from './HalfEdgeMesh'
 import { localPointFromWorld, worldPointFromObject } from './objectTransform'
 import { collectCoincidentVertexGroups, groupCoincidentVertexIndices } from './meshTopology'
-import { buildVertexToFacesMap, isFaceFrontFacing } from './overlayVisibility'
+import { edgeKey } from './meshSelection'
+import { getMeshAdjacency } from './meshAdjacencyCache'
+import {
+  buildVertexToFacesMap,
+  isBoundaryOrDoubleSidedEdge,
+  isFaceFrontFacing,
+} from './overlayVisibility'
 
 const _world = new THREE.Vector3()
 const _viewDir = new THREE.Vector3()
@@ -64,11 +70,34 @@ export function isVertexOverlayGroupPickable(
   vertexFaces = buildVertexToFacesMap(object)
 ): boolean {
   const indices = Array.isArray(group) ? group : group.indices
+  let sawFace = false
   for (const vi of indices) {
     for (const fi of vertexFaces.get(vi) ?? []) {
+      sawFace = true
       if (isFaceFrontFacing(object, fi, camera)) return true
     }
   }
+  if (!sawFace) return true
+
+  // Extruded edge tips only touch the bridge wall. Keep those boundary verts
+  // selectable even when the wall is edge-on or facing away. After Make Double
+  // Sided the wall has two reverse faces, so treat that thin sheet the same.
+  const { edgeToFaces } = getMeshAdjacency(object)
+  for (const vi of indices) {
+    for (const fi of vertexFaces.get(vi) ?? []) {
+      const face = object.faces[fi]
+      if (!face) continue
+      for (let i = 0; i < face.length; i++) {
+        const a = face[i]!
+        const b = face[(i + 1) % face.length]!
+        if (a !== vi && b !== vi) continue
+        if (isBoundaryOrDoubleSidedEdge(object, edgeToFaces.get(edgeKey(a, b)))) {
+          return true
+        }
+      }
+    }
+  }
+
   return false
 }
 

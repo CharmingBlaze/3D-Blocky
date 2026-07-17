@@ -244,13 +244,93 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
 
     setSelectionMode: (mode) => {
       get().penCancelPath()
+      const { meshSelection, objects, selectionMode: previousMode } = get()
+      let nextSelection = meshSelection
+
+      // Blender-style component conversion: keep the same region editable when
+      // switching Vertex/Edge/Face after operations like edge Extrude.
+      if (mode !== 'object' && meshSelection && previousMode !== mode) {
+        const obj = objects.find((candidate) => candidate.id === meshSelection.objectId)
+        if (obj) {
+          if (mode === 'vertex') {
+            const verts = new Set(getAffectedVertices(meshSelection, obj))
+            nextSelection = {
+              objectId: meshSelection.objectId,
+              vertices: [...verts],
+              edges: [],
+              faces: [],
+            }
+          } else if (mode === 'edge') {
+            const edges = new Set(meshSelection.edges)
+            if (previousMode === 'vertex') {
+              const selected = new Set(meshSelection.vertices)
+              for (const face of obj.faces) {
+                for (let i = 0; i < face.length; i++) {
+                  const a = face[i]!
+                  const b = face[(i + 1) % face.length]!
+                  if (selected.has(a) && selected.has(b)) edges.add(edgeKey(a, b))
+                }
+              }
+            } else if (previousMode === 'face') {
+              const faceSet = new Set(meshSelection.faces)
+              const counts = new Map<string, number>()
+              for (const fi of faceSet) {
+                const face = obj.faces[fi]
+                if (!face) continue
+                for (let i = 0; i < face.length; i++) {
+                  const key = edgeKey(face[i]!, face[(i + 1) % face.length]!)
+                  counts.set(key, (counts.get(key) ?? 0) + 1)
+                }
+              }
+              for (const [key, count] of counts) if (count === 1) edges.add(key)
+            }
+            nextSelection = {
+              objectId: meshSelection.objectId,
+              vertices: [],
+              edges: [...edges],
+              faces: [],
+            }
+          } else if (mode === 'face') {
+            const faces = new Set(meshSelection.faces)
+            if (previousMode === 'edge') {
+              const edgeSet = new Set(meshSelection.edges)
+              for (let fi = 0; fi < obj.faces.length; fi++) {
+                const face = obj.faces[fi]!
+                for (let i = 0; i < face.length; i++) {
+                  if (edgeSet.has(edgeKey(face[i]!, face[(i + 1) % face.length]!))) {
+                    faces.add(fi)
+                    break
+                  }
+                }
+              }
+            } else if (previousMode === 'vertex') {
+              const selected = new Set(meshSelection.vertices)
+              for (let fi = 0; fi < obj.faces.length; fi++) {
+                if (obj.faces[fi]!.every((vi) => selected.has(vi))) faces.add(fi)
+              }
+            }
+            nextSelection = {
+              objectId: meshSelection.objectId,
+              vertices: [],
+              edges: [],
+              faces: [...faces],
+            }
+          }
+          if (nextSelection && !selectionHasComponents(nextSelection)) nextSelection = null
+        }
+      }
+
       set({
         selectionMode: mode,
         activeTool: SELECT_TOOL_BY_MODE[mode],
         toolCategory: 'select',
         meshHover: null,
         vertexMergeModifierHeld: false,
-        ...(mode === 'object' ? { meshSelection: null } : {}),
+        ...(mode === 'object'
+          ? { meshSelection: null }
+          : nextSelection !== meshSelection
+            ? { meshSelection: nextSelection }
+            : {}),
       } as unknown as Partial<S>)
     },
 
