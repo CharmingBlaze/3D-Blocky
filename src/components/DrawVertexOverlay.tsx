@@ -27,7 +27,7 @@ export function DrawVertexOverlay() {
     activeTool,
     objects,
     selectionObjectIds,
-    polyDrawSnapAllScene,
+    polyDrawSnapVertex,
     polyDrawHover,
     polyDrawDraft,
   } = useAppStore(
@@ -35,7 +35,7 @@ export function DrawVertexOverlay() {
       activeTool: s.activeTool,
       objects: s.objects,
       selectionObjectIds: s.selectionObjectIds,
-      polyDrawSnapAllScene: s.polyDrawSnapAllScene,
+      polyDrawSnapVertex: s.polyDrawSnapVertex,
       polyDrawHover: s.polyDrawHover,
       polyDrawDraft: s.polyDrawDraft,
     }))
@@ -43,17 +43,20 @@ export function DrawVertexOverlay() {
 
   const isPolyDraw = activeTool === 'poly-draw'
   const isDirectMeshMode = activeTool === 'smart' || activeTool === 'extrude'
-  const showVertices = activeTool === 'draw' || isPolyDraw || isDirectMeshMode
+  const showVertices =
+    activeTool === 'draw' ||
+    (isPolyDraw && polyDrawSnapVertex) ||
+    isDirectMeshMode
 
   const visibleObjects = useMemo(() => {
     if (!showVertices) return []
     const shown = objects.filter(isSceneObjectVisible)
-    if (isPolyDraw && polyDrawSnapAllScene) return shown
+    if (isPolyDraw && polyDrawSnapVertex) return shown
     if (selectionObjectIds.length > 0) {
       return shown.filter((o) => selectionObjectIds.includes(o.id))
     }
     return shown
-  }, [showVertices, isPolyDraw, objects, selectionObjectIds, polyDrawSnapAllScene])
+  }, [showVertices, isPolyDraw, objects, selectionObjectIds, polyDrawSnapVertex])
 
   const hoverSnap = polyDrawHover?.snap ?? null
   const hoveredMeshKey =

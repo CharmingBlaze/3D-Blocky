@@ -55,7 +55,7 @@ export function shouldFlipPolyDrawFaceTowardView(
 function collectSnapObjectIds(points: PolyDrawDraftPoint[]): string[] {
   const ids = new Set<string>()
   for (const pt of points) {
-    if (pt.snap?.kind === 'mesh') ids.add(pt.snap.objectId)
+    if (pt.snap?.kind === 'mesh' || pt.snap?.kind === 'edge') ids.add(pt.snap.objectId)
   }
   return [...ids]
 }

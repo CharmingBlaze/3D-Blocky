@@ -400,8 +400,12 @@ export function SidePanel() {
     clipboard,
     polyDrawMode,
     setPolyDrawMode,
-    polyDrawSnapAllScene,
-    setPolyDrawSnapAllScene,
+    polyDrawSnapVertex,
+    setPolyDrawSnapVertex,
+    polyDrawSnapEdge,
+    setPolyDrawSnapEdge,
+    polyDrawSnapGrid,
+    setPolyDrawSnapGrid,
     flipSelectedNormals,
     recalculateOutwardNormals,
     makeSelectedDoubleSided,
@@ -586,8 +590,12 @@ export function SidePanel() {
       clipboard: s.clipboard,
       polyDrawMode: s.polyDrawMode,
       setPolyDrawMode: s.setPolyDrawMode,
-      polyDrawSnapAllScene: s.polyDrawSnapAllScene,
-      setPolyDrawSnapAllScene: s.setPolyDrawSnapAllScene,
+      polyDrawSnapVertex: s.polyDrawSnapVertex,
+      setPolyDrawSnapVertex: s.setPolyDrawSnapVertex,
+      polyDrawSnapEdge: s.polyDrawSnapEdge,
+      setPolyDrawSnapEdge: s.setPolyDrawSnapEdge,
+      polyDrawSnapGrid: s.polyDrawSnapGrid,
+      setPolyDrawSnapGrid: s.setPolyDrawSnapGrid,
       flipSelectedNormals: s.flipSelectedNormals,
       recalculateOutwardNormals: s.recalculateOutwardNormals,
       makeSelectedDoubleSided: s.makeSelectedDoubleSided,
@@ -998,7 +1006,7 @@ export function SidePanel() {
             </SideBtnGroup>
             {(activeTool === 'smart' || activeTool === 'poly-draw' || activeTool === 'extrude') && (
               <p className="side-color-hint muted">
-                Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face. Right-click commits in-progress mesh tools. Select a face, then Double Sided to see both sides.
+                Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face. Right-click commits in-progress mesh tools. Drawing Options → Double-sided makes new mesh faces two-sided; or select a face and use Double Sided.
               </p>
             )}
             <div className="side-create-label">Drawing options</div>
@@ -1037,7 +1045,7 @@ export function SidePanel() {
               </label>
               <label
                 className="side-checkbox"
-                title="Both sides of faces are visible — good for thin planes and open shells"
+                title="New mesh faces (Line/Rectangle/Polygon) get a reverse-wound twin so both sides are solid and selectable"
               >
                 <input
                   type="checkbox"
@@ -1045,6 +1053,43 @@ export function SidePanel() {
                   onChange={() => setDrawDoubleSided(true)}
                 />
                 <span>Double-sided</span>
+              </label>
+            </div>
+            <div className="side-checkbox-row">
+              <label
+                className="side-checkbox"
+                title="Snap Line / Rectangle / Polygon clicks to nearby mesh vertices"
+              >
+                <input
+                  type="checkbox"
+                  checked={polyDrawSnapVertex}
+                  onChange={(e) => setPolyDrawSnapVertex(e.target.checked)}
+                />
+                <span>Snap to vertex</span>
+              </label>
+              <label
+                className="side-checkbox"
+                title="Snap Line / Rectangle / Polygon clicks to nearby mesh edges"
+              >
+                <input
+                  type="checkbox"
+                  checked={polyDrawSnapEdge}
+                  onChange={(e) => setPolyDrawSnapEdge(e.target.checked)}
+                />
+                <span>Snap to edge</span>
+              </label>
+            </div>
+            <div className="side-checkbox-row">
+              <label
+                className="side-checkbox"
+                title="Snap free Line / Rectangle / Polygon clicks to the scene grid"
+              >
+                <input
+                  type="checkbox"
+                  checked={polyDrawSnapGrid}
+                  onChange={(e) => setPolyDrawSnapGrid(e.target.checked)}
+                />
+                <span>Snap to grid</span>
               </label>
             </div>
             <div className="side-create-label">Shape tools</div>
@@ -1061,25 +1106,15 @@ export function SidePanel() {
               />
             </div>
             {activeTool === 'poly-draw' && (
-              <>
-                <label className="side-checkbox" title="Show and snap to vertices on every scene object">
-                  <input
-                    type="checkbox"
-                    checked={polyDrawSnapAllScene}
-                    onChange={(e) => setPolyDrawSnapAllScene(e.target.checked)}
-                  />
-                  <span>Show &amp; snap all vertices</span>
-                </label>
-                <p className="side-color-hint muted">
-                  {polyDrawMode === 'poly'
-                    ? 'Click connected line points · click the first point to close the loop and create a face.'
-                    : polyDrawMode === 'rectangle'
-                      ? 'Click one corner, then the opposite corner to create a rectangle.'
-                      : polyDrawMode === 'ngon'
-                        ? 'Click the centre, then click the radius to create a six-sided polygon.'
-                        : `${polyDrawMode === 'triangle' ? 'Three' : 'Four'} clicks complete each face.`}
-                </p>
-              </>
+              <p className="side-color-hint muted">
+                {polyDrawMode === 'poly'
+                  ? 'Click connected line points · click the first point to close the loop and create a face.'
+                  : polyDrawMode === 'rectangle'
+                    ? 'Click one corner, then the opposite corner to create a rectangle.'
+                    : polyDrawMode === 'ngon'
+                      ? 'Click the centre, then click the radius to create a six-sided polygon.'
+                      : `${polyDrawMode === 'triangle' ? 'Three' : 'Four'} clicks complete each face.`}
+              </p>
             )}
             <div className="side-create-label">Drawing input</div>
             <SideBtnGroup cols={2}>

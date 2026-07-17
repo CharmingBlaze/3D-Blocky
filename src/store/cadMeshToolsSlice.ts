@@ -23,6 +23,7 @@ import {
   findEdgeLoop,
   insertMultipleEdgeLoops,
   isValidLoopSeed,
+  makeSelectionDoubleSided,
 } from '../mesh/meshTopologyOps'
 import {
   autoFinalizeCount,
@@ -44,7 +45,9 @@ export type PolyDrawMode = 'triangle' | 'quad' | 'poly' | 'rectangle' | 'ngon'
 
 export type PolyDrawPointSnap =
   | { kind: 'mesh'; objectId: string; vertexIndex: number }
+  | { kind: 'edge'; objectId: string; a: number; b: number; t: number }
   | { kind: 'draft'; draftIndex: number }
+  | { kind: 'grid' }
 
 export interface PolyDrawDraftPoint {
   world: Vec3
@@ -119,7 +122,9 @@ export interface CadMeshToolsLayoutState {
   polyDrawMode: PolyDrawMode
   polyDrawDraft: PolyDrawDraft | null
   polyDrawHover: { world: Vec3; snap: PolyDrawPointSnap | null } | null
-  polyDrawSnapAllScene: boolean
+  polyDrawSnapVertex: boolean
+  polyDrawSnapEdge: boolean
+  polyDrawSnapGrid: boolean
   lastPolyDrawFace: LastPolyDrawFace | null
   lastPolyDrawClickAt: number
   loopCutDraft: LoopCutDraft | null
@@ -129,7 +134,9 @@ export interface CadMeshToolsLayoutState {
 
 export interface CadMeshToolsLayoutActions {
   setPolyDrawMode: (mode: PolyDrawMode) => void
-  setPolyDrawSnapAllScene: (on: boolean) => void
+  setPolyDrawSnapVertex: (on: boolean) => void
+  setPolyDrawSnapEdge: (on: boolean) => void
+  setPolyDrawSnapGrid: (on: boolean) => void
   polyDrawPointerMove: (
     world: Vec3,
     snapHighlight: PolyDrawDraft['snapHighlight'],
@@ -177,7 +184,9 @@ export const cadMeshToolsInitialState: CadMeshToolsLayoutState = {
   polyDrawMode: 'rectangle',
   polyDrawDraft: null,
   polyDrawHover: null,
-  polyDrawSnapAllScene: true,
+  polyDrawSnapVertex: false,
+  polyDrawSnapEdge: false,
+  polyDrawSnapGrid: false,
   lastPolyDrawFace: null,
   lastPolyDrawClickAt: 0,
   loopCutDraft: null,
@@ -218,7 +227,9 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       } as unknown as Partial<S>)
     },
 
-    setPolyDrawSnapAllScene: (on) => set({ polyDrawSnapAllScene: on } as unknown as Partial<S>),
+    setPolyDrawSnapVertex: (on) => set({ polyDrawSnapVertex: on } as unknown as Partial<S>),
+    setPolyDrawSnapEdge: (on) => set({ polyDrawSnapEdge: on } as unknown as Partial<S>),
+    setPolyDrawSnapGrid: (on) => set({ polyDrawSnapGrid: on } as unknown as Partial<S>),
 
     polyDrawPointerMove: (world, snapHighlight, hoverSnap) => {
       const { polyDrawDraft } = get()
@@ -350,9 +361,33 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
       const isNewObject =
         result.removedIds.length === 0 && !objects.some((o) => o.id === result.primaryId)
       let nextObjects = result.objects
-      if (isNewObject) {
+
+      // Drawing Options → Double-sided creates reverse-wound twins so both sides
+      // are real selectable faces. Keep material single-sided: DoubleSide + twins
+      // z-fights and averages lighting/normals across opposite windings.
+      if (drawDoubleSided) {
+        const primary = nextObjects.find((o) => o.id === result.primaryId)
+        if (primary) {
+          const newFaces = Array.from(
+            { length: result.newFaceCount },
+            (_, i) => result.newFaceStartIndex + i
+          )
+          const { object: doubled } = makeSelectionDoubleSided(
+            primary,
+            {
+              objectId: primary.id,
+              vertices: [],
+              edges: [],
+              faces: newFaces,
+            },
+            'face'
+          )
+          const stamped = isNewObject ? stampDrawMaterial(doubled, false) : doubled
+          nextObjects = nextObjects.map((o) => (o.id === primary.id ? stamped : o))
+        }
+      } else if (isNewObject) {
         nextObjects = nextObjects.map((o) =>
-          o.id === result.primaryId ? stampDrawMaterial(o, drawDoubleSided) : o
+          o.id === result.primaryId ? stampDrawMaterial(o, false) : o
         )
       }
 

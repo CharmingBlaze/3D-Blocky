@@ -60,7 +60,11 @@ import {
   worldPointFromObject,
 } from '../mesh/objectTransform'
 import { constrainKnifeEndWorld } from '../mesh/knifeUtils'
-import { findPolyDrawSnapTarget, snapHighlightFromTarget } from '../polyDraw/polyDrawSnap'
+import {
+  findPolyDrawSnapTarget,
+  snapHighlightFromTarget,
+  snapWorldToSceneGrid,
+} from '../polyDraw/polyDrawSnap'
 import { resolveFreeClickWorld, workPlaneDepthForView } from '../polyDraw/polyDrawPlacement'
 import {
   normalizedViewportPoint,
@@ -205,7 +209,9 @@ export function useViewportPointerHandlers({
     polyDrawClick,
     polyDrawPointerMove,
     polyDrawFinish,
-    polyDrawSnapAllScene,
+    polyDrawSnapVertex,
+    polyDrawSnapEdge,
+    polyDrawSnapGrid,
     clearPolyDrawHover,
     loopCutBegin,
     loopCutCommit,
@@ -274,7 +280,9 @@ export function useViewportPointerHandlers({
       polyDrawClick: s.polyDrawClick,
       polyDrawPointerMove: s.polyDrawPointerMove,
       polyDrawFinish: s.polyDrawFinish,
-      polyDrawSnapAllScene: s.polyDrawSnapAllScene,
+      polyDrawSnapVertex: s.polyDrawSnapVertex,
+      polyDrawSnapEdge: s.polyDrawSnapEdge,
+      polyDrawSnapGrid: s.polyDrawSnapGrid,
       clearPolyDrawHover: s.clearPolyDrawHover,
       loopCutBegin: s.loopCutBegin,
       loopCutCommit: s.loopCutCommit,
@@ -468,7 +476,8 @@ export function useViewportPointerHandlers({
       const store = useAppStore.getState()
       const draftPoints = store.polyDrawDraft?.points ?? []
       const snap = findPolyDrawSnapTarget(clientX, clientY, rect, camera, store.objects, {
-        includeAllScene: polyDrawSnapAllScene,
+        snapVertex: polyDrawSnapVertex,
+        snapEdge: polyDrawSnapEdge,
         selectionObjectIds: store.selectionObjectIds,
         draftPoints,
         allowCloseLoop,
@@ -480,7 +489,7 @@ export function useViewportPointerHandlers({
 
       const existingWorlds = draftPoints.map((p) => p.world)
       const depth = workPlaneDepthForView(view, existingWorlds, defaultDepth)
-      const world = resolveFreeClickWorld(
+      let world = resolveFreeClickWorld(
         clientX,
         clientY,
         rect,
@@ -490,9 +499,17 @@ export function useViewportPointerHandlers({
         existingWorlds,
         store.objects
       )
+      if (polyDrawSnapGrid && world) {
+        world = snapWorldToSceneGrid(world)
+        return {
+          world,
+          snap: { kind: 'grid' } as PolyDrawPointSnap,
+          highlight: { world, isDraft: false },
+        }
+      }
       return { world, snap: null as PolyDrawPointSnap | null, highlight: null }
     },
-    [view, defaultDepth, polyDrawSnapAllScene]
+    [view, defaultDepth, polyDrawSnapVertex, polyDrawSnapEdge, polyDrawSnapGrid]
   )
 
   const resolveKnifeHit = useCallback(
