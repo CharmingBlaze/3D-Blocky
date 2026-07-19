@@ -32,6 +32,12 @@ import { useOutlinerUiStore } from '../store/outlinerUiStore'
 import { boxCenterSize } from '../primitives/primitiveBoxMath'
 import { HairTextureDialog } from './HairTextureDialog'
 import { listSceneTextures } from '../uv/sceneTextures'
+import { pickOpenFile } from '../io/fileDialogs'
+import { IMAGE_IMPORT_FILTERS } from '../io/download'
+
+const MODEL_IMPORT_FILTERS = [
+  { name: '3D models', extensions: ['obj', 'glb', 'gltf', 'stl'] },
+]
 
 const STROKE_MODES: { id: StrokeMode; label: string; hint: string }[] = [
   { id: 'outline', label: 'Outline', hint: 'Draw a closed outline → filled flat 3D shape' },
@@ -147,6 +153,29 @@ function SideSection({
         {children}
       </div>
     </section>
+  )
+}
+
+/** Compact inspector subsection used for dense option groups inside a panel. */
+function SideSubsection({ title, children }: { title: string; children: ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const contentId = useId()
+  return (
+    <div className="side-subsection">
+      <button
+        type="button"
+        className="side-create-label side-subsection-toggle"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-expanded={!collapsed}
+        aria-controls={contentId}
+      >
+        <span>{title}</span>
+        <span className="side-subsection-state" aria-hidden>{collapsed ? 'Show ▸' : 'Hide ▾'}</span>
+      </button>
+      <div id={contentId} className="side-subsection-body" hidden={collapsed}>
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -626,9 +655,17 @@ export function SidePanel() {
   )
 
   const hairTextureId = useAppStore((s) => s.hairTextureId)
+  const importHairTextureImage = useAppStore((s) => s.importHairTextureImage)
+  const pathSourceObjectId = useAppStore((s) => s.pathSourceObjectId)
+  const setPathSourceObjectId = useAppStore((s) => s.setPathSourceObjectId)
+  const importSceneFile = useAppStore((s) => s.importSceneFile)
   const pixelDocuments = useAppStore((s) => s.pixelDocuments)
   const objectTextures = useAppStore((s) => s.objectTextures)
   const [showHairTextureDialog, setShowHairTextureDialog] = useState(false)
+  const [cardTextureBusy, setCardTextureBusy] = useState(false)
+  const [cardTextureError, setCardTextureError] = useState<string | null>(null)
+  const [objectArrayImportBusy, setObjectArrayImportBusy] = useState(false)
+  const [objectArraySourceError, setObjectArraySourceError] = useState<string | null>(null)
 
   const hairTextureLabel = useMemo(() => {
     if (!hairTextureId) return null
@@ -684,7 +721,136 @@ export function SidePanel() {
     ? boxCenterSize(selectedPrimitiveSource.box).size
     : null
   const selectedVectorSource = selectedObj?.vectorSource ?? null
+  const objectArrayCandidates = useMemo(
+    () => objects.filter((object) =>
+      object.positions.length > 0 && object.faces.length > 0 &&
+      object.sketchSource?.pathOutput !== 'object-array' &&
+      object.vectorSource?.pathOutput !== 'object-array'
+    ),
+    [objects]
+  )
+  const activeObjectArraySourceId =
+    selectedSketchSource?.pathOutput === 'object-array'
+      ? selectedSketchSource.pathSourceObjectId ?? null
+      : selectedVectorSource?.pathOutput === 'object-array'
+        ? selectedVectorSource.pathSourceObjectId ?? null
+        : pathSourceObjectId
+  const activeObjectArraySource = objectArrayCandidates.find(
+    (object) => object.id === activeObjectArraySourceId
+  ) ?? null
+
+  const assignObjectArraySource = useCallback((sourceId: string | null) => {
+    const sourceObject = objectArrayCandidates.find((object) => object.id === sourceId) ?? null
+    setObjectArraySourceError(null)
+    setPathSourceObjectId(sourceObject?.id ?? null)
+    if (selectedSketchSource?.pathOutput === 'object-array') {
+      updateSelectedSketchSource({
+        pathSourceObjectId: sourceObject?.id ?? null,
+        pathSourceObject: sourceObject,
+      })
+      commitSketchSourceEdit()
+    } else if (selectedVectorSource?.pathOutput === 'object-array') {
+      updateSelectedVectorSource({
+        pathSourceObjectId: sourceObject?.id ?? null,
+        pathSourceObject: sourceObject,
+      })
+      commitVectorSourceEdit()
+    }
+  }, [
+    objectArrayCandidates, setPathSourceObjectId, selectedSketchSource, selectedVectorSource,
+    updateSelectedSketchSource, commitSketchSourceEdit, updateSelectedVectorSource, commitVectorSourceEdit,
+  ])
+
+  const importObjectArraySource = useCallback(async () => {
+    setObjectArraySourceError(null)
+    setObjectArrayImportBusy(true)
+    const editedObjectId =
+      selectedSketchSource?.pathOutput === 'object-array' || selectedVectorSource?.pathOutput === 'object-array'
+        ? selectedObj?.id ?? null
+        : null
+    const editedSourceKind = selectedSketchSource?.pathOutput === 'object-array'
+      ? 'sketch'
+      : selectedVectorSource?.pathOutput === 'object-array'
+        ? 'vector'
+        : null
+    try {
+      const file = await pickOpenFile({ title: 'Import Object Array source', filters: MODEL_IMPORT_FILTERS })
+      if (!file) return
+      await importSceneFile(file)
+      const state = useAppStore.getState()
+      const importedId = state.selectedObjectId
+      const importedObject = state.objects.find((object) => object.id === importedId) ?? null
+      if (!importedObject) throw new Error('The model did not contain a usable mesh')
+      state.setPathSourceObjectId(importedObject.id)
+
+      // Preserve live editing when the import was launched from an existing array.
+      if (editedObjectId && editedSourceKind) {
+        state.selectObject(editedObjectId)
+        if (editedSourceKind === 'sketch') {
+          state.updateSelectedSketchSource({ pathSourceObjectId: importedObject.id, pathSourceObject: importedObject })
+          state.commitSketchSourceEdit()
+        } else {
+          state.updateSelectedVectorSource({ pathSourceObjectId: importedObject.id, pathSourceObject: importedObject })
+          state.commitVectorSourceEdit()
+        }
+      }
+    } catch (error) {
+      setObjectArraySourceError(error instanceof Error ? error.message : 'Could not import the 3D source')
+    } finally {
+      setObjectArrayImportBusy(false)
+    }
+  }, [importSceneFile, selectedObj?.id, selectedSketchSource, selectedVectorSource])
+  const importCardTexture = useCallback(async () => {
+    setCardTextureError(null)
+    setCardTextureBusy(true)
+    try {
+      const file = await pickOpenFile({ title: 'Import image for 2D cards', filters: IMAGE_IMPORT_FILTERS })
+      if (!file) return
+      const textureId = await importHairTextureImage(file)
+      const state = useAppStore.getState()
+      // Cards always begin with the complete image. Hair-specific crop,
+      // rotation, luma-key, and tint settings must not leak into billboards.
+      state.setHairUvTransform({ offsetU: 0, offsetV: 0, scaleU: 1, scaleV: 1, flipU: false, flipV: false, rotationDeg: 0 })
+      state.setHairTextureSettings({
+        wrap: 'clamp', colorMode: 'image', tintEnabled: false, opacity: 1,
+        removeDarkBackground: false, brightness: 1, shadowDetail: 0.18,
+      })
+      const targetIds = resolveTargetObjectIds(state.selectedObjectId, state.selectionObjectIds)
+      const cardIds = targetIds.filter((id) => {
+        const object = state.objects.find((candidate) => candidate.id === id)
+        return object?.sketchSource?.pathOutput === 'cards' || object?.vectorSource?.pathOutput === 'cards'
+      })
+      for (const objectId of cardIds) {
+        state.assignObjectTextureDocument(objectId, textureId, { skipHistory: true })
+        const textured = useAppStore.getState().objects.find((object) => object.id === objectId)
+        if (!textured?.material) continue
+        state.updateObject(objectId, {
+          material: {
+            ...textured.material,
+            textureCanvasMode: 'replace', textureWrap: 'clamp',
+            textureRepeat: [1, 1], textureOffset: [0, 0], textureRotation: 0,
+            textureTint: [1, 1, 1, 1], textureTintStrength: 0,
+            textureLumaAlpha: false, textureBrightness: 1, textureShadowDetail: 0,
+            textureGradient: undefined, opacity: 1, doubleSided: false,
+          },
+        })
+      }
+      if (cardIds.length > 0) {
+        state.commitHistory('Apply card image')
+      }
+    } catch (error) {
+      setCardTextureError(error instanceof Error ? error.message : 'Could not import the card image')
+    } finally {
+      setCardTextureBusy(false)
+    }
+  }, [importHairTextureImage])
   const selectedVectorDoodle = selectedVectorSource
+  const commitLivePathSettings =
+    selectedSketchSource?.kind === 'path'
+      ? commitSketchSourceEdit
+      : selectedVectorSource?.strokeMode === 'centerline'
+        ? commitVectorSourceEdit
+        : undefined
   const selectedExtrudableDoodle = selectedSketchDoodle ?? selectedVectorDoodle
   const editingVectorPath = !!vectorPenDraft?.editingObjectId && vectorPenDraft.editingObjectId === selectedObj?.id
 
@@ -1009,8 +1175,8 @@ export function SidePanel() {
                 Line closes loops into faces. Rectangle uses opposite corners. Polygon uses centre and radius. Push/Pull reshapes a face. Right-click commits in-progress mesh tools. Drawing Options → Double-sided makes new mesh faces two-sided; or select a face and use Double Sided.
               </p>
             )}
-            <div className="side-create-label">Drawing options</div>
-            <div className="side-checkbox-row">
+            <SideSubsection title="Drawing options">
+              <div className="side-checkbox-row">
               <label className="side-checkbox" title="Snap to path endpoints">
                 <input
                   type="checkbox"
@@ -1030,8 +1196,8 @@ export function SidePanel() {
                 />
                 <span>Smooth draw</span>
               </label>
-            </div>
-            <div className="side-checkbox-row">
+              </div>
+              <div className="side-checkbox-row">
               <label
                 className="side-checkbox"
                 title="Only the front of faces is visible (back faces are culled)"
@@ -1054,8 +1220,8 @@ export function SidePanel() {
                 />
                 <span>Double-sided</span>
               </label>
-            </div>
-            <div className="side-checkbox-row">
+              </div>
+              <div className="side-checkbox-row">
               <label
                 className="side-checkbox"
                 title="Snap Line / Rectangle / Polygon clicks to nearby mesh vertices"
@@ -1078,8 +1244,8 @@ export function SidePanel() {
                 />
                 <span>Snap to edge</span>
               </label>
-            </div>
-            <div className="side-checkbox-row">
+              </div>
+              <div className="side-checkbox-row">
               <label
                 className="side-checkbox"
                 title="Snap free Line / Rectangle / Polygon clicks to the scene grid"
@@ -1091,7 +1257,8 @@ export function SidePanel() {
                 />
                 <span>Snap to grid</span>
               </label>
-            </div>
+              </div>
+            </SideSubsection>
             <div className="side-create-label">Shape tools</div>
             <div className="side-shape-menus">
               <SidePanelPrimitivesMenu
@@ -1183,11 +1350,39 @@ export function SidePanel() {
               <div className="hair-draw-options path-draw-options">
                 <div className="hair-draw-options-heading"><span>Path settings</span><span className="muted">New strokes</span></div>
                 <div className="side-create-label">Path output</div>
-                <select className="side-select" value={pathOutput} onChange={(e) => setPathOutputSettings({ pathOutput: e.target.value as typeof pathOutput })}>
+                <select className="side-select" value={pathOutput} onChange={(e) => { setPathOutputSettings({ pathOutput: e.target.value as typeof pathOutput }); commitLivePathSettings?.() }}>
                   <option value="tube">Tube</option><option value="ribbon">Ribbon</option><option value="chain">Chain</option><option value="vine">Vine</option>
                   <option value="rope">Rope</option><option value="cards">2D Cards</option><option value="object-array">Object Array</option><option value="profile-sweep">Profile Sweep</option>
                 </select>
-                {pathOutput === 'object-array' && <p className="side-color-hint muted">Select an object before drawing. Its mesh is distributed along the new path; otherwise a box placeholder is used.</p>}
+                {pathOutput === 'object-array' && <div className="hair-draw-options">
+                  <div className="hair-draw-options-heading">
+                    <span>Array source</span>
+                    <span className="muted">{activeObjectArraySource ? 'Ready' : 'Choose a mesh'}</span>
+                  </div>
+                  <select
+                    className="side-select"
+                    value={activeObjectArraySource?.id ?? ''}
+                    onChange={(event) => assignObjectArraySource(event.target.value || null)}
+                    aria-label="Object Array source"
+                  >
+                    <option value="">Box placeholder</option>
+                    {objectArrayCandidates.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+                  </select>
+                  <SideBtnGroup cols={2}>
+                    <button
+                      type="button"
+                      className="side-btn"
+                      disabled={!objectArrayCandidates.some((object) => object.id === selectedObjectId)}
+                      onClick={() => assignObjectArraySource(selectedObjectId)}
+                    >Use selected</button>
+                    <button type="button" className="side-btn" disabled={objectArrayImportBusy} onClick={() => void importObjectArraySource()}>
+                      {objectArrayImportBusy ? 'Importing…' : 'Import 3D…'}
+                    </button>
+                  </SideBtnGroup>
+                  {activeObjectArraySource && <p className="side-color-hint muted">Using {activeObjectArraySource.name} for every instance.</p>}
+                  {objectArraySourceError && <p className="side-color-hint side-error">{objectArraySourceError}</p>}
+                  <p className="side-color-hint muted">Choose any scene mesh or import OBJ, GLB, GLTF, or STL.</p>
+                </div>}
                 {(pathOutput === 'tube' || pathOutput === 'vine' || pathOutput === 'rope' || pathOutput === 'profile-sweep') && <>
                 <div className="side-create-label">Start cap</div>
                 <SideBtnGroup cols={4}>
@@ -1201,14 +1396,14 @@ export function SidePanel() {
                     <button key={cap} className={`side-btn ${pathEndCap === cap ? 'active' : ''}`} onClick={() => setPathEndCap(cap)}>{cap}</button>
                   ))}
                 </SideBtnGroup>
-                <SideSlider label="Radius" value={pathRadiusScale} display={`${Math.round(pathRadiusScale * 100)}%`} min={0.25} max={3} step={0.05} onChange={setPathRadiusScale} />
-                <SideSlider label="Round sides" value={pathRadialSegments} display={String(pathRadialSegments)} min={3} max={24} step={1} onChange={setPathRadialSegments} />
+                <SideSlider label="Radius" value={pathRadiusScale} display={`${Math.round(pathRadiusScale * 100)}%`} min={0.25} max={3} step={0.05} onChange={setPathRadiusScale} onCommit={commitLivePathSettings} />
+                <SideSlider label="Round sides" value={pathRadialSegments} display={String(pathRadialSegments)} min={3} max={24} step={1} onChange={setPathRadialSegments} onCommit={commitLivePathSettings} />
                 </>}
-                <SideSlider label="Start width" value={pathStartScale} display={`${Math.round(pathStartScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathStartScale:v})} />
-                <SideSlider label="End width" value={pathEndScale} display={`${Math.round(pathEndScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathEndScale:v})} />
-                <SideSlider label="Offset" value={pathOffset} display={pathOffset.toFixed(1)} min={-64} max={64} step={.5} onChange={(v) => setPathOutputSettings({pathOffset:v})} />
-                {(pathOutput === 'rope' || pathOutput === 'profile-sweep') && <SideSlider label="Twist" value={pathTwist} display={`${Math.round(pathTwist)}°`} min={-1080} max={1080} step={5} onChange={(v) => setPathOutputSettings({pathTwist:v})} />}
-                {(pathOutput === 'chain' || pathOutput === 'cards' || pathOutput === 'object-array') && <SideSlider label="Spacing" value={pathSpacing} display={`${Math.round(pathSpacing)}px`} min={2} max={128} step={1} onChange={(v) => setPathOutputSettings({pathSpacing:v})} />}
+                <SideSlider label="Start width" value={pathStartScale} display={`${Math.round(pathStartScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathStartScale:v})} onCommit={commitLivePathSettings} />
+                <SideSlider label="End width" value={pathEndScale} display={`${Math.round(pathEndScale * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => setPathOutputSettings({pathEndScale:v})} onCommit={commitLivePathSettings} />
+                <SideSlider label="Offset" value={pathOffset} display={pathOffset.toFixed(1)} min={-64} max={64} step={.5} onChange={(v) => setPathOutputSettings({pathOffset:v})} onCommit={commitLivePathSettings} />
+                {(pathOutput === 'rope' || pathOutput === 'profile-sweep') && <SideSlider label="Twist" value={pathTwist} display={`${Math.round(pathTwist)}°`} min={-1080} max={1080} step={5} onChange={(v) => setPathOutputSettings({pathTwist:v})} onCommit={commitLivePathSettings} />}
+                {(pathOutput === 'chain' || pathOutput === 'cards' || pathOutput === 'object-array') && <SideSlider label="Spacing" value={pathSpacing} display={`${Math.round(pathSpacing)}px`} min={2} max={128} step={1} onChange={(v) => setPathOutputSettings({pathSpacing:v})} onCommit={commitLivePathSettings} />}
                 {(pathOutput === 'cards' || pathOutput === 'object-array') && <div className="hair-draw-options">
                   <div className="hair-draw-options-heading"><span>Distribution</span><span className="muted">Deterministic</span></div>
                   <SideBtnGroup cols={3}>{(['spacing','count','fit'] as const).map((mode)=><button key={mode} className={`side-btn ${pathDistributionMode===mode?'active':''}`} onClick={()=>setPathOutputSettings({pathDistributionMode:mode})}>{mode}</button>)}</SideBtnGroup>
@@ -1226,7 +1421,22 @@ export function SidePanel() {
                   <label className="side-checkbox"><input type="checkbox" checked={pathKeepInstances} onChange={(e)=>setPathOutputSettings({pathKeepInstances:e.target.checked})}/><span>Keep procedural instances</span></label>
                 </div>}
                 {pathOutput === 'chain' && <label className="side-checkbox"><input type="checkbox" checked={pathChainAlternating} onChange={(e)=>setPathOutputSettings({pathChainAlternating:e.target.checked})}/><span>Alternate links 90°</span></label>}
+                {pathOutput === 'chain' && <>
+                  <SideSlider label="Link roundness" value={pathRadialSegments} display={String(pathRadialSegments)} min={6} max={10} step={1} onChange={setPathRadialSegments} onCommit={commitLivePathSettings}/>
+                  <p className="side-color-hint muted">Links remain interlocked and use outward-facing torus topology.</p>
+                </>}
                 {pathOutput === 'cards' && <label className="side-checkbox"><input type="checkbox" checked={pathCardCrossed} onChange={(e)=>setPathOutputSettings({pathCardCrossed:e.target.checked})}/><span>Crossed foliage cards</span></label>}
+                {pathOutput === 'cards' && <>
+                  <SideSlider label="Card width" value={pathProfileWidth} display={`${Math.round(pathProfileWidth*100)}%`} min={.25} max={4} step={.05} onChange={(v)=>setPathOutputSettings({pathProfileWidth:v})}/>
+                  <SideSlider label="Card length" value={pathProfileHeight} display={`${Math.round(pathProfileHeight*100)}%`} min={.25} max={4} step={.05} onChange={(v)=>setPathOutputSettings({pathProfileHeight:v})}/>
+                  <div className="side-create-label">Card image</div>
+                  <SideBtnGroup cols={2}>
+                    <button type="button" className="side-btn" disabled={cardTextureBusy} onClick={() => void importCardTexture()}>{cardTextureBusy ? 'Importing…' : 'Import image…'}</button>
+                    <button type="button" className="side-btn" disabled={!hairTextureId} onClick={() => setShowHairTextureDialog(true)}>Edit texture</button>
+                  </SideBtnGroup>
+                  {cardTextureError && <p className="side-color-hint side-error">{cardTextureError}</p>}
+                  <p className="side-color-hint muted">The complete image is mapped onto the front and back of every card.</p>
+                </>}
                 {pathOutput === 'profile-sweep' && <>
                   <div className="side-create-label">Profile</div><SideBtnGroup cols={4}>{(['round','square','rectangle','rail'] as const).map((p)=><button key={p} className={`side-btn ${pathProfile===p?'active':''}`} onClick={()=>setPathOutputSettings({pathProfile:p})}>{p}</button>)}</SideBtnGroup>
                   <SideSlider label="Profile width" value={pathProfileWidth} display={`${Math.round(pathProfileWidth*100)}%`} min={.1} max={4} step={.05} onChange={(v)=>setPathOutputSettings({pathProfileWidth:v})}/>
@@ -1265,7 +1475,7 @@ export function SidePanel() {
                 {!ribbonFlat && <p className="side-color-hint muted">Extrude depth controls solid ribbon thickness.</p>}
               </div>
             )}
-            {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || (strokeMode === 'centerline' && (pathOutput === 'ribbon' || pathOutput === 'cards')) || strokeMode === 'tapered-tube') && (
+            {(strokeMode.startsWith('hair-') || strokeMode === 'ribbon' || strokeMode === 'centerline' || strokeMode === 'tapered-tube') && (
               <div className="hair-draw-options">
                 <div className="hair-draw-options-heading">
                   <span>Appearance</span>
@@ -1283,7 +1493,7 @@ export function SidePanel() {
                 >
                   {hairTextureId
                     ? `Texture · ${hairTextureLabel?.split(' (')[0] ?? 'On'}`
-                    : 'Texture · Use current color'}
+                    : (strokeMode === 'centerline' ? 'Add texture to path…' : 'Texture · Use current color')}
                 </button>
                 {strokeMode !== 'ribbon' && <div className="side-checkbox-row">
                   <label className="side-checkbox" title="Taper hair to a point at both ends">
@@ -1549,6 +1759,24 @@ export function SidePanel() {
                   {(['chain','cards','object-array'] as const).includes((selectedSketchSource.pathOutput ?? 'tube') as any) && (
                     <SideSlider label="Spacing" value={selectedSketchSource.pathSpacing ?? 16} display={`${Math.round(selectedSketchSource.pathSpacing ?? 16)}px`} min={2} max={128} step={1} onChange={(v)=>updateSelectedSketchSource({pathSpacing:v})} onCommit={commitSketchSourceEdit}/>
                   )}
+                  {selectedSketchSource.pathOutput === 'object-array' && <div className="hair-draw-options">
+                    <div className="hair-draw-options-heading"><span>Array source</span><span className="muted">Live</span></div>
+                    <select
+                      className="side-select"
+                      value={activeObjectArraySource?.id ?? ''}
+                      onChange={(event) => assignObjectArraySource(event.target.value || null)}
+                      aria-label="Selected Object Array source"
+                    >
+                      <option value="">Box placeholder</option>
+                      {objectArrayCandidates.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+                    </select>
+                    <SideBtnGroup cols={2}>
+                      <button type="button" className="side-btn" disabled={!objectArrayCandidates.some((object) => object.id === selectedObjectId)} onClick={() => assignObjectArraySource(selectedObjectId)}>Use selected</button>
+                      <button type="button" className="side-btn" disabled={objectArrayImportBusy} onClick={() => void importObjectArraySource()}>{objectArrayImportBusy ? 'Importing…' : 'Import 3D…'}</button>
+                    </SideBtnGroup>
+                    {activeObjectArraySource && <p className="side-color-hint muted">Using {activeObjectArraySource.name}; changes rebuild this array immediately.</p>}
+                    {objectArraySourceError && <p className="side-color-hint side-error">{objectArraySourceError}</p>}
+                  </div>}
                   {(selectedSketchSource.pathOutput === 'cards' || selectedSketchSource.pathOutput === 'object-array') && <>
                     <SideBtnGroup cols={3}>{(['spacing','count','fit'] as const).map((mode)=><button key={mode} className={`side-btn ${(selectedSketchSource.pathDistributionMode ?? 'spacing')===mode?'active':''}`} onClick={()=>{updateSelectedSketchSource({pathDistributionMode:mode});commitSketchSourceEdit()}}>{mode}</button>)}</SideBtnGroup>
                     {(selectedSketchSource.pathDistributionMode ?? 'spacing') === 'count' && (
@@ -1561,6 +1789,15 @@ export function SidePanel() {
                     <SideSlider label="Seed" value={selectedSketchSource.pathSeed ?? 1} display={String(selectedSketchSource.pathSeed ?? 1)} min={1} max={9999} step={1} onChange={(v)=>updateSelectedSketchSource({pathSeed:v})} onCommit={commitSketchSourceEdit}/>
                     <label className="side-checkbox"><input type="checkbox" checked={selectedSketchSource.pathAlternateRotation ?? false} onChange={(e)=>{updateSelectedSketchSource({pathAlternateRotation:e.target.checked});commitSketchSourceEdit()}}/><span>Alternate rotation 90°</span></label>
                     <label className="side-checkbox"><input type="checkbox" checked={selectedSketchSource.pathMirrorAlternate ?? false} onChange={(e)=>{updateSelectedSketchSource({pathMirrorAlternate:e.target.checked});commitSketchSourceEdit()}}/><span>Mirror alternating pieces</span></label>
+                  </>}
+                  {selectedSketchSource.pathOutput === 'cards' && <>
+                    <div className="side-create-label">Card image</div>
+                    <SideBtnGroup cols={2}>
+                      <button type="button" className="side-btn" disabled={cardTextureBusy} onClick={() => void importCardTexture()}>{cardTextureBusy ? 'Importing…' : 'Import image…'}</button>
+                      <button type="button" className="side-btn" disabled={!hairTextureId} onClick={() => setShowHairTextureDialog(true)}>Edit texture</button>
+                    </SideBtnGroup>
+                    {cardTextureError && <p className="side-color-hint side-error">{cardTextureError}</p>}
+                    <p className="side-color-hint muted">Applied to both sides of every selected card.</p>
                   </>}
                   {(selectedSketchSource.pathOutput === 'rope' || selectedSketchSource.pathOutput === 'profile-sweep') && (
                     <SideSlider label="Twist" value={selectedSketchSource.pathTwist ?? 360} display={`${Math.round(selectedSketchSource.pathTwist ?? 360)}°`} min={-1080} max={1080} step={5} onChange={(v)=>updateSelectedSketchSource({pathTwist:v})} onCommit={commitSketchSourceEdit}/>
@@ -1678,6 +1915,15 @@ export function SidePanel() {
                   </select>
                   <SideSlider label="Start width" value={selectedVectorSource.pathStartScale ?? 1} display={`${Math.round((selectedVectorSource.pathStartScale ?? 1) * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathStartScale: v })} onCommit={commitVectorSourceEdit} />
                   <SideSlider label="End width" value={selectedVectorSource.pathEndScale ?? 1} display={`${Math.round((selectedVectorSource.pathEndScale ?? 1) * 100)}%`} min={0.05} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathEndScale: v })} onCommit={commitVectorSourceEdit} />
+                  {selectedVectorSource.pathOutput === 'cards' && <>
+                    <div className="side-create-label">Card image</div>
+                    <SideBtnGroup cols={2}>
+                      <button type="button" className="side-btn" disabled={cardTextureBusy} onClick={() => void importCardTexture()}>{cardTextureBusy ? 'Importing…' : 'Import image…'}</button>
+                      <button type="button" className="side-btn" disabled={!hairTextureId} onClick={() => setShowHairTextureDialog(true)}>Edit texture</button>
+                    </SideBtnGroup>
+                    {cardTextureError && <p className="side-color-hint side-error">{cardTextureError}</p>}
+                    <p className="side-color-hint muted">Applied to both sides of every selected card.</p>
+                  </>}
                   {(selectedVectorSource.pathOutput ?? 'tube') === 'tube' && (
                     <>
                       <SideSlider label="Radius" value={selectedVectorSource.pathRadiusScale ?? 1} display={`${Math.round((selectedVectorSource.pathRadiusScale ?? 1) * 100)}%`} min={0.25} max={3} step={0.05} onChange={(v) => updateSelectedVectorSource({ pathRadiusScale: v })} onCommit={commitVectorSourceEdit} />

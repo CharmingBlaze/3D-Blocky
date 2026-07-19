@@ -13,13 +13,18 @@ import {
   snapSketchStrokeClosed,
 } from '../stroke/sketchDoodle'
 import { strokeToMesh, isHoleLineStroke } from '../stroke/strokeToMesh'
-import { isVectorDoodleObject, regenerateVectorObject } from '../vector/vectorSource'
+import {
+  isVectorDoodleObject,
+  regenerateVectorObject,
+  regenerateVectorObjectFromSource,
+  type EditableVectorSourcePatch,
+} from '../vector/vectorSource'
 import { isNearPoint } from '../vector/penTool'
 import { extrudeValueFromScreenDelta } from '../mesh/meshOps'
 import { planeToWorld3D, type StrokePlaneFrame } from '../utils/screenToWorld'
 import type { ViewType } from '../scene/viewTypes'
 import { emaSmoothPoint, movingAverageSmoothStroke } from '../stroke/strokeCapture'
-import { applyActiveHairTexture } from '../material/materialEditorSlice'
+import { applyActiveCardTexture, applyActiveHairTexture } from '../material/materialEditorSlice'
 import {
   applyHairUvTransformToObject,
   DEFAULT_HAIR_UV_TRANSFORM,
@@ -122,6 +127,8 @@ export interface StrokeLayoutState {
   pathMirrorAlternate: boolean
   pathSeed: number
   pathKeepInstances: boolean
+  /** Scene object used as the template for newly drawn Object Arrays. */
+  pathSourceObjectId: string | null
 }
 
 export interface StrokeLayoutActions {
@@ -165,6 +172,7 @@ export interface StrokeLayoutActions {
   setRibbonWidthScale: (scale: number) => void
   setRibbonFlat: (flat: boolean) => void
   setPathOutputSettings: (settings: Partial<Pick<StrokeLayoutState, 'pathOutput' | 'pathStartScale' | 'pathEndScale' | 'pathTwist' | 'pathSpacing' | 'pathOffset' | 'pathProfile' | 'pathProfileWidth' | 'pathProfileHeight' | 'pathChainAlternating' | 'pathCardCrossed' | 'pathDistributionMode' | 'pathCount' | 'pathStartPadding' | 'pathEndPadding' | 'pathRandomScale' | 'pathRotation' | 'pathRandomRotation' | 'pathAlternateRotation' | 'pathMirrorAlternate' | 'pathSeed' | 'pathKeepInstances'>>) => void
+  setPathSourceObjectId: (objectId: string | null) => void
   toggleAutoConnectPaths: () => void
   setSmoothDrawing: (on: boolean) => void
   setEditingSketchObject: (objectId: string | null) => void
@@ -234,6 +242,7 @@ export const strokeLayoutInitialState: StrokeLayoutState = {
   pathMirrorAlternate: false,
   pathSeed: 1,
   pathKeepInstances: true,
+  pathSourceObjectId: null,
 }
 
 export function clearStrokeDraftState(): Pick<
@@ -282,6 +291,21 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
 ): StrokeLayoutActions {
   const store = () => get() as T & StrokeLayoutActions & StrokeStore
   const patch = (partial: object) => partial as unknown as Partial<T>
+  const updateSelectedPathLive = (
+    changes: EditableSketchSourcePatch & EditableVectorSourcePatch
+  ) => {
+    const { selectedObjectId, selectionObjectIds, objects } = store()
+    if (!selectedObjectId || selectionObjectIds.length !== 1) return
+    const object = objects.find((candidate) => candidate.id === selectedObjectId)
+    let updated: SceneObject | null = null
+    if (isSketchDoodleObject(object) && object.sketchSource.kind === 'path') {
+      updated = regenerateSketchObjectFromSource(object, changes)
+    } else if (isVectorDoodleObject(object) && object.vectorSource.strokeMode === 'centerline') {
+      updated = regenerateVectorObjectFromSource(object, changes)
+    }
+    if (!updated) return
+    set(patch({ objects: objects.map((candidate) => candidate.id === updated!.id ? updated! : candidate) }))
+  }
   return {
     setExtrudeMode: (on) =>
       set(
@@ -573,7 +597,7 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
         pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
         pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
-        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
+        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances, pathSourceObjectId,
       } = store()
 
       let capturedStroke = currentStroke.map((point) => ({ ...point }))
@@ -641,8 +665,8 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
         pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
         pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
-        pathSourceObject: pathOutput === 'object-array' ? objects.find((o) => o.id === selectedObjectId) ?? null : null,
-        pathSourceObjectId: pathOutput === 'object-array' ? selectedObjectId : null,
+        pathSourceObject: pathOutput === 'object-array' ? objects.find((o) => o.id === pathSourceObjectId) ?? null : null,
+        pathSourceObjectId: pathOutput === 'object-array' ? pathSourceObjectId : null,
         planeFrame: currentStrokePlane,
       }
 
@@ -710,8 +734,10 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
         }
       }
 
-      if (obj && (isHairStrokeMode(strokeMode) || (strokeMode === 'centerline' && pathOutput === 'cards'))) {
-        obj = applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
+      if (obj && (isHairStrokeMode(strokeMode) || strokeMode === 'centerline')) {
+        obj = strokeMode === 'centerline' && pathOutput === 'cards'
+          ? applyActiveCardTexture(obj, hairTextureId, hairTextureSettings)
+          : applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
         obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 
@@ -792,12 +818,24 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
 
     setHairTipStyle: (style) =>
       set({ hairTipStyle: style === 'square' ? 'square' : 'pointed' } as Partial<T>),
-    setPathStartCap: (style) => set({ pathStartCap: style } as Partial<T>),
-    setPathEndCap: (style) => set({ pathEndCap: style } as Partial<T>),
-    setPathRadialSegments: (segments) =>
-      set({ pathRadialSegments: Math.max(3, Math.min(24, Math.round(segments))) } as Partial<T>),
-    setPathRadiusScale: (scale) =>
-      set({ pathRadiusScale: Math.max(0.1, Math.min(4, scale)) } as Partial<T>),
+    setPathStartCap: (style) => {
+      set({ pathStartCap: style } as Partial<T>)
+      updateSelectedPathLive({ pathStartCap: style })
+    },
+    setPathEndCap: (style) => {
+      set({ pathEndCap: style } as Partial<T>)
+      updateSelectedPathLive({ pathEndCap: style })
+    },
+    setPathRadialSegments: (segments) => {
+      const value = Math.max(3, Math.min(24, Math.round(segments)))
+      set({ pathRadialSegments: value } as Partial<T>)
+      updateSelectedPathLive({ pathRadialSegments: value })
+    },
+    setPathRadiusScale: (scale) => {
+      const value = Math.max(0.1, Math.min(4, scale))
+      set({ pathRadiusScale: value } as Partial<T>)
+      updateSelectedPathLive({ pathRadiusScale: value })
+    },
     setRibbonStartTip: (style) => set({ ribbonStartTip: style } as Partial<T>),
     setRibbonEndTip: (style) => set({ ribbonEndTip: style } as Partial<T>),
     setRibbonTaper: (fraction) =>
@@ -805,6 +843,10 @@ export function createStrokeSlice<T extends StrokeLayoutState>(
     setRibbonWidthScale: (scale) =>
       set({ ribbonWidthScale: Math.max(0.1, Math.min(4, scale)) } as Partial<T>),
     setRibbonFlat: (flat) => set({ ribbonFlat: flat } as Partial<T>),
-    setPathOutputSettings: (settings) => set(settings as Partial<T>),
+    setPathOutputSettings: (settings) => {
+      set(settings as Partial<T>)
+      updateSelectedPathLive(settings)
+    },
+    setPathSourceObjectId: (objectId) => set({ pathSourceObjectId: objectId } as Partial<T>),
   }
 }

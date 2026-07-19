@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyActiveHairTexture, inheritTextureMaterial } from '../material/materialEditorSlice'
+import { applyActiveCardTexture, applyActiveHairTexture, inheritTextureMaterial } from '../material/materialEditorSlice'
 import { strokeToMesh } from './strokeToMesh'
 import { defaultMaterial } from '../material/materialTypes'
 import type { SceneObject } from '../mesh/HalfEdgeMesh'
@@ -38,6 +38,14 @@ function texturedSource(textureId: string): SceneObject {
 }
 
 describe('hair texture assignment', () => {
+  it('uses an imported card image as the replacement surface', () => {
+    const textured = applyActiveCardTexture(texturedSource('old'), 'card-image')
+    expect(textured.material?.mode).toBe('texture')
+    expect(textured.material?.textureId).toBe('card-image')
+    expect(textured.material?.textureCanvasMode).toBe('replace')
+    expect(textured.material?.doubleSided).toBe(false)
+    expect(textured.material?.textureRepeat).toEqual([1, 1])
+  })
   it('with hair texture → textured material on Hair Paths', () => {
     const obj = strokeToMesh({ ...base, strokeMode: 'hair-paths' })!
     const textured = applyActiveHairTexture(obj, 'tex-hair-1')

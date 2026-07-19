@@ -1,7 +1,8 @@
 import { HalfEdgeMesh, type SceneObject } from './HalfEdgeMesh'
-import { generateCapsuleSweep, generateTaperedPointedTube, type SweepCapStyle } from './extrusion'
+import { generateCapsuleSweep, generateCapsuleSweep3D, generateTaperedPointedTube, type SweepCapStyle } from './extrusion'
 import { generateHairRibbon, type HairTipStyle } from './hairRibbon'
 import type { Vec2 } from '../utils/math'
+import { ensurePositiveVolume } from './meshWinding'
 
 export type PathOutput = 'tube' | 'ribbon' | 'chain' | 'vine' | 'rope' | 'cards' | 'object-array' | 'profile-sweep'
 export type PathProfile = 'round' | 'square' | 'rectangle' | 'rail'
@@ -128,19 +129,31 @@ function makeBox(width: number, height: number, depth: number, color: number): H
   ]
   m.faces = [[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]]
   m.faceColors = m.faces.map(() => color)
+  // A predictable per-face atlas keeps the fallback object texture-ready.
+  m.uvs = [
+    {u:0,v:1},{u:1,v:1},{u:1,v:0},{u:0,v:0},
+  ]
+  m.faceUvIndices = m.faces.map(() => [0,1,2,3])
   m.buildHalfEdges(); return m
 }
 
-function makeCard(width: number, height: number, color: number): HalfEdgeMesh {
-  const m = new HalfEdgeMesh(), x = width / 2, y = height / 2
-  m.positions = [{x:-x,y:-y,z:0},{x:x,y:-y,z:0},{x:x,y:y,z:0},{x:-x,y:y,z:0}]
+/** A path-aligned image card. Local X follows the path and local Y is the
+ * card's upright axis. UVs use normal image orientation. The reverse face has
+ * opposite U handedness so it reads identically instead of mirrored. */
+function makeCard(width: number, length: number, color: number): HalfEdgeMesh {
+  const m = new HalfEdgeMesh(), x = length / 2, y = width / 2
+  m.positions = [{x:-x,y:-y,z:0},{x:-x,y:y,z:0},{x:x,y:y,z:0},{x:x,y:-y,z:0}]
   m.faces = [[0,1,2,3],[0,3,2,1]]; m.faceColors = [color,color]
-  m.uvs = [{u:0,v:1},{u:1,v:1},{u:1,v:0},{u:0,v:0}]
-  m.faceUvIndices = [[0,1,2,3],[0,3,2,1]]; m.buildHalfEdges(); return m
+  m.uvs = [{u:0,v:0},{u:0,v:1},{u:1,v:1},{u:1,v:0}]
+  m.faceUvIndices = [[0,1,2,3],[3,0,1,2]]; m.buildHalfEdges(); return m
 }
 
-function makeLink(major: number, minor: number, color: number): HalfEdgeMesh {
-  const m = new HalfEdgeMesh(), around = 12, tube = 5
+function makeLink(major: number, minor: number, color: number, detail: number): HalfEdgeMesh {
+  const m = new HalfEdgeMesh()
+  // Two independent loops keep topology regular: more segments around the
+  // link silhouette, fewer around the metal cross-section.
+  const around = Math.max(12, Math.min(20, Math.round(detail) * 2))
+  const tube = Math.max(6, Math.min(10, Math.round(detail)))
   for (let i=0;i<around;i++) for (let j=0;j<tube;j++) {
     const a=i/around*Math.PI*2, b=j/tube*Math.PI*2
     m.positions.push({x:Math.cos(a)*(major+minor*Math.cos(b)),y:Math.sin(a)*(major*.72+minor*Math.cos(b)),z:minor*Math.sin(b)})
@@ -148,6 +161,13 @@ function makeLink(major: number, minor: number, color: number): HalfEdgeMesh {
   for (let i=0;i<around;i++) for (let j=0;j<tube;j++) {
     const n=(i+1)%around, q=(j+1)%tube
     m.faces.push([i*tube+j,n*tube+j,n*tube+q,i*tube+q]); m.faceColors.push(color)
+    // Face-local UV corners keep both torus seams continuous (the final cells
+    // end at 1 instead of jumping backward to 0). Winding follows dMajor ×
+    // dTube, so the textured side and normals face away from the link core.
+    const u0=i/around,u1=(i+1)/around,v0=j/tube,v1=(j+1)/tube
+    const uvBase=m.uvs.length
+    m.uvs.push({u:u0,v:v0},{u:u1,v:v0},{u:u1,v:v1},{u:u0,v:v1})
+    m.faceUvIndices.push([uvBase,uvBase+1,uvBase+2,uvBase+3])
   }
   m.buildHalfEdges(); return m
 }
@@ -161,11 +181,12 @@ function sweepProfile(path: Vec2[], profile: Vec2[], settings: PathOutputSetting
     for (const q of profile) {
       const lateral=(q.x*cr-q.y*sr)*scale+settings.offset, z=(q.x*sr+q.y*cr)*scale
       m.positions.push({x:path[i]!.x+nx*lateral,y:path[i]!.y+ny*lateral,z})
+      m.uvs.push({u, v: profile.indexOf(q) / n})
     }
   }
-  for(let i=0;i<path.length-1;i++) for(let j=0;j<n;j++){const q=(j+1)%n;m.faces.push([i*n+j,(i+1)*n+j,(i+1)*n+q,i*n+q]);m.faceColors.push(color)}
-  if(settings.startCap!=='open'){m.faces.push(Array.from({length:n},(_,i)=>n-1-i));m.faceColors.push(color)}
-  if(settings.endCap!=='open'){m.faces.push(Array.from({length:n},(_,i)=>(path.length-1)*n+i));m.faceColors.push(color)}
+  for(let i=0;i<path.length-1;i++) for(let j=0;j<n;j++){const q=(j+1)%n;m.faces.push([i*n+j,(i+1)*n+j,(i+1)*n+q,i*n+q]);m.faceUvIndices.push([i*n+j,(i+1)*n+j,(i+1)*n+q,i*n+q]);m.faceColors.push(color)}
+  if(settings.startCap!=='open'){m.faces.push(Array.from({length:n},(_,i)=>n-1-i));m.faceUvIndices.push(Array.from({length:n},(_,i)=>n-1-i));m.faceColors.push(color)}
+  if(settings.endCap!=='open'){m.faces.push(Array.from({length:n},(_,i)=>(path.length-1)*n+i));m.faceUvIndices.push(Array.from({length:n},(_,i)=>(path.length-1)*n+i));m.faceColors.push(color)}
   m.buildHalfEdges(); return m
 }
 
@@ -176,7 +197,19 @@ export function generatePathOutput(path: Vec2[], settings: PathOutputSettings, c
   if (settings.output === 'vine') return generateTaperedPointedTube(path,{radius,radialSegments:settings.radialSegments,preserveSpine:true,color,tipStyle:'pointed'})
   if (settings.output === 'rope') {
     const strands: HalfEdgeMesh[]=[]
-    for(let strand=0;strand<3;strand++) strands.push(generateCapsuleSweep(path.map((p,i)=>{const t=tangent(path,i),phase=i/Math.max(1,path.length-1)*settings.twist*Math.PI/180+strand*Math.PI*2/3;return{x:p.x-t.y*Math.cos(phase)*radius*.7,y:p.y+t.x*Math.cos(phase)*radius*.7}}),{radius:radius*.42,radialSegments:Math.max(4,settings.radialSegments-2),preserveSpine:true,color,startCap:settings.startCap,endCap:settings.endCap}))
+    const arc=[0]
+    for(let i=1;i<path.length;i++) arc.push(arc[i-1]!+Math.hypot(path[i]!.x-path[i-1]!.x,path[i]!.y-path[i-1]!.y))
+    const total=Math.max(arc[arc.length-1]??0,1e-8)
+    const orbit=radius*.48
+    for(let strand=0;strand<3;strand++) {
+      const centerline=path.map((p,i)=>{
+        const t=tangent(path,i)
+        const phase=arc[i]!/total*settings.twist*Math.PI/180+strand*Math.PI*2/3
+        const radial=Math.cos(phase)*orbit
+        return {x:p.x-t.y*radial,y:p.y+t.x*radial,z:Math.sin(phase)*orbit}
+      })
+      strands.push(ensurePositiveVolume(generateCapsuleSweep3D(centerline,{radius:radius*.44,radialSegments:Math.max(5,settings.radialSegments-2),color,startCap:settings.startCap,endCap:settings.endCap})))
+    }
     return mergeOutputMeshes(strands,color)
   }
   if (settings.output === 'profile-sweep') {
@@ -184,7 +217,12 @@ export function generatePathOutput(path: Vec2[], settings: PathOutputSettings, c
     const profile=settings.profile==='rail'?[{x:-w,y:-h},{x:w,y:-h},{x:w,y:-h*.55},{x:w*.3,y:-h*.55},{x:w*.3,y:h*.55},{x:w,y:h*.55},{x:w,y:h},{x:-w,y:h},{x:-w,y:h*.55},{x:-w*.3,y:h*.55},{x:-w*.3,y:-h*.55},{x:-w,y:-h*.55}]:settings.profile==='round'?Array.from({length:settings.radialSegments},(_,i)=>({x:Math.cos(i/settings.radialSegments*Math.PI*2)*w,y:Math.sin(i/settings.radialSegments*Math.PI*2)*h})):[{x:-w,y:-h},{x:w,y:-h},{x:w,y:h},{x:-w,y:h}]
     return sweepProfile(path,profile,settings,color)
   }
-  const samples=samplePath(path,settings).map((sample)=>({ ...sample, p: { x: sample.p.x - sample.t.y * settings.offset, y: sample.p.y + sample.t.x * settings.offset } }))
+  // Chain spacing is capped at an interlocking pitch. Larger gaps made the
+  // alternating link look missing because no neighboring ring crossed it.
+  const samplingSettings = settings.output === 'chain' && (settings.distributionMode ?? 'spacing') === 'spacing'
+    ? { ...settings, spacing: Math.min(settings.spacing, radius * 2.35) }
+    : settings
+  const samples=samplePath(path,samplingSettings).map((sample)=>({ ...sample, p: { x: sample.p.x - sample.t.y * settings.offset, y: sample.p.y + sample.t.x * settings.offset } }))
   const random = seededRandom(settings.seed ?? 1)
   const placement = (s: typeof samples[number], i: number) => {
     const randomScale = Math.max(0, settings.randomScale ?? 0)
@@ -194,8 +232,24 @@ export function generatePathOutput(path: Vec2[], settings: PathOutputSettings, c
     const angle = Math.atan2(s.t.y,s.t.x) + ((settings.rotation ?? 0) + randomRotation + alternate) * Math.PI / 180
     return { scale, angle, mirror: !!settings.mirrorAlternate && i % 2 === 1 }
   }
-  if(settings.output==='chain') {const link=makeLink(radius*1.25,radius*.28,color);return mergeOutputMeshes(samples.map((s,i)=>{const p=placement(s,i);return transformCopy(link,s.p,p.angle+Math.PI/2,p.scale,settings.chainAlternating&&i%2?Math.PI/2:0,p.mirror)}),color)}
-  if(settings.output==='cards') {const card=makeCard(radius*2,radius*2,color);const meshes=samples.flatMap((s,i)=>{const p=placement(s,i);const first=transformCopy(card,s.p,p.angle,p.scale,0,p.mirror);return settings.cardCrossed?[first,transformCopy(card,s.p,p.angle,p.scale,Math.PI/2,p.mirror)]:[first]});return mergeOutputMeshes(meshes,color)}
+  if(settings.output==='chain') {
+    const link=makeLink(radius*1.35,radius*.34,color,settings.radialSegments)
+    // Link major axis follows the path. Alternating links roll 90° around that
+    // axis, passing through their neighbors instead of merely sitting beside them.
+    return mergeOutputMeshes(samples.map((s,i)=>{
+      const p=placement(s,i)
+      // Validate each disconnected solid independently. This also repairs a
+      // reflected winding if a procedural/mirrored chain source is restored.
+      return ensurePositiveVolume(transformCopy(link,s.p,p.angle,p.scale,settings.chainAlternating&&i%2?Math.PI/2:0,p.mirror))
+    }),color)
+  }
+  if(settings.output==='cards') {
+    const cardWidth = radius * 2 * Math.max(.1, settings.profileWidth)
+    const cardLength = radius * 4 * Math.max(.1, settings.profileHeight)
+    const card=makeCard(cardWidth,cardLength,color)
+    const meshes=samples.flatMap((s,i)=>{const p=placement(s,i);const first=transformCopy(card,s.p,p.angle,p.scale,0,p.mirror);return settings.cardCrossed?[first,transformCopy(card,s.p,p.angle,p.scale,Math.PI/2,p.mirror)]:[first]})
+    return mergeOutputMeshes(meshes,color)
+  }
   const source=settings.sourceObject?HalfEdgeMesh.fromObject(settings.sourceObject):makeBox(radius*1.3,radius*1.3,radius*1.3,color)
   return mergeOutputMeshes(samples.map((s,i)=>{const p=placement(s,i);return transformCopy(source,s.p,p.angle,p.scale,0,p.mirror)}),color)
 }

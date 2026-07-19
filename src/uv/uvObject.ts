@@ -12,6 +12,45 @@ export type UvMappingMode = 'box' | 'perFace'
 export type SceneObjectWithUVs = SceneObject & { uvs: Uv2[]; faceUvIndices: number[][] }
 export const DEFAULT_UV_LAYOUT_VERSION = 1
 
+export function isProceduralCardObject(obj: SceneObject): boolean {
+  return obj.sketchSource?.pathOutput === 'cards' || obj.vectorSource?.pathOutput === 'cards'
+}
+
+/** Every generated card intentionally overlaps the same full 0–1 image.
+ * Generic unwrap heuristics interpret that overlap as an error and atlas-pack
+ * the cards; this restores the authored billboard layout face by face. */
+export function assignFullImageCardUVs(obj: SceneObject): SceneObjectWithUVs {
+  const uvs: Uv2[] = []
+  const faceUvIndices = obj.faces.map((face, faceIndex) => {
+    if (face.length !== 4) {
+      const indices: number[] = []
+      for (let i = 0; i < face.length; i++) {
+        const angle = i / Math.max(1, face.length) * Math.PI * 2
+        indices.push(uvs.length)
+        uvs.push({ u: .5 + Math.cos(angle) * .5, v: .5 + Math.sin(angle) * .5 })
+      }
+      return indices
+    }
+    const base = uvs.length
+    // Generated cards are emitted as front/back face pairs. The reversed U
+    // assignment on the second face prevents the image reading backward.
+    if (faceIndex % 2 === 0) {
+      uvs.push({u:0,v:0},{u:0,v:1},{u:1,v:1},{u:1,v:0})
+    } else {
+      uvs.push({u:1,v:0},{u:0,v:0},{u:0,v:1},{u:1,v:1})
+    }
+    return [base, base + 1, base + 2, base + 3]
+  })
+  return {
+    ...obj,
+    uvs,
+    faceUvIndices,
+    uvMappingMode: 'perFace',
+    uvAutoPacked: true,
+    uvLayoutVersion: DEFAULT_UV_LAYOUT_VERSION,
+  }
+}
+
 /** Sketch/pen extruded meshes — use directional Blockbench atlas instead of smart UV. */
 export function isDoodleLikeObject(obj: SceneObject): boolean {
   return isSketchDoodleObject(obj) || isVectorDoodleObject(obj)
@@ -80,6 +119,10 @@ export function defaultBoxUnwrapObject(obj: SceneObject): SceneObjectWithUVs {
 }
 
 export function ensureObjectUVs(obj: SceneObject): SceneObjectWithUVs {
+  // Repeated full-image UVs are intentional for foliage/image cards. Always
+  // restore them here so legacy objects that were atlas-packed repair as soon
+  // as they render with a texture.
+  if (isProceduralCardObject(obj)) return assignFullImageCardUVs(obj)
   // Migrate untouched legacy CAD primitives once. The marker prevents later
   // manual UV moves (including intentional out-of-atlas tiling) being reset.
   if (

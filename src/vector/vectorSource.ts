@@ -62,6 +62,9 @@ export interface VectorSource {
   pathMirrorAlternate?: boolean
   pathSeed?: number
   pathKeepInstances?: boolean
+  /** Stable scene reference plus an embedded snapshot for Object Array regeneration. */
+  pathSourceObjectId?: string | null
+  pathSourceObject?: SceneObject | null
 }
 
 export function isVectorDoodleObject(
@@ -137,6 +140,8 @@ export type EditableVectorSourcePatch = Partial<
     | 'pathMirrorAlternate'
     | 'pathSeed'
     | 'pathKeepInstances'
+    | 'pathSourceObjectId'
+    | 'pathSourceObject'
   >
 >
 
@@ -193,6 +198,8 @@ export function regenerateVectorObjectFromSource(
     pathMirrorAlternate: changes.pathMirrorAlternate ?? source.pathMirrorAlternate,
     pathSeed: Math.floor(changes.pathSeed ?? source.pathSeed ?? 1),
     pathKeepInstances: changes.pathKeepInstances ?? source.pathKeepInstances,
+    pathSourceObjectId: 'pathSourceObjectId' in changes ? changes.pathSourceObjectId : source.pathSourceObjectId,
+    pathSourceObject: 'pathSourceObject' in changes ? changes.pathSourceObject : source.pathSourceObject,
   }
 
   const path = clonePath(nextSource.path)
@@ -246,6 +253,8 @@ export function regenerateVectorObjectFromSource(
     pathMirrorAlternate: nextSource.pathMirrorAlternate,
     pathSeed: nextSource.pathSeed,
     pathKeepInstances: nextSource.pathKeepInstances,
+    pathSourceObjectId: nextSource.pathSourceObjectId,
+    pathSourceObject: nextSource.pathSourceObject,
   })
   if (!rebuilt) return null
 
@@ -258,7 +267,10 @@ export function regenerateVectorObjectFromSource(
       rotation: { ...IDENTITY_TRANSFORM.rotation },
       scale: { ...IDENTITY_TRANSFORM.scale },
     },
-    smoothShading: obj.smoothShading ?? false,
+    smoothShading:
+      nextSource.strokeMode === 'centerline' && ['tube', 'vine', 'rope', 'chain'].includes(nextSource.pathOutput ?? 'tube')
+        ? true
+        : (obj.smoothShading ?? false),
     material: obj.material,
     faceMaterials: obj.faceMaterials,
     uvMappingMode: obj.uvMappingMode,

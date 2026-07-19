@@ -8,6 +8,7 @@ import type { HairUvTransform } from '../stroke/hairUvTransform'
 import { HairTexturePreview3D } from './HairTexturePreview3D'
 import { compositeLayers } from '../pixel/compositeLayers'
 import type { PixelDocument } from '../pixel/pixelTypes'
+import { applyActiveCardTexture, resolveTargetObjectIds } from '../material/materialEditorSlice'
 
 interface HairTextureDialogProps {
   onClose: () => void
@@ -132,6 +133,21 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
   const textureUrl = hairTextureId ? objectTextures[hairTextureId]?.url ?? null : null
   const previewKind = strokeMode === 'hair-strips' || strokeMode === 'hair-round' ? strokeMode : 'hair-paths'
 
+  const applyTextureToSelectedCards = (textureId: string) => {
+    const state = useAppStore.getState()
+    const ids = resolveTargetObjectIds(state.selectedObjectId, state.selectionObjectIds)
+    let changed = false
+    for (const objectId of ids) {
+      const object = state.objects.find((candidate) => candidate.id === objectId)
+      const isCard = object?.sketchSource?.pathOutput === 'cards' || object?.vectorSource?.pathOutput === 'cards'
+      if (!object || !isCard) continue
+      const textured = applyActiveCardTexture(object, textureId, state.hairTextureSettings)
+      state.updateObject(objectId, { material: textured.material })
+      changed = true
+    }
+    if (changed) state.commitHistory('Apply card image')
+  }
+
   const applySmartDefaults = (doc: PixelDocument | null) => {
     const { darkBackdrop, verticalFibers, atlasCrop } = analyzeHairTexture(doc)
     if (atlasCrop) {
@@ -176,6 +192,7 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
   const chooseTexture = (id: string) => {
     setHairTextureId(id)
     applySmartDefaults(pixelDocuments[id] ?? null)
+    applyTextureToSelectedCards(id)
   }
 
   const runImport = async () => {
@@ -190,6 +207,7 @@ export function HairTextureDialog({ onClose }: HairTextureDialogProps) {
       const id = await importHairTextureImage(file)
       const imported = useAppStore.getState().pixelDocuments[id] ?? null
       applySmartDefaults(imported)
+      applyTextureToSelectedCards(id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {

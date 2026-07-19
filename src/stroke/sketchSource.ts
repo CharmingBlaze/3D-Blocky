@@ -441,6 +441,7 @@ export type EditableSketchSourcePatch = Partial<Pick<SketchSource,
   | 'pathProfile' | 'pathProfileWidth' | 'pathProfileHeight' | 'pathChainAlternating' | 'pathCardCrossed'
   | 'pathDistributionMode' | 'pathCount' | 'pathStartPadding' | 'pathEndPadding' | 'pathRandomScale' | 'pathRotation'
   | 'pathRandomRotation' | 'pathAlternateRotation' | 'pathMirrorAlternate' | 'pathSeed' | 'pathKeepInstances'
+  | 'pathSourceObjectId' | 'pathSourceObject'
 >>
 
 /** Rebuild a sketch doodle from editable source parameters, preserving identity and transforms. */
@@ -488,6 +489,8 @@ export function regenerateSketchObjectFromSource(
     pathMirrorAlternate: changes.pathMirrorAlternate ?? source.pathMirrorAlternate,
     pathSeed: Math.floor(changes.pathSeed ?? source.pathSeed ?? 1),
     pathKeepInstances: changes.pathKeepInstances ?? source.pathKeepInstances,
+    pathSourceObjectId: 'pathSourceObjectId' in changes ? changes.pathSourceObjectId : source.pathSourceObjectId,
+    pathSourceObject: 'pathSourceObject' in changes ? changes.pathSourceObject : source.pathSourceObject,
   }
 
   const mesh = buildMeshFromSource(nextSource, nextSource.extrudeDepth, obj.color)
@@ -497,6 +500,9 @@ export function regenerateSketchObjectFromSource(
   offsetMeshInPlane(mesh, nextSource.center.x, nextSource.center.y)
   projectMeshToView(mesh, nextSource.view, nextSource.defaultDepth, nextSource.planeFrame)
 
+  const radialPathOutput = nextSource.kind === 'path' && (
+    (nextSource.pathOutput ?? 'tube') === 'tube' || nextSource.pathOutput === 'vine'
+  )
   if (
     nextSource.kind === 'outline' ||
     nextSource.kind === 'ribbon' ||
@@ -504,7 +510,8 @@ export function regenerateSketchObjectFromSource(
     nextSource.kind === 'hair-path' ||
     nextSource.kind === 'hair-strip' ||
     nextSource.kind === 'hair-round' ||
-    (nextSource.isClosed && nextSource.kind !== 'path')
+    (nextSource.isClosed && nextSource.kind !== 'path') ||
+    (nextSource.kind === 'path' && !radialPathOutput)
   ) {
     ensureClosedMeshOutward(mesh)
   } else {
@@ -526,6 +533,8 @@ export function regenerateSketchObjectFromSource(
       nextSource.kind === 'hair-round') &&
     mesh.uvs.length > 0 &&
     mesh.faceUvIndices.length === mesh.faces.length
+  const cardUvs = nextSource.kind === 'path' && nextSource.pathOutput === 'cards' &&
+    mesh.uvs.length > 0 && mesh.faceUvIndices.length === mesh.faces.length
 
   const capsuleKind = nextSource.kind === 'capsule-path' || nextSource.kind === 'capsule-shape'
   const rebuilt = mesh.toObject(obj.id, obj.name, {
@@ -535,9 +544,12 @@ export function regenerateSketchObjectFromSource(
     sketchSource: nextSource,
     polyBudget: Math.max(mesh.vertexCount(), nextSource.polyBudget),
     color: obj.color,
-    smoothShading: obj.smoothShading ?? false,
-    uvAutoPacked: hairUvs ? true : obj.uvAutoPacked,
-    uvMappingMode: hairUvs ? 'box' : obj.uvMappingMode,
+    smoothShading:
+      nextSource.kind === 'path' && ['tube', 'vine', 'rope', 'chain'].includes(nextSource.pathOutput ?? 'tube')
+        ? true
+        : (obj.smoothShading ?? false),
+    uvAutoPacked: hairUvs || cardUvs ? true : obj.uvAutoPacked,
+    uvMappingMode: cardUvs ? 'perFace' : hairUvs ? 'box' : obj.uvMappingMode,
     transform: obj.transform ?? {
       position: { ...IDENTITY_TRANSFORM.position },
       rotation: { ...IDENTITY_TRANSFORM.rotation },

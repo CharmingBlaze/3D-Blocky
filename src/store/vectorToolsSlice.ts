@@ -1,7 +1,7 @@
 import * as vectorSourceApi from '../vector/vectorSource'
 import type { EditableVectorSourcePatch } from '../vector/vectorSource'
 import { vectorPathToMesh } from '../vector/vectorPathToMesh'
-import { applyActiveHairTexture } from '../material/materialEditorSlice'
+import { applyActiveCardTexture, applyActiveHairTexture } from '../material/materialEditorSlice'
 import { applyHairUvTransformToObject } from '../stroke/hairUvTransform'
 import { emptyVectorDocument, type VectorDocument, type VectorPath, type VectorAnchor, type ShapeKind } from '../vector/types'
 import {
@@ -281,6 +281,7 @@ type VectorStore = VectorToolsLayoutState & {
   pathMirrorAlternate: boolean
   pathSeed: number
   pathKeepInstances: boolean
+  pathSourceObjectId: string | null
   pushHistory: (label?: string) => boolean
   objectTextures: Record<string, UvTextureInfo>
 }
@@ -928,7 +929,6 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         extrudeAmount,
         blobInflation,
         objects,
-        selectedObjectId,
         hairTextureId,
         hairUvTransform,
         hairTextureSettings,
@@ -945,7 +945,7 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         pathOutput, pathStartScale, pathEndScale, pathTwist, pathSpacing, pathOffset,
         pathProfile, pathProfileWidth, pathProfileHeight, pathChainAlternating, pathCardCrossed,
         pathDistributionMode, pathCount, pathStartPadding, pathEndPadding, pathRandomScale, pathRotation,
-        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances,
+        pathRandomRotation, pathAlternateRotation, pathMirrorAlternate, pathSeed, pathKeepInstances, pathSourceObjectId,
       } = store()
 
       const replaceId = options?.replaceObjectId
@@ -1016,13 +1016,17 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
         pathSeed: prevSource?.pathSeed ?? pathSeed,
         pathKeepInstances: prevSource?.pathKeepInstances ?? pathKeepInstances,
         pathSourceObject: (prevSource?.pathOutput ?? pathOutput) === 'object-array'
-          ? objects.find((o) => o.id === selectedObjectId) ?? null
+          ? objects.find((o) => o.id === (prevSource?.pathSourceObjectId ?? pathSourceObjectId)) ?? null
           : null,
-        pathSourceObjectId: (prevSource?.pathOutput ?? pathOutput) === 'object-array' ? selectedObjectId : null,
+        pathSourceObjectId: (prevSource?.pathOutput ?? pathOutput) === 'object-array'
+          ? (prevSource?.pathSourceObjectId ?? pathSourceObjectId)
+          : null,
       })
 
-      if (obj && isHairStrokeMode(useStrokeMode)) {
-        obj = applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
+      if (obj && (isHairStrokeMode(useStrokeMode) || useStrokeMode === 'centerline')) {
+        obj = useStrokeMode === 'centerline' && (prevSource?.pathOutput ?? pathOutput) === 'cards'
+          ? applyActiveCardTexture(obj, hairTextureId, hairTextureSettings)
+          : applyActiveHairTexture(obj, hairTextureId, hairTextureSettings)
         obj = applyHairUvTransformToObject(obj, hairUvTransform)
       }
 
@@ -1081,6 +1085,8 @@ export function createVectorToolsSlice<T extends VectorToolsLayoutState>(
               pathMirrorAlternate: prevSource?.pathMirrorAlternate ?? pathMirrorAlternate,
               pathSeed: prevSource?.pathSeed ?? pathSeed,
               pathKeepInstances: prevSource?.pathKeepInstances ?? pathKeepInstances,
+              pathSourceObjectId: obj.sketchSource?.pathSourceObjectId ?? prevSource?.pathSourceObjectId ?? pathSourceObjectId,
+              pathSourceObject: obj.sketchSource?.pathSourceObject ?? prevSource?.pathSourceObject ?? null,
             })
           : obj
 

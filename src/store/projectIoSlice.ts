@@ -203,6 +203,7 @@ export function defaultProjectPreferencesPartial(): Record<string, unknown> {
     pathMirrorAlternate: strokeLayoutInitialState.pathMirrorAlternate,
     pathSeed: strokeLayoutInitialState.pathSeed,
     pathKeepInstances: strokeLayoutInitialState.pathKeepInstances,
+    pathSourceObjectId: strokeLayoutInitialState.pathSourceObjectId,
     polyBudget: sceneSettingsInitialState.polyBudget,
     brushDensity: sceneSettingsInitialState.brushDensity,
     drawDoubleSided: sceneSettingsInitialState.drawDoubleSided,

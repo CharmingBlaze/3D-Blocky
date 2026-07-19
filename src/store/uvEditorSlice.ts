@@ -2,7 +2,7 @@ import type { FloatingPanelState } from '../components/FloatingPanel'
 import type { UvSnapMode } from '../uv/uvSnap'
 import { unwrapSelectedFaces, type UvUnwrapMethod } from '../uv/uvUnwrap'
 import { expandFacesToPlanarRegions } from '../mesh/faceGroups'
-import { ensureObjectUVs, assignUvMappingForMode, resolveUvMappingMode, setUvPoints, type UvMappingMode } from '../uv/uvObject'
+import { ensureObjectUVs, assignFullImageCardUVs, isProceduralCardObject, assignUvMappingForMode, resolveUvMappingMode, setUvPoints, type UvMappingMode } from '../uv/uvObject'
 import {
   flipUVsHorizontal,
   flipUVsVertical,
@@ -341,7 +341,7 @@ export function createUvEditorSlice<T extends UvEditorLayoutState>(
       const mat = resolveEffectiveMaterial(obj)
       if (mat.mode === 'texture' && (mat.textureId ?? obj.id) === docId) return
 
-      const withUvs = ensureObjectUVs(obj)
+      const withUvs = isProceduralCardObject(obj) ? assignFullImageCardUVs(obj) : ensureObjectUVs(obj)
       store().updateObject(objectId, {
         ...setObjectMaterialMode(withUvs, 'texture', docId),
         uvs: withUvs.uvs,

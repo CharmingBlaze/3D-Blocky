@@ -646,8 +646,9 @@ export function pathSketchDoodleToObject(input: PolylineInput): SceneObject | nu
   const spine = preparePathCenterline(relative, polyBudget)
   if (!spine) return null
 
+  const pathOutput = input.pathOutput ?? 'tube'
   const mesh = generatePathOutput(spine, {
-    output: input.pathOutput ?? 'tube', radius, radialSegments: input.pathRadialSegments ?? primitiveSegmentsForBudget(polyBudget, 8),
+    output: pathOutput, radius, radialSegments: input.pathRadialSegments ?? primitiveSegmentsForBudget(polyBudget, 8),
     startCap: input.pathStartCap ?? 'flat', endCap: input.pathEndCap ?? 'flat', startScale: input.pathStartScale ?? 1, endScale: input.pathEndScale ?? 1,
     twist: input.pathTwist ?? 360, spacing: input.pathSpacing ?? 16, offset: input.pathOffset ?? 0,
     ribbonStartTip: input.ribbonStartTip ?? 'square', ribbonEndTip: input.ribbonEndTip ?? 'square', ribbonTaper: input.ribbonTaper ?? .35, ribbonFlat: input.ribbonFlat ?? false,
@@ -673,10 +674,14 @@ export function pathSketchDoodleToObject(input: PolylineInput): SceneObject | nu
     defaultDepth,
     color,
     polyBudget,
-    name ?? ({tube:'Path',ribbon:'Ribbon',chain:'Chain',vine:'Vine',rope:'Rope',cards:'2D Cards','object-array':'Object Array','profile-sweep':'Profile Sweep'}[input.pathOutput ?? 'tube']),
+    name ?? ({tube:'Path',ribbon:'Ribbon',chain:'Chain',vine:'Vine',rope:'Rope',cards:'2D Cards','object-array':'Object Array','profile-sweep':'Profile Sweep'}[pathOutput]),
     source,
-    false,
-    prepared.points
+    pathOutput === 'chain' || pathOutput === 'tube' || pathOutput === 'vine' || pathOutput === 'rope',
+    // Only shapes whose surface is actually radial to the stroke centerline
+    // may use the tube orientation repair. Chain links are separate tori; using
+    // the stroke as their centerline flips valid inner/link-side faces.
+    pathOutput === 'tube' || pathOutput === 'vine' ? prepared.points : undefined,
+    pathOutput === 'cards' ? { uvAutoPacked: true, uvMappingMode: 'perFace' } : undefined
   )
 }
 

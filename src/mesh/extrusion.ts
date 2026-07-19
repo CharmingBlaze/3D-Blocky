@@ -451,6 +451,16 @@ function normalizeClosedSpine(path: Vec2[], closed: boolean): Vec2[] {
   return path
 }
 
+function normalizeClosedCurve3D(path: Vec3[], closed: boolean): Vec3[] {
+  if (!closed || path.length < 2) return path
+  const first = path[0]!
+  const last = path[path.length - 1]!
+  if (Math.hypot(first.x - last.x, first.y - last.y, first.z - last.z) < 0.5) {
+    return path.slice(0, -1)
+  }
+  return path
+}
+
 /**
  * Sweep a low-poly circular cross-section along a 2D path.
  * Side walls are quads between rings; open ends use flat n-gon disks when hemiRings <= 0
@@ -460,18 +470,12 @@ function normalizeClosedSpine(path: Vec2[], closed: boolean): Vec2[] {
 export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions): HalfEdgeMesh {
   const {
     radius,
-    radialSegments,
     minAngleDeg = 15,
     closed = false,
-    hemiRings = 0,
-    color = 0xf5a66e,
     preserveSpine = false,
-    startCap,
-    endCap,
   } = options
 
   const mesh = new HalfEdgeMesh()
-  const segments = Math.max(3, Math.min(24, radialSegments))
   if (path.length < 2 || radius < 1e-6) return mesh
 
   const spine = normalizeClosedSpine(path, closed)
@@ -480,7 +484,34 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
   const sampled = preserveSpine ? spine : curvatureSampleProfile(spine, minAngleDeg)
   if (sampled.length < 2) return mesh
 
-  const curve = sampled.map(vec2To3)
+  return generateCapsuleSweepCurve(sampled.map(vec2To3), options)
+}
+
+/**
+ * Sweep a circular cross-section along an authored 3D centerline. Rope uses
+ * this entry point so its strands can orbit both around and behind the path
+ * instead of merely wavering from side to side in the drawing plane.
+ */
+export function generateCapsuleSweep3D(path: Vec3[], options: CapsuleSweepOptions): HalfEdgeMesh {
+  const mesh = new HalfEdgeMesh()
+  if (path.length < 2 || options.radius < 1e-6) return mesh
+  const curve = normalizeClosedCurve3D(path, options.closed ?? false)
+  if (curve.length < 2) return mesh
+  return generateCapsuleSweepCurve(curve, options)
+}
+
+function generateCapsuleSweepCurve(curve: Vec3[], options: CapsuleSweepOptions): HalfEdgeMesh {
+  const {
+    radius,
+    radialSegments,
+    closed = false,
+    hemiRings = 0,
+    color = 0xf5a66e,
+    startCap,
+    endCap,
+  } = options
+  const mesh = new HalfEdgeMesh()
+  const segments = Math.max(3, Math.min(24, radialSegments))
   const frames = buildSweepFrames(curve, closed)
   if (frames.length < 2) return mesh
 
@@ -498,6 +529,37 @@ export function generateCapsuleSweep(path: Vec2[], options: CapsuleSweepOptions)
     appendStyledSweepEndCap(mesh, frames[0]!, ringVerts[0]!, radius, segments, true, color, startCap ?? legacyStyle)
     appendStyledSweepEndCap(mesh, frames[ringCount - 1]!, ringVerts[ringCount - 1]!, radius, segments, false, color, endCap ?? legacyStyle)
   }
+
+  // Author one continuous cylindrical UV set for every sweep variant. This is
+  // intentionally done after caps are built so flat, rounded, and pointed ends
+  // all remain textureable. U follows arc length; V wraps the cross-section.
+  const arcU = arcLengthParams(curve)
+  mesh.faceUvIndices = mesh.faces.map((face) => {
+    const values = face.map((vertexIndex) => {
+      const p = mesh.positions[vertexIndex]!
+      let nearest = 0
+      let nearestDistance = Number.POSITIVE_INFINITY
+      for (let i = 0; i < frames.length; i++) {
+        const c = frames[i]!.center
+        const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z
+        const distance = dx * dx + dy * dy + dz * dz
+        if (distance < nearestDistance) {
+          nearestDistance = distance
+          nearest = i
+        }
+      }
+      const frame = frames[nearest]!
+      const delta = sub3(p, frame.center)
+      const around = Math.atan2(dot3(delta, frame.binormal), dot3(delta, frame.normal))
+      return { u: arcU[nearest]!, v: (around / (Math.PI * 2) + 1) % 1 }
+    })
+    const minV = Math.min(...values.map((uv) => uv.v))
+    const maxV = Math.max(...values.map((uv) => uv.v))
+    if (maxV - minV > 0.5) {
+      values.forEach((uv) => { if (uv.v < 0.5) uv.v += 1 })
+    }
+    return values.map((uv) => pushTubeUv(mesh, uv.u, uv.v))
+  })
 
   mesh.buildHalfEdges()
   return mesh

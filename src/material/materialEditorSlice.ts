@@ -279,3 +279,34 @@ export function applyActiveHairTexture(
     },
   }
 }
+
+/** Use an imported image as the card surface itself instead of painting it
+ * over the palette color. Card meshes author one outward polygon per side, so
+ * each polygon renders once and avoids coplanar double-sided z-fighting. */
+export function applyActiveCardTexture(
+  obj: SceneObject,
+  textureId: string | null | undefined,
+  settings?: import('../stroke/hairTextureSettings').HairTextureSettings
+): SceneObject {
+  const textured = applyActiveHairTexture(obj, textureId, settings)
+  if (!textureId || !textured.material) return textured
+  return {
+    ...textured,
+    material: {
+      ...textured.material,
+      textureCanvasMode: 'replace',
+      textureWrap: 'clamp',
+      textureRepeat: [1, 1],
+      textureOffset: [0, 0],
+      textureRotation: 0,
+      textureTint: [1, 1, 1, 1],
+      textureTintStrength: 0,
+      textureLumaAlpha: false,
+      textureBrightness: 1,
+      textureShadowDetail: 0,
+      textureGradient: undefined,
+      opacity: 1,
+      doubleSided: false,
+    },
+  }
+}
