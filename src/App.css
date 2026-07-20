@@ -400,6 +400,51 @@
   gap: 6px;
 }
 
+.side-panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  flex-shrink: 0;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-dark) 55%, var(--bg-panel));
+}
+
+.side-panel-tab {
+  min-width: 0;
+  padding: 7px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-panel-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+}
+
+.side-panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+}
+
+.side-panel-tab:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
 .app-brand-mark {
   display: inline-flex;
   align-items: center;
@@ -1120,6 +1165,20 @@
   gap: 4px;
   padding: 6px 8px;
   background: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-dark));
+}
+
+.side-panel .side-panel-tabs {
+  background: color-mix(in srgb, var(--bg-dark) 40%, var(--bg-panel));
+}
+
+.side-panel .side-panel-tab {
+  padding: 6px 2px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.side-panel .side-panel-tab.active {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .side-panel .side-file-menu {

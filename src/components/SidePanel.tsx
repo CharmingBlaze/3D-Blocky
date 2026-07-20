@@ -99,6 +99,15 @@ const POLY_DRAW_MODES: { id: PolyDrawMode; label: string }[] = [
   { id: 'ngon', label: 'Polygon' },
 ]
 
+type SidePanelTab = 'create' | 'edit' | 'look' | 'scene'
+
+const SIDE_PANEL_TABS: { id: SidePanelTab; label: string; title: string }[] = [
+  { id: 'create', label: 'Create', title: 'Create tools and active drawing options' },
+  { id: 'edit', label: 'Edit', title: 'Selection, transform, topology, and object actions' },
+  { id: 'look', label: 'Look', title: 'Appearance, materials, and viewport display' },
+  { id: 'scene', label: 'Scene', title: 'References, workspace panels, and interface' },
+]
+
 function SideBtnGroup({
   cols,
   children,
@@ -666,6 +675,7 @@ export function SidePanel() {
   const [cardTextureError, setCardTextureError] = useState<string | null>(null)
   const [objectArrayImportBusy, setObjectArrayImportBusy] = useState(false)
   const [objectArraySourceError, setObjectArraySourceError] = useState<string | null>(null)
+  const [panelTab, setPanelTab] = useState<SidePanelTab>('create')
 
   const hairTextureLabel = useMemo(() => {
     if (!hairTextureId) return null
@@ -1005,117 +1015,27 @@ export function SidePanel() {
           </div>
         </div>
 
-        <div className="side-panel-scroll themed-scroll">
-          <SideSection title="Workspace" order={60} columns={2}>
-            <div className="side-create-label">Toolbars</div>
+        <div className="side-panel-tabs" role="tablist" aria-label="Side panel sections">
+          {SIDE_PANEL_TABS.map((tab) => (
             <button
-              className="side-btn side-btn-wide"
-              onClick={() => setShowToolRing(true)}
-              title="Open tool ring (Tab to toggle)"
-            >
-              Tools (Tab)
-            </button>
-            <TransformToolbarToggle />
-            <PrimitivesToolbarToggle />
-            <button
-              className={`side-btn side-btn-wide ${outlinerOpen ? 'active' : ''}`}
-              onClick={openOutliner}
-              title={outlinerMinimized ? 'Restore scene Outliner' : 'Open scene Outliner'}
-            >
-              Outliner{outlinerOpen && outlinerMinimized ? ' ▾' : ''}
-            </button>
-          </SideSection>
-
-          <SideSection title="View" columns={2} order={40}>
-            <div className="side-create-label">Viewport aids</div>
-            <SideBtnGroup cols={2}>
-              <button
-                className={`side-btn ${showGrid ? 'active' : ''}`}
-                onClick={() => setShowGrid(!showGrid)}
-                title="Toggle grid"
-              >
-                Grid
-              </button>
-              <button
-                className={`side-btn ${showDensityHeatmap ? 'active' : ''}`}
-                onClick={() => setShowDensityHeatmap(!showDensityHeatmap)}
-              >
-                Heatmap
-              </button>
-            </SideBtnGroup>
-            <div className="side-create-label">Navigation</div>
-            <button
+              key={tab.id}
               type="button"
-              className="side-btn side-btn-wide"
-              disabled={!canFitViews}
-              onClick={handleFitViews}
-              title="Reset all viewports to their default orientation and fit them to the selected object(s)"
+              role="tab"
+              aria-selected={panelTab === tab.id}
+              id={`side-panel-tab-${tab.id}`}
+              className={`side-panel-tab ${panelTab === tab.id ? 'active' : ''}`}
+              title={tab.title}
+              onClick={() => setPanelTab(tab.id)}
             >
-              Reset & Fit
+              {tab.label}
             </button>
-          </SideSection>
+          ))}
+        </div>
 
-          <SideSection title="Appearance" order={15}>
-            <div className="side-create-label">Color</div>
-            <PaletteBar variant="side" />
-            <div className="side-create-label">Editors</div>
-            <div className="side-editor-grid">
-              <button
-                className={`side-btn ${uvEditorOpen ? 'active' : ''}`}
-                onClick={toggleUvEditor}
-                disabled={selectionCount === 0 && !selectedObjectId}
-                title={
-                  uvEditorOpen && uvEditorPanel.minimized
-                    ? 'Restore UV Editor'
-                    : 'UV Editor — edit texture coordinates for selected object'
-                }
-              >
-                UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
-              </button>
-              <button
-                className={`side-btn ${materialEditorOpen ? 'active' : ''}`}
-                onClick={toggleMaterialEditor}
-                disabled={selectionCount === 0 && !selectedObjectId}
-                title={
-                  materialEditorOpen && materialEditorPanel.minimized
-                    ? 'Restore Material Editor'
-                    : 'Material Editor — colors, palettes, gradients'
-                }
-              >
-                Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
-              </button>
-              <SidePanelPixelEditorMenu
-                open={pixelEditorOpen}
-                minimized={pixelEditorPanel.minimized}
-                canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
-                onOpen={() => openPixelEditor()}
-                onClose={togglePixelEditor}
-                onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
-                onNewDocument={(width, height) => openPixelEditor({ width, height })}
-                onShowCanvas={togglePixelEditor}
-              />
-            </div>
-            <div className="side-create-label">Viewport display</div>
-            <SideButtonDropdown
-              label="View"
-              value={viewportDisplayMode}
-              options={VIEWPORT_DISPLAY_MODES.map((mode) => ({
-                value: mode,
-                label: VIEWPORT_DISPLAY_CONFIG[mode].label,
-              }))}
-              onSelect={(mode) => setViewportDisplayMode(mode as ViewportDisplayMode)}
-              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
-              alwaysShowLabel
-              active
-            />
-            {viewportDisplayMode === 'normals' && (
-              <p className="side-color-hint muted">
-                Green outward · red inverted · Alt+click face to flip · F flips selection
-              </p>
-            )}
-          </SideSection>
-
-          <SideSection title="Create" columns={2} order={10}>
+        <div className="side-panel-scroll themed-scroll">
+          {panelTab === 'create' && (
+          <>
+          <SideSection title="Create" columns={2} order={10} collapsible={false}>
             <div className="side-create-label">Mesh tools</div>
             <SideBtnGroup cols={3}>
               <button
@@ -2106,7 +2026,11 @@ export function SidePanel() {
               </p>
             </SideSection>
           )}
+          </>
+          )}
 
+          {panelTab === 'edit' && (
+          <>
           <SideSection title="Selection" columns={2} order={20}>
             <div className="side-create-label">Selection filters</div>
             <SideBtnGroup cols={2}>
@@ -2487,7 +2411,159 @@ export function SidePanel() {
             )}
           </SideSection>
 
-          <SideSection title="References & images" order={50}>
+          <SideSection title="Object" columns={2} order={30}>
+            <div className="side-create-label">Shading & topology</div>
+            <SideBtnGroup cols={2}>
+              <button className="side-btn" onClick={toggleTopologyLock} title="Lock topology (L)">
+                Lock
+              </button>
+              <button
+                className={`side-btn ${allSelectedFlat ? 'active' : ''}`}
+                onClick={() => setSelectionSmoothShading(false)}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title="Shade flat — faceted low-poly look (Blender Shade Flat)"
+              >
+                Shade Flat
+              </button>
+              <button
+                className={`side-btn ${allSelectedSmooth ? 'active' : ''}`}
+                onClick={() => setSelectionSmoothShading(true)}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title="Shade smooth — averaged vertex normals (Blender Shade Smooth)"
+              >
+                Shade Smooth
+              </button>
+              <button className="side-btn" onClick={simplifySelected}>
+                Reduce
+              </button>
+            </SideBtnGroup>
+            <div className="side-create-label">Clipboard & actions</div>
+            <SideBtnGroup cols={2}>
+              <button
+                className="side-btn"
+                onClick={copySelection}
+                disabled={selectionCount === 0}
+                title="Copy selection (Ctrl+C)"
+              >
+                Copy
+              </button>
+              <button
+                className="side-btn"
+                onClick={pasteClipboard}
+                disabled={!clipboard?.length}
+                title="Paste (Ctrl+V)"
+              >
+                Paste
+              </button>
+              <button
+                className="side-btn side-btn-danger"
+                onClick={deleteSelection}
+                disabled={!hasDeletableSelection}
+                title="Delete selection (Del)"
+              >
+                Delete
+              </button>
+            </SideBtnGroup>
+          </SideSection>
+          </>
+          )}
+
+          {panelTab === 'look' && (
+          <>
+          <SideSection title="Appearance" order={15} collapsible={false}>
+            <div className="side-create-label">Color</div>
+            <PaletteBar variant="side" />
+            <div className="side-create-label">Editors</div>
+            <div className="side-editor-grid">
+              <button
+                className={`side-btn ${uvEditorOpen ? 'active' : ''}`}
+                onClick={toggleUvEditor}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title={
+                  uvEditorOpen && uvEditorPanel.minimized
+                    ? 'Restore UV Editor'
+                    : 'UV Editor — edit texture coordinates for selected object'
+                }
+              >
+                UV Editor{uvEditorOpen && uvEditorPanel.minimized ? ' ▾' : ''}
+              </button>
+              <button
+                className={`side-btn ${materialEditorOpen ? 'active' : ''}`}
+                onClick={toggleMaterialEditor}
+                disabled={selectionCount === 0 && !selectedObjectId}
+                title={
+                  materialEditorOpen && materialEditorPanel.minimized
+                    ? 'Restore Material Editor'
+                    : 'Material Editor — colors, palettes, gradients'
+                }
+              >
+                Material Editor{materialEditorOpen && materialEditorPanel.minimized ? ' ▾' : ''}
+              </button>
+              <SidePanelPixelEditorMenu
+                open={pixelEditorOpen}
+                minimized={pixelEditorPanel.minimized}
+                canPaintOnModel={selectionCount > 0 || !!selectedObjectId}
+                onOpen={() => openPixelEditor()}
+                onClose={togglePixelEditor}
+                onPaintOnModel={() => openPixelEditor({ paintOnModel: true })}
+                onNewDocument={(width, height) => openPixelEditor({ width, height })}
+                onShowCanvas={togglePixelEditor}
+              />
+            </div>
+            <div className="side-create-label">Viewport display</div>
+            <SideButtonDropdown
+              label="View"
+              value={viewportDisplayMode}
+              options={VIEWPORT_DISPLAY_MODES.map((mode) => ({
+                value: mode,
+                label: VIEWPORT_DISPLAY_CONFIG[mode].label,
+              }))}
+              onSelect={(mode) => setViewportDisplayMode(mode as ViewportDisplayMode)}
+              title={VIEWPORT_DISPLAY_CONFIG[viewportDisplayMode].hint}
+              alwaysShowLabel
+              active
+            />
+            {viewportDisplayMode === 'normals' && (
+              <p className="side-color-hint muted">
+                Green outward · red inverted · Alt+click face to flip · F flips selection
+              </p>
+            )}
+          </SideSection>
+
+          <SideSection title="View" columns={2} order={40}>
+            <div className="side-create-label">Viewport aids</div>
+            <SideBtnGroup cols={2}>
+              <button
+                className={`side-btn ${showGrid ? 'active' : ''}`}
+                onClick={() => setShowGrid(!showGrid)}
+                title="Toggle grid"
+              >
+                Grid
+              </button>
+              <button
+                className={`side-btn ${showDensityHeatmap ? 'active' : ''}`}
+                onClick={() => setShowDensityHeatmap(!showDensityHeatmap)}
+              >
+                Heatmap
+              </button>
+            </SideBtnGroup>
+            <div className="side-create-label">Navigation</div>
+            <button
+              type="button"
+              className="side-btn side-btn-wide"
+              disabled={!canFitViews}
+              onClick={handleFitViews}
+              title="Reset all viewports to their default orientation and fit them to the selected object(s)"
+            >
+              Reset & Fit
+            </button>
+          </SideSection>
+          </>
+          )}
+
+          {panelTab === 'scene' && (
+          <>
+          <SideSection title="References & images" order={50} collapsible={false}>
             <div className="side-create-label">Placement</div>
             <p className="side-color-hint muted">
               Drag an image into empty viewport space to place it. Drop onto an existing object to texture that object instead.
@@ -2628,65 +2704,32 @@ export function SidePanel() {
             </p>
           </SideSection>
 
-          <SideSection title="Object" columns={2} order={30}>
-            <div className="side-create-label">Shading & topology</div>
-            <SideBtnGroup cols={2}>
-              <button className="side-btn" onClick={toggleTopologyLock} title="Lock topology (L)">
-                Lock
-              </button>
-              <button
-                className={`side-btn ${allSelectedFlat ? 'active' : ''}`}
-                onClick={() => setSelectionSmoothShading(false)}
-                disabled={selectionCount === 0 && !selectedObjectId}
-                title="Shade flat — faceted low-poly look (Blender Shade Flat)"
-              >
-                Shade Flat
-              </button>
-              <button
-                className={`side-btn ${allSelectedSmooth ? 'active' : ''}`}
-                onClick={() => setSelectionSmoothShading(true)}
-                disabled={selectionCount === 0 && !selectedObjectId}
-                title="Shade smooth — averaged vertex normals (Blender Shade Smooth)"
-              >
-                Shade Smooth
-              </button>
-              <button className="side-btn" onClick={simplifySelected}>
-                Reduce
-              </button>
-            </SideBtnGroup>
-            <div className="side-create-label">Clipboard & actions</div>
-            <SideBtnGroup cols={2}>
-              <button
-                className="side-btn"
-                onClick={copySelection}
-                disabled={selectionCount === 0}
-                title="Copy selection (Ctrl+C)"
-              >
-                Copy
-              </button>
-              <button
-                className="side-btn"
-                onClick={pasteClipboard}
-                disabled={!clipboard?.length}
-                title="Paste (Ctrl+V)"
-              >
-                Paste
-              </button>
-              <button
-                className="side-btn side-btn-danger"
-                onClick={deleteSelection}
-                disabled={!hasDeletableSelection}
-                title="Delete selection (Del)"
-              >
-                Delete
-              </button>
-            </SideBtnGroup>
+          <SideSection title="Workspace" order={60} columns={2}>
+            <div className="side-create-label">Toolbars</div>
+            <button
+              className="side-btn side-btn-wide"
+              onClick={() => setShowToolRing(true)}
+              title="Open tool ring (Tab to toggle)"
+            >
+              Tools (Tab)
+            </button>
+            <TransformToolbarToggle />
+            <PrimitivesToolbarToggle />
+            <button
+              className={`side-btn side-btn-wide ${outlinerOpen ? 'active' : ''}`}
+              onClick={openOutliner}
+              title={outlinerMinimized ? 'Restore scene Outliner' : 'Open scene Outliner'}
+            >
+              Outliner{outlinerOpen && outlinerMinimized ? ' ▾' : ''}
+            </button>
           </SideSection>
 
           <SideSection title="Interface" order={70}>
             <div className="side-create-label">Theme</div>
             <ThemePicker />
           </SideSection>
+          </>
+          )}
         </div>
       </aside>
       {showHairTextureDialog && (
