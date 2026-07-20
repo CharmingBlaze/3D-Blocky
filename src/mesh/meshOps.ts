@@ -4,6 +4,8 @@ import {
   edgeKey,
   parseEdgeKey,
   getAffectedVertices,
+  selectionHasComponents,
+  transformMeshSelectionWithGizmo,
   type MeshComponentSelection,
 } from './meshSelection'
 import type { SelectionMode } from '../store/appStore'
@@ -13,28 +15,33 @@ import {
   normalize3,
   type Vec3,
 } from '../utils/math'
-import { transformMeshSelectionWithGizmo } from './meshSelection'
-
-import { cloneObjectUVs } from '../uv/uvObject'
+import { cloneTransform } from './objectTransform'
+import { cloneMaterial } from '../material/materialTypes'
+import { mirrorWorldDirection } from '../symmetry/symmetry'
+import {
+  expandMeshSelectionWithSymmetry,
+  mirrorMeshSelection,
+  propagateSymmetricVertexPositions,
+  type MeshSymmetryPlane,
+} from '../symmetry/meshSymmetry'
 
 export function cloneSceneObject(obj: SceneObject): SceneObject {
-  const { uvs, faceUvIndices } = cloneObjectUVs(obj)
   return {
     ...obj,
     positions: obj.positions.map((p) => ({ ...p })),
     faces: obj.faces.map((f) => [...f]),
     faceColors: [...obj.faceColors],
     faceGroups: obj.faceGroups?.map((g) => [...g]),
-    uvs: uvs.length > 0 ? uvs : obj.uvs,
-    faceUvIndices: faceUvIndices.length > 0 ? faceUvIndices : obj.faceUvIndices,
+    uvs: obj.uvs?.map((u) => ({ ...u })),
+    faceUvIndices: obj.faceUvIndices?.map((f) => [...f]),
+    cornerColors: obj.cornerColors?.map(
+      (c) => [c[0], c[1], c[2], c[3]] as [number, number, number, number]
+    ),
+    faceColorIndices: obj.faceColorIndices?.map((f) => [...f]),
+    material: obj.material ? cloneMaterial(obj.material) : undefined,
+    faceMaterials: obj.faceMaterials?.map((m) => (m ? cloneMaterial(m) : null)),
     pivot: obj.pivot ? { ...obj.pivot } : undefined,
-    transform: obj.transform
-      ? {
-          position: { ...obj.transform.position },
-          rotation: { ...obj.transform.rotation },
-          scale: { ...obj.transform.scale },
-        }
-      : undefined,
+    transform: obj.transform ? cloneTransform(obj.transform) : undefined,
     primitiveSource: obj.primitiveSource
       ? {
           ...obj.primitiveSource,
@@ -52,6 +59,36 @@ export function cloneSceneObject(obj: SceneObject): SceneObject {
           ...obj.sketchSource,
           relative: obj.sketchSource.relative.map((point) => ({ ...point })),
           center: { ...obj.sketchSource.center },
+          planeFrame: obj.sketchSource.planeFrame
+            ? {
+                origin: { ...obj.sketchSource.planeFrame.origin },
+                right: { ...obj.sketchSource.planeFrame.right },
+                up: { ...obj.sketchSource.planeFrame.up },
+              }
+            : obj.sketchSource.planeFrame,
+        }
+      : undefined,
+    vectorSource: obj.vectorSource
+      ? {
+          ...obj.vectorSource,
+          path: {
+            ...obj.vectorSource.path,
+            anchors: obj.vectorSource.path.anchors.map((a) => ({
+              ...a,
+              position: { ...a.position },
+              inHandle: a.inHandle ? { ...a.inHandle } : null,
+              outHandle: a.outHandle ? { ...a.outHandle } : null,
+            })),
+            shapeParams: obj.vectorSource.path.shapeParams
+              ? { ...obj.vectorSource.path.shapeParams }
+              : undefined,
+          },
+        }
+      : undefined,
+    latheSource: obj.latheSource
+      ? {
+          ...obj.latheSource,
+          points: obj.latheSource.points.map((point) => ({ ...point })),
         }
       : undefined,
   }
@@ -573,6 +610,15 @@ export function moveMeshSelection(
   return { ...obj, positions }
 }
 
+function extrudeDirectionForAxisLock(
+  axisLock?: 'x' | 'y' | 'z' | null
+): Vec3 | undefined {
+  if (axisLock === 'x') return { x: 1, y: 0, z: 0 }
+  if (axisLock === 'y') return { x: 0, y: 1, z: 0 }
+  if (axisLock === 'z') return { x: 0, y: 0, z: 1 }
+  return undefined
+}
+
 export function applyMeshModalOp(
   baseObject: SceneObject,
   selection: MeshComponentSelection,
@@ -593,7 +639,7 @@ export function applyMeshModalOp(
         selection,
         selectionMode,
         value,
-        axisLock === 'x' ? {x:1,y:0,z:0} : axisLock === 'y' ? {x:0,y:1,z:0} : axisLock === 'z' ? {x:0,y:0,z:1} : undefined
+        extrudeDirectionForAxisLock(axisLock)
       )
     case 'bevel':
       return bevelMeshSelection(baseObject, selection, selectionMode, value, bevelSegments)
@@ -628,6 +674,125 @@ export function applyMeshModalOp(
       return moveMeshSelection(baseObject, selection, value, deltaWorldX, deltaWorldY, axisLock, view)
     case 'round':
       return roundMeshSelection(baseObject, selection, value)
+  }
+}
+
+function mergeResultingSelections(
+  objectId: string,
+  a?: MeshComponentSelection,
+  b?: MeshComponentSelection
+): MeshComponentSelection | undefined {
+  if (!a && !b) return undefined
+  return {
+    objectId,
+    vertices: [...new Set([...(a?.vertices ?? []), ...(b?.vertices ?? [])])],
+    edges: [...new Set([...(a?.edges ?? []), ...(b?.edges ?? [])])],
+    faces: [...new Set([...(a?.faces ?? []), ...(b?.faces ?? [])])],
+  }
+}
+
+/** Mesh modal op with bilateral symmetry for extrude/bevel/transform. */
+export function applyMeshModalOpWithSymmetry(
+  baseObject: SceneObject,
+  selection: MeshComponentSelection,
+  selectionMode: SelectionMode,
+  op: MeshModalOpKind,
+  value: number,
+  pivotWorld: Vec3,
+  deltaWorldX: number = 0,
+  deltaWorldY: number = 0,
+  axisLock?: 'x' | 'y' | 'z' | null,
+  view: string = 'perspective',
+  bevelSegments = 1,
+  symmetry?: MeshSymmetryPlane | null
+): SceneObject & { resultingSelection?: MeshComponentSelection } {
+  if (!symmetry?.enabled) {
+    return applyMeshModalOp(
+      baseObject,
+      selection,
+      selectionMode,
+      op,
+      value,
+      pivotWorld,
+      deltaWorldX,
+      deltaWorldY,
+      axisLock,
+      view,
+      bevelSegments
+    )
+  }
+
+  const { axis, plane } = symmetry
+
+  if (op === 'extrude' || op === 'bevel') {
+    const direction = extrudeDirectionForAxisLock(axisLock)
+    if (op === 'extrude' && direction) {
+      const mirrored = mirrorMeshSelection(baseObject, selection, axis, plane)
+      const primary = extrudeMeshSelection(
+        baseObject,
+        selection,
+        selectionMode,
+        value,
+        direction
+      )
+      if (!selectionHasComponents(mirrored)) return primary
+      const mirrorDir = mirrorWorldDirection(direction, axis)
+      const secondary = extrudeMeshSelection(
+        primary,
+        mirrored,
+        selectionMode,
+        value,
+        mirrorDir
+      )
+      return {
+        ...secondary,
+        resultingSelection: mergeResultingSelections(
+          baseObject.id,
+          primary.resultingSelection,
+          secondary.resultingSelection
+        ),
+      }
+    }
+
+    const expanded = expandMeshSelectionWithSymmetry(baseObject, selection, axis, plane)
+    return applyMeshModalOp(
+      baseObject,
+      expanded,
+      selectionMode,
+      op,
+      value,
+      pivotWorld,
+      deltaWorldX,
+      deltaWorldY,
+      axisLock,
+      view,
+      bevelSegments
+    )
+  }
+
+  const primary = applyMeshModalOp(
+    baseObject,
+    selection,
+    selectionMode,
+    op,
+    value,
+    pivotWorld,
+    deltaWorldX,
+    deltaWorldY,
+    axisLock,
+    view,
+    bevelSegments
+  )
+  const primaryVerts = getAffectedVertices(selection, baseObject)
+  return {
+    ...primary,
+    positions: propagateSymmetricVertexPositions(
+      baseObject,
+      primaryVerts,
+      primary.positions,
+      axis,
+      plane
+    ),
   }
 }
 

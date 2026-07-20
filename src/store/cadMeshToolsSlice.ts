@@ -32,7 +32,9 @@ import {
 } from '../polyDraw/polyDrawCommit'
 import { stampDrawMaterial } from '../material/materialEditorSlice'
 import type { SelectionMode } from './selectionSlice'
-import { mirrorSceneObject, type SymmetryAxis } from '../symmetry/symmetry'
+import { mirrorSceneObject, mirrorWorldPoint, type SymmetryAxis } from '../symmetry/symmetry'
+import { worldPointFromObject } from '../mesh/objectTransform'
+import { edgeKey, parseEdgeKey } from '../mesh/meshSelection'
 import { sub3, type Vec3 } from '../utils/math'
 import type { ViewType } from '../scene/viewTypes'
 import {
@@ -42,6 +44,42 @@ import {
 } from '../polyDraw/polyDrawShapes'
 
 export type PolyDrawMode = 'triangle' | 'quad' | 'poly' | 'rectangle' | 'ngon'
+
+function findNearestVertexIndex(obj: SceneObject, world: Vec3, eps = 1e-3): number | null {
+  let best = -1
+  let bestDist = eps * eps
+  for (let i = 0; i < obj.positions.length; i++) {
+    const w = worldPointFromObject(obj, obj.positions[i]!)
+    const dx = w.x - world.x
+    const dy = w.y - world.y
+    const dz = w.z - world.z
+    const d = dx * dx + dy * dy + dz * dz
+    if (d <= bestDist) {
+      bestDist = d
+      best = i
+    }
+  }
+  return best >= 0 ? best : null
+}
+
+/** Resolve an edge on a (possibly remapped) mesh near two world endpoints. */
+function findEdgeNearWorldPoints(
+  obj: SceneObject,
+  worldA: Vec3,
+  worldB: Vec3,
+  eps = 1e-3
+): string | null {
+  const a = findNearestVertexIndex(obj, worldA, eps)
+  const b = findNearestVertexIndex(obj, worldB, eps)
+  if (a == null || b == null || a === b) return null
+  const key = edgeKey(a, b)
+  for (const face of obj.faces) {
+    for (let i = 0; i < face.length; i++) {
+      if (edgeKey(face[i]!, face[(i + 1) % face.length]!) === key) return key
+    }
+  }
+  return null
+}
 
 export type PolyDrawPointSnap =
   | { kind: 'mesh'; objectId: string; vertexIndex: number }
@@ -491,7 +529,7 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
     },
 
     loopCutCommit: () => {
-      const { loopCutDraft, objects } = get()
+      const { loopCutDraft, objects, symmetryEnabled, symmetryAxis, symmetryPlane } = get()
       if (!loopCutDraft) return
       const obj = objects.find((o) => o.id === loopCutDraft.objectId)
       if (!obj || obj.topologyLocked) {
@@ -514,7 +552,28 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         }
       }
 
-      const cut = insertMultipleEdgeLoops(obj, loopCutDraft.loopEdges, loopCutDraft.seedEdge, tValues)
+      let cut = insertMultipleEdgeLoops(obj, loopCutDraft.loopEdges, loopCutDraft.seedEdge, tValues)
+      if (symmetryEnabled) {
+        const [sa, sb] = parseEdgeKey(loopCutDraft.seedEdge)
+        const mirrorA = mirrorWorldPoint(
+          worldPointFromObject(obj, obj.positions[sa]!),
+          symmetryAxis,
+          symmetryPlane
+        )
+        const mirrorB = mirrorWorldPoint(
+          worldPointFromObject(obj, obj.positions[sb]!),
+          symmetryAxis,
+          symmetryPlane
+        )
+        const mirrorSeed = findEdgeNearWorldPoints(cut, mirrorA, mirrorB)
+        if (mirrorSeed && mirrorSeed !== loopCutDraft.seedEdge && isValidLoopSeed(cut, mirrorSeed)) {
+          const mirrorLoop = findEdgeLoop(cut, mirrorSeed)
+          const overlapsPrimary = mirrorLoop.some((key) => loopCutDraft.loopEdges.includes(key))
+          if (!overlapsPrimary && mirrorLoop.length > 0) {
+            cut = insertMultipleEdgeLoops(cut, mirrorLoop, mirrorSeed, tValues)
+          }
+        }
+      }
       const cleaned = cleanupCutTopology(cut)
       get().updateObject(obj.id, {
         positions: cleaned.positions,
@@ -721,10 +780,10 @@ export function createCadMeshToolsSlice<S extends CadMeshToolsHost & CadMeshTool
         applied += applyPath(path)
       }
 
-      // 2. Mirror knife: mirror the path, reattach to topology, remesh both sides.
+      // 2. Mirror knife / symmetry mode: mirror the path, reattach, remesh both sides.
       // Post-weld cleans seam duplicate verts (Blockbench auto-merge idea).
-      if (activeTool === 'mirror-knife') {
-        const { symmetryAxis, symmetryPlane } = get()
+      const { symmetryEnabled, symmetryAxis, symmetryPlane } = get()
+      if (activeTool === 'mirror-knife' || symmetryEnabled) {
         for (const path of allPaths) {
           if (knifePathOnMirrorPlane(path, symmetryAxis, symmetryPlane)) continue
 

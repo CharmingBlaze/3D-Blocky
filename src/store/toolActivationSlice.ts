@@ -13,12 +13,13 @@ import {
 } from '../mesh/meshSelection'
 import type { ViewType } from '../scene/viewTypes'
 import {
-  applyMeshModalOp,
+  applyMeshModalOpWithSymmetry,
   cloneSceneObject,
   modalValueFromMouseDelta,
   modalValueFromWheel,
   type MeshModalOpKind,
 } from '../mesh/meshOps'
+import type { SymmetryAxis } from '../symmetry/symmetry'
 import { clearStrokeDraftState, type DrawInputMode } from './strokeSlice'
 import { clearVectorDraftState } from './vectorToolsSlice'
 import type { SelectionMode } from './selectionSlice'
@@ -141,6 +142,9 @@ type ToolStore = ToolActivationLayoutState & {
   meshSelection: MeshComponentSelection | null
   objects: SceneObject[]
   showExportDialog: boolean
+  symmetryEnabled: boolean
+  symmetryAxis: SymmetryAxis
+  symmetryPlane: number
   penCancelPath: () => void
   polyDrawCancel: () => void
   clearPolyDrawHover: () => void
@@ -372,8 +376,9 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
     applyMeshModalPreview: () => {
       const modal = store().meshModal
       if (!modal) return
+      const { symmetryEnabled, symmetryAxis, symmetryPlane } = store()
 
-      const result = applyMeshModalOp(
+      const result = applyMeshModalOpWithSymmetry(
         modal.baseObject,
         modal.selection,
         modal.selectionMode,
@@ -384,7 +389,12 @@ export function createToolActivationSlice<T extends ToolActivationLayoutState>(
         modal.startClientY - modal.currentClientY,
         modal.axisLock,
         modal.view,
-        modal.bevelSegments
+        modal.bevelSegments,
+        {
+          enabled: symmetryEnabled,
+          axis: symmetryAxis,
+          plane: symmetryPlane,
+        }
       )
 
       store().updateObject(modal.objectId, {

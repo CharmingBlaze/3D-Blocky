@@ -156,25 +156,27 @@ export function createImageDropSlice<T extends ImageDropLayoutState>(
             selectedBillboardImageId: null,
           }
         })
-        deps.addObject(prepared, { skipHistory: true, skipSymmetry: true })
-        // addObject stamps drawDoubleSided — keep FrontSide dual-face image cards.
+        deps.addObject(prepared, { skipHistory: true })
+        // addObject stamps drawDoubleSided — keep FrontSide dual-face image cards
+        // on the primary and any symmetry mirror copies.
         const mat = prepared.material
         if (mat) {
-          deps.updateObject(prepared.id, {
-            material: {
-              ...mat,
-              mode: 'texture',
-              textureId: docId,
-              textureWrap: 'clamp',
-              textureRepeat: [1, 1],
-              textureOffset: [0, 0],
-              textureRotation: 0,
-              textureTint: [1, 1, 1, 1],
-              textureTintStrength: 0,
-              opacity: 1,
-              doubleSided: false,
-            },
-          })
+          const texturedMat = {
+            ...mat,
+            mode: 'texture' as const,
+            textureId: docId,
+            textureWrap: 'clamp' as const,
+            textureRepeat: [1, 1] as [number, number],
+            textureOffset: [0, 0] as [number, number],
+            textureRotation: 0,
+            textureTint: [1, 1, 1, 1] as [number, number, number, number],
+            textureTintStrength: 0,
+            opacity: 1,
+            doubleSided: false,
+          }
+          for (const id of store().selectionObjectIds) {
+            deps.updateObject(id, { material: texturedMat })
+          }
         }
         deps.reconcileBlobUrls()
         store().commitHistory('Image plane')

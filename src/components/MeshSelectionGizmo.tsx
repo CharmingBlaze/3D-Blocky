@@ -9,6 +9,7 @@ import {
   transformMeshSelectionWithGizmo,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
+import { propagateSymmetricVertexPositions } from '../symmetry/meshSymmetry'
 import { useAppStore, type ActiveTool } from '../store/appStore'
 
 const TRANSFORM_TOOLS: ActiveTool[] = ['move', 'rotate', 'scale']
@@ -91,7 +92,7 @@ export function MeshSelectionGizmo({
     if (!anchor || !drag) return
 
     const verts = getAffectedVertices(meshSelection, object)
-    const positions = transformMeshSelectionWithGizmo(
+    let positions = transformMeshSelectionWithGizmo(
       object,
       verts,
       drag.basePositions,
@@ -104,10 +105,25 @@ export function MeshSelectionGizmo({
       anchor.scale
     )
 
+    const { symmetryEnabled, symmetryAxis, symmetryPlane } = useAppStore.getState()
+    if (symmetryEnabled) {
+      const snapshot = {
+        ...object,
+        positions: object.positions.map((p, i) => drag.basePositions[i] ?? p),
+      }
+      positions = propagateSymmetricVertexPositions(
+        snapshot,
+        verts,
+        positions,
+        symmetryAxis,
+        symmetryPlane
+      )
+    }
+
     const live = useAppStore.getState().objects.find((o) => o.id === object.id)
     if (live) {
       let moved = false
-      for (const vi of verts) {
+      for (let vi = 0; vi < positions.length; vi++) {
         const next = positions[vi]
         const prev = live.positions[vi]
         if (!next || !prev) continue

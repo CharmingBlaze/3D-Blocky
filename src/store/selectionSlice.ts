@@ -1,8 +1,5 @@
 import type { SceneObject, ObjectTransform } from '../mesh/HalfEdgeMesh'
-import {
-  ensureTransform,
-  worldDeltaToLocal,
-} from '../mesh/objectTransform'
+import { ensureTransform } from '../mesh/objectTransform'
 import {
   collectFacesToDelete,
   deleteFacesFromObject,
@@ -17,9 +14,14 @@ import {
   edgeKey,
   getAffectedVertices,
   selectionHasComponents,
-  translateVertexPositions,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
+import type { SymmetryAxis } from '../symmetry/symmetry'
+import {
+  expandFaceSetWithSymmetry,
+  expandMeshSelectionWithSymmetry,
+  translateMeshSelectionWithSymmetry,
+} from '../symmetry/meshSymmetry'
 import { collectUniqueEdges } from '../mesh/meshTopology'
 import type { MeshPickHit } from '../select/meshPick'
 import type { PixelDocument } from '../pixel/pixelTypes'
@@ -156,6 +158,9 @@ type SelectionStoreHost = SelectionLayoutState & {
   pixelDocuments: Record<string, PixelDocument>
   activeTool: string
   toolCategory: string
+  symmetryEnabled: boolean
+  symmetryAxis: SymmetryAxis
+  symmetryPlane: number
   penCancelPath: () => void
   mergeSelectedVertices: (indices: number[]) => void
   updateObject: (id: string, updates: Partial<SceneObject>) => void
@@ -554,7 +559,15 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
     },
 
     deleteSelection: () => {
-      const { selectionMode, selectionObjectIds, meshSelection, objects } = get()
+      const {
+        selectionMode,
+        selectionObjectIds,
+        meshSelection,
+        objects,
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane,
+      } = get()
 
       if (
         selectionMode !== 'object' &&
@@ -564,7 +577,15 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
         const obj = objects.find((o) => o.id === meshSelection.objectId)
         if (!obj || obj.topologyLocked) return
 
-        const faceIndices = collectFacesToDelete(obj, meshSelection, selectionMode)
+        let faceIndices = collectFacesToDelete(obj, meshSelection, selectionMode)
+        if (symmetryEnabled && faceIndices.size > 0) {
+          faceIndices = expandFaceSetWithSymmetry(
+            obj,
+            faceIndices,
+            symmetryAxis,
+            symmetryPlane
+          )
+        }
         if (faceIndices.size === 0) return
 
         const updated = deleteFacesFromObject(obj, faceIndices)
@@ -642,7 +663,7 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
     },
 
     translateMeshSelection: (deltaWorld, basePositions) => {
-      const { meshSelection, objects } = get()
+      const { meshSelection, objects, symmetryEnabled, symmetryAxis, symmetryPlane } = get()
       if (!meshSelection) return
 
       const obj = objects.find((o) => o.id === meshSelection.objectId)
@@ -651,8 +672,17 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
       const verts = getAffectedVertices(meshSelection, obj)
       if (verts.size === 0) return
 
-      const localDelta = worldDeltaToLocal(obj, deltaWorld)
-      const positions = translateVertexPositions(obj, verts, basePositions, localDelta)
+      const positions = translateMeshSelectionWithSymmetry(
+        obj,
+        meshSelection,
+        basePositions,
+        deltaWorld,
+        {
+          enabled: symmetryEnabled,
+          axis: symmetryAxis,
+          plane: symmetryPlane,
+        }
+      )
       get().updateObject(obj.id, { positions })
     },
 
@@ -688,9 +718,32 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
       if (selectionHasComponents(meshSelection)) {
         const obj = objects.find((o) => o.id === meshSelection!.objectId)
         if (!obj || obj.topologyLocked) return
-
+        const { symmetryEnabled, symmetryAxis, symmetryPlane } = get()
         const verts = getAffectedVertices(meshSelection!, obj)
-        const localDelta = worldDeltaToLocal(obj, delta)
+        const basePositions: Record<number, Vec3> = {}
+        for (const vi of verts) basePositions[vi] = { ...obj.positions[vi]! }
+        if (symmetryEnabled) {
+          const expanded = expandMeshSelectionWithSymmetry(
+            obj,
+            meshSelection!,
+            symmetryAxis,
+            symmetryPlane
+          )
+          for (const vi of getAffectedVertices(expanded, obj)) {
+            basePositions[vi] = { ...obj.positions[vi]! }
+          }
+        }
+        const positions = translateMeshSelectionWithSymmetry(
+          obj,
+          meshSelection!,
+          basePositions,
+          delta,
+          {
+            enabled: symmetryEnabled,
+            axis: symmetryAxis,
+            plane: symmetryPlane,
+          }
+        )
         set((s) => ({
           objects: s.objects.map((o) => {
             if (o.id !== obj.id) return o
@@ -699,15 +752,7 @@ export function createSelectionSlice<S extends SelectionStoreHost & SelectionLay
               sketchSource: undefined,
               vectorSource: undefined,
               primitiveSource: undefined,
-              positions: o.positions.map((p, i) =>
-                verts.has(i)
-                  ? {
-                      x: p.x + localDelta.x,
-                      y: p.y + localDelta.y,
-                      z: p.z + localDelta.z,
-                    }
-                  : p
-              ),
+              positions,
             }
           }),
         }) as unknown as Partial<S>)

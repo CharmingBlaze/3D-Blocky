@@ -19,6 +19,8 @@ import {
   selectionHasComponents,
   type MeshComponentSelection,
 } from '../mesh/meshSelection'
+import type { SymmetryAxis } from '../symmetry/symmetry'
+import { expandMeshSelectionWithSymmetry } from '../symmetry/meshSymmetry'
 import {
   allVertexIndices,
   applySelectionPlaneTransform,
@@ -67,8 +69,22 @@ type MeshStore = MeshEditLayoutState & {
   selectionObjectIds: string[]
   selectedObjectId: string | null
   polyBudget: number
+  symmetryEnabled: boolean
+  symmetryAxis: SymmetryAxis
+  symmetryPlane: number
   updateObject: (id: string, updates: Partial<SceneObject>) => void
   commitHistory: (label?: string) => boolean
+}
+
+function selectionForSymmetryEdit(
+  obj: SceneObject,
+  selection: MeshComponentSelection,
+  symmetryEnabled: boolean,
+  symmetryAxis: SymmetryAxis,
+  symmetryPlane: number
+): MeshComponentSelection {
+  if (!symmetryEnabled) return selection
+  return expandMeshSelectionWithSymmetry(obj, selection, symmetryAxis, symmetryPlane)
 }
 
 export function createMeshEditSlice<T extends MeshEditLayoutState>(
@@ -155,33 +171,56 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
     setVertexMergeModifierHeld: (held) => setPartial({ vertexMergeModifierHeld: held }),
 
     flipSelectedNormals: () => {
-      const { meshSelection, objects, selectionMode } = store()
+      const { meshSelection, objects, selectionMode, symmetryEnabled, symmetryAxis, symmetryPlane } =
+        store()
       if (!meshSelection || selectionMode === 'object') return
       const obj = objects.find((o) => o.id === meshSelection.objectId)
       if (!obj || obj.topologyLocked) return
-      const flipped = flipSelectionNormals(obj, meshSelection, selectionMode)
+      const selection = selectionForSymmetryEdit(
+        obj,
+        meshSelection,
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane
+      )
+      const flipped = flipSelectionNormals(obj, selection, selectionMode)
       store().updateObject(obj.id, { faces: flipped.faces, faceUvIndices: flipped.faceUvIndices })
       store().commitHistory('Flip normals')
     },
 
     flipFaceNormal: (objectId, faceIndex) => {
-      const { objects } = store()
+      const { objects, symmetryEnabled, symmetryAxis, symmetryPlane } = store()
       const obj = objects.find((o) => o.id === objectId)
       if (!obj || obj.topologyLocked) return
       if (faceIndex < 0 || faceIndex >= obj.faces.length) return
-      const selection: MeshComponentSelection = {
-        objectId,
-        vertices: [],
-        edges: [],
-        faces: [faceIndex],
-      }
+      const selection = selectionForSymmetryEdit(
+        obj,
+        {
+          objectId,
+          vertices: [],
+          edges: [],
+          faces: [faceIndex],
+        },
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane
+      )
       const flipped = flipSelectionNormals(obj, selection, 'face')
       store().updateObject(obj.id, { faces: flipped.faces, faceUvIndices: flipped.faceUvIndices })
       store().commitHistory('Flip normal')
     },
 
     recalculateOutwardNormals: () => {
-      const { meshSelection, objects, selectionMode, selectedObjectId, selectionObjectIds } = store()
+      const {
+        meshSelection,
+        objects,
+        selectionMode,
+        selectedObjectId,
+        selectionObjectIds,
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane,
+      } = store()
       const componentTarget = selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
       const ids = componentTarget
         ? [meshSelection.objectId]
@@ -192,7 +231,17 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       setPartial({
         objects: objects.map((obj) => {
           if (!ids.includes(obj.id) || obj.topologyLocked) return obj
-          return makeSelectionOutward(obj, componentTarget ? meshSelection : null, selectionMode)
+          const selection =
+            componentTarget && meshSelection
+              ? selectionForSymmetryEdit(
+                  obj,
+                  meshSelection,
+                  symmetryEnabled,
+                  symmetryAxis,
+                  symmetryPlane
+                )
+              : null
+          return makeSelectionOutward(obj, selection, selectionMode)
         }),
       })
       store().commitHistory('Recalculate outward normals')
@@ -205,6 +254,9 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
         selectionMode,
         selectionObjectIds,
         selectedObjectId,
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane,
       } = store()
 
       const applyToObject = (
@@ -231,7 +283,14 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       if (meshSelection && selectionMode !== 'object' && selectionHasComponents(meshSelection)) {
         const obj = objects.find((o) => o.id === meshSelection.objectId)
         if (!obj) return
-        if (!applyToObject(obj, meshSelection, selectionMode)) return
+        const selection = selectionForSymmetryEdit(
+          obj,
+          meshSelection,
+          symmetryEnabled,
+          symmetryAxis,
+          symmetryPlane
+        )
+        if (!applyToObject(obj, selection, selectionMode)) return
         // Keep the original front/back selection; reverse faces stay independently pickable.
         store().commitHistory('Make double sided')
         return
@@ -319,7 +378,16 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
     },
 
     subdivideSelected: () => {
-      const { meshSelection, objects, selectionMode, selectedObjectId, selectionObjectIds } = store()
+      const {
+        meshSelection,
+        objects,
+        selectionMode,
+        selectedObjectId,
+        selectionObjectIds,
+        symmetryEnabled,
+        symmetryAxis,
+        symmetryPlane,
+      } = store()
       const componentTarget = selectionMode !== 'object' && meshSelection && selectionHasComponents(meshSelection)
       const ids = componentTarget
         ? [meshSelection.objectId]
@@ -330,7 +398,17 @@ export function createMeshEditSlice<T extends MeshEditLayoutState>(
       setPartial({
         objects: objects.map((obj) => {
           if (!ids.includes(obj.id) || obj.topologyLocked) return obj
-          const subdivided = subdivideObject(obj, componentTarget ? meshSelection : null, selectionMode)
+          const selection =
+            componentTarget && meshSelection
+              ? selectionForSymmetryEdit(
+                  obj,
+                  meshSelection,
+                  symmetryEnabled,
+                  symmetryAxis,
+                  symmetryPlane
+                )
+              : null
+          const subdivided = subdivideObject(obj, selection, selectionMode)
           return ensureObjectUVs({
             ...subdivided,
             uvs: undefined,
